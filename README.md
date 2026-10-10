@@ -74,6 +74,7 @@ pnpm test:browser
 - `docs/接口文档.md`：原样保留的主要实现依据。原文的待确认项没有被本次迁移消除。
 - `docs/development-guide.md`：内部实现边界与开发实践。
 - `docs/migration-baseline.md`：本次实际迁移、测试结果和限制。
+- `docs/code-review.md`：工程规则与迁移需求的双轴审查结果。
 - `docs/migration-source.json`：来源提交、逐文件 Git blob 与 SHA-256。
 - `docs/development-plan.md`：下一阶段任务、风险和实施顺序。
 - `.scratch/booth/linear-write-draft.md`：待确认、未提交的临时 Linear 操作草案；不属于正式 Issue 系统。

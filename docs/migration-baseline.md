@@ -41,6 +41,8 @@
 
 从原锁文件保留所需 importer 和 resolutions/snapshots，再由 pnpm 裁剪；包条目从 288 降到 203，移除 85 个，未引入任何原锁文件以外的包版本。精简 workspace 为根工程、api、web、contracts 四项。原 workspace 的 esbuild 构建许可与 minimumReleaseAge=4320 分钟均保留。
 
+实际测试对象是初始化提交 `5ce21f5` 之后、尚未提交的迁移工作树，随后纳入 `c0a143bd91a244e04878b50ce0cfddd546a2d682`。测试涉及的应用源码、测试脚本、契约、目录、package.json、workspace、锁文件及 TypeScript/Vite 配置与该提交一致；中文说明和 Linear 草案在测试后补充。后续 `3a49295` 只清除了 storage.ts 文件末尾多余空行并更新对应哈希，没有业务变化。本记录不宣称曾对提交后的最终 HEAD 重跑全部测试；文件来源及最终字节哈希见来源清单。
+
 | 实际命令或检查 | 真实结果 |
 | --- | --- |
 | `pnpm install --lockfile-only --offline` | 初次失败：本机缺少 registry.npmmirror.com 的离线元数据。未升级依赖。 |
@@ -65,3 +67,7 @@
 Linear 在线 VLM-8/9/10 内容正确且均 Done，建议保持不动。临时操作草案包含主开发 Issue 及其进度/验收评论、跨单回调高优先级 Issue 及其复现/验收评论，共4项，全部待确认。没有创建 Project、Issue、评论或修改任何在线字段。
 
 本阶段在迁移基线完成后停止，不继续上述新功能、不执行 Linear 写入、不配置远程仓库或推送。
+
+## 双轴审查结果
+
+审查固定点为初始化提交5ce21f5，代码范围到3a49295，最终文档修正也已复核。Standards轴发现的实测版本标注问题已解决，剩余2项非阻塞的前端维护建议；Spec轴0项发现。完整结果见 `docs/code-review.md`。审查没有扩大本阶段业务功能范围。
