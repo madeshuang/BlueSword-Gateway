@@ -67,7 +67,7 @@ Linear 是本项目唯一正式的 Issue 管理系统。
 编写或修改 Issue 标题、描述、评论等内容之前，
 必须先读取并遵守：
 
-`D:\Users\sev\issue\requirements_of_issue.md`
+`docs/references/requirements_of_issue.md`
 
 该文件是 Issue 书写规范的权威来源。
 未经用户确认，不得修改它，不得自行简化或覆盖其要求。
@@ -80,10 +80,6 @@ Linear 是本项目唯一正式的 Issue 管理系统。
 对于规范中含义或字段映射不明确的要求，先向用户澄清，
 不自行推断或改写 Linear 系统元数据。
 
-`D:\Users\sev\issue` 中的历史 Issue 和评论仅作背景参考，
-可能不是最新信息。发现与在线 Linear 不一致时说明差异，
-不得据此自动覆盖在线内容。
-
 ## 临时草稿与技术方案
 
 `.scratch/<feature>/` 仅可存放临时分析、
@@ -95,7 +91,7 @@ Linear 是本项目唯一正式的 Issue 管理系统。
 
 复杂技术方案可独立保存为项目内的正式 Markdown 文档，
 由 Linear Issue 引用。向 Linear 添加或修改引用仍须确认。
-正式资料与临时资料的处理沿用 `docs/development-guide.md`。
+正式资料与临时资料的处理沿用 `AGENTS.md`。
 
 技能要求“发布到 Issue tracker”时，
 先准备 Linear 提交草案，展示完整内容并等待确认。
@@ -105,3 +101,7 @@ Linear 是本项目唯一正式的 Issue 管理系统。
 ## Git 代码托管边界
 
 BlueSword-Gateway 使用独立本地 Git 仓库。当前不配置 remote、不执行 push 或远程 Git 操作。旧 BlueSword-Agent 仓库仅作为冻结原型，不推送到公司 Gitea。后续用户明确授权时再为新项目配置代码托管地址，不沿用旧仓库的预设 URL。
+
+## 用户手动操作时
+
+用户选择手动创建或更新 Linear 时，Codex 只整理包含字段、完整内容、验收条件和理由的草案，不代为执行。用户通知操作完成后，再按要求只读核对在线结果；发现差异先报告，不自动补写、评论或改状态。

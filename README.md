@@ -1,10 +1,10 @@
 # BlueSword-Gateway
 
-展会机器人系统的用户侧网关。用户选择物品并确认数量，后端向机器人发送抓取指令；机器人主动通知完成或不可恢复故障。当前工程是从冻结原型选择性迁移并重新验证的本地基线，真实模型调用、现场配置和机器人联调仍未验证。
+展会机器人系统的用户侧网关。用户选择物品并确认数量，后端向机器人发送抓取指令；机器人主动通知完成或不可恢复故障。当前支持本地演示和 HTTP 开发模式；真实模型调用、现场配置和机器人联调仍未验证。
 
 ## 环境与安装
 
-需要 Node.js >=24.13.0、pnpm 11.25.0。本次验证使用 Node.js 24.13.1。SQLite 使用 Node 内置 `node:sqlite`，该版本运行时会提示实验性功能警告。
+需要 Node.js >=24.13.0、pnpm 11.25.0。SQLite 使用 Node 内置 `node:sqlite`，该版本运行时会提示实验性功能警告。
 
 在项目根目录执行：
 
@@ -12,7 +12,7 @@
 pnpm install --frozen-lockfile
 ```
 
-workspace 只有根工程、`apps/api`、`apps/web`、`packages/contracts`。包名仍使用 `@bluesword/*`，以减少无意义的导入变更。依赖沿用归档锁文件已解析的版本，并在 package.json 中固定直接依赖版本。
+workspace 只有根工程、`apps/api`、`apps/web`、`packages/contracts`。包名使用 `@bluesword/*`，直接依赖版本在 package.json 中固定，安装时使用现有锁文件。
 
 ## 本地演示
 
@@ -45,14 +45,14 @@ pnpm dev
 | `BOOTH_CATALOG_PATH` | 目录 JSON 路径，默认 `config/booth-catalog.example.json`。相对路径从项目根目录解析。 |
 | `BOOTH_CATALOG_CONFIRMED` | HTTP 模式只有为 `true` 才允许发单。真实物品、位置和数量上限核对后才能设置。 |
 | `BOOTH_DB_PATH` | 默认 `.data/booth.sqlite`；演示使用独立数据库。 |
-| `OPENAI_API_KEY`、`OPENAI_MODEL` | 服务端 GPT 配置，默认模型 `gpt-4.1-mini`；这是复用原配置，尚未完成真实调用验证。 |
+| `OPENAI_API_KEY`、`OPENAI_MODEL` | 服务端 GPT 配置，默认模型 `gpt-4.1-mini`，尚未完成真实调用验证。DeepSeek 的配置与接入尚未实现。 |
 | `OPENAI_TIMEOUT_MS` | AI 调用超时，默认 20000 毫秒。 |
 | `BOOTH_OPERATOR_TOKEN` | 工作人员解除本地异常占用所需凭据；示例留空。 |
 | `VITE_API_TARGET` | Vite 开发服务器代理地址，默认 `http://127.0.0.1:4100`；自定义 API 端口时需在 Vite 进程环境中设置。 |
 
 现场目录沿用示例文件的字段结构，要求物品 ID 唯一，`maxCount` 为 1–100 的整数，色值为六位十六进制。`art` 使用现有四种插画类别；可选 `imageUrl` 只引用 `/products/` 下的本地文件，将实际照片放入 `apps/web/public/products/` 后使用。当前没有现场照片或已核对的真实目录。
 
-工作人员入口位于页面底部，或访问 `/#operations`。故障和受理不明时，必须现场核对机器人停止及物品情况，再输入凭据并勾选确认，才能解除我方占用。这不会向机器人发送停止或取消指令。执行中任务不会按时间自动结束。缺少跨任务关联标识时，迟到回调仍可能误关联下一单；本基线没有解决该风险，见后续计划。
+工作人员入口位于页面底部，或访问 `/#operations`。故障和受理不明时，必须现场核对机器人停止及物品情况，再输入凭据并勾选确认，才能解除我方占用。这不会向机器人发送停止或取消指令。执行中任务不会按时间自动结束。缺少跨任务关联标识时，迟到回调仍可能误关联下一单；当前尚未解决该风险，见 [开发计划 P1](docs/development-plan.md)。
 
 ## 验证命令
 
@@ -67,14 +67,13 @@ pnpm test:browser
 
 `build` 包含严格类型检查及前端生产构建，输出位于 `apps/web/dist`；它不生成后端编译包。`pnpm --filter @bluesword/web preview` 仅供查看前端构建，生产部署与 API 路由安排留待后续处理。
 
-迁移测试共有 16 项：10 项正式接口与任务事实，5 项可控 OpenAI 行为，1 项目录校验。没有迁移旧 Mock 的 37 项测试。浏览器脚本使用本地机器人对端和 AI 替身，不调用真实模型；Windows 默认使用已安装的 Microsoft Edge，可通过 `PLAYWRIGHT_CHANNEL` 改为其他 Playwright 支持的已安装浏览器。其他系统需准备 Playwright Chromium。
+当前后端测试共有 16 项：10 项正式接口与任务事实，5 项可控 OpenAI 行为，1 项目录校验。这些测试不代表真实模型或现场机器人验证。浏览器脚本使用本地机器人对端和 AI 替身，不调用真实模型；Windows 默认使用已安装的 Microsoft Edge，可通过 `PLAYWRIGHT_CHANNEL` 改为其他 Playwright 支持的已安装浏览器。其他系统需准备 Playwright Chromium。
 
 ## 文档入口
 
-- `docs/接口文档.md`：原样保留的主要实现依据。原文的待确认项没有被本次迁移消除。
-- `docs/development-guide.md`：内部实现边界与开发实践。
-- `docs/migration-baseline.md`：本次实际迁移、测试结果和限制。
-- `docs/code-review.md`：工程规则与迁移需求的双轴审查结果。
-- `docs/migration-source.json`：来源提交、逐文件 Git blob 与 SHA-256。
-- `docs/development-plan.md`：下一阶段任务、风险和实施顺序。
-- `.scratch/booth/linear-write-draft.md`：待确认、未提交的临时 Linear 操作草案；不属于正式 Issue 系统。
+- [接口文档](docs/接口文档.md)：当前主要实现依据；原文中列出的待确认项仍然有效。
+- [项目背景与需求说明](docs/项目背景与需求说明.md)：第一版范围、重要决策、历史方案状态与原始资料索引。
+- [开发说明](docs/development-guide.md)：内部实现边界与运行约束。
+- [开发计划](docs/development-plan.md)：未解决风险、验收条件与下一阶段顺序。
+- [AGENTS.md](AGENTS.md)：长期开发规则、文档职责与 Git 操作边界。
+- [Linear 操作草案](.scratch/booth/linear-write-draft.md)：供用户手动核对和创建的临时草案；被 Git 忽略，不属于正式 Issue 系统。
