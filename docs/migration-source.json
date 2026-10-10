@@ -1,0 +1,224 @@
+{
+  "repository": "E:\\Sevenova\\BlueSword-Agent",
+  "branch": "codex/archive-bluesword-agent-2026-10-10",
+  "commit": "86e8b6d7ac79672be13dc8f4a4aed028ad0c91d5",
+  "files": [
+    {
+      "path": ".gitattributes",
+      "sourceBlob": "a2237bc625f6f93131ba03342a81d6f2de3772e6",
+      "sourceSha256": "302266a0b9a482b15b10e052bdde95531ddd827a64b2b674243cebdc91299720",
+      "baselineSha256": "302266a0b9a482b15b10e052bdde95531ddd827a64b2b674243cebdc91299720",
+      "handling": "unchanged"
+    },
+    {
+      "path": ".env.example",
+      "sourceBlob": "b607f58845e826a4858c910d3d9d6a68b9ba3794",
+      "sourceSha256": "4c9adfa3d4e2037784b7016a7bf89eaeed0f3c503afe997e065bd66ddd3afb4e",
+      "baselineSha256": "2d4aa4fbfbc95bbab5fdf6783a38a646679fcc47a18d1513fe76c0e8b04e9fc4",
+      "handling": "adapted"
+    },
+    {
+      "path": "package.json",
+      "sourceBlob": "312465e928115ff751c40215dd028c87d087cb33",
+      "sourceSha256": "fa6a748ead46a8ca8e1d4f44691872ac260589dc5d54007c450136a28ba03467",
+      "baselineSha256": "711f55b7b1d7b8feb1887a16c0e519e19fe6230282aad0c9be0f26b9398728dc",
+      "handling": "adapted"
+    },
+    {
+      "path": "pnpm-workspace.yaml",
+      "sourceBlob": "0e58b1678902cbaa3fb0d73b5e6b5b9ef801a017",
+      "sourceSha256": "2e3d2a5716b532b4db6af53f975e1e305e7cec8627df770a53e32e6eb1195315",
+      "baselineSha256": "2e3d2a5716b532b4db6af53f975e1e305e7cec8627df770a53e32e6eb1195315",
+      "handling": "unchanged"
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "sourceBlob": "99ffcf03c3ee35b834c268aef20143735cb9edb2",
+      "sourceSha256": "33915f2a7e095b8e5be6dd2c7f78f2aa120133e76c6b5d0a7419bfad4213f169",
+      "baselineSha256": "29f33f972d8e46cb2dd30f314a17cc9147b770b62b2e59dce390b7a9732ffaab",
+      "handling": "adapted"
+    },
+    {
+      "path": "tsconfig.json",
+      "sourceBlob": "bcc6de3df49ec6a05048ab41ba6931f047f5f92d",
+      "sourceSha256": "e76f8799f1a1ceea91a78f0d676161ffaddd82d92e4dec6a4d857541b4ab9da2",
+      "baselineSha256": "e76f8799f1a1ceea91a78f0d676161ffaddd82d92e4dec6a4d857541b4ab9da2",
+      "handling": "unchanged"
+    },
+    {
+      "path": "apps/api/package.json",
+      "sourceBlob": "d28f3d06b5821d896d2230888dd17fe9fff2895f",
+      "sourceSha256": "e33eba74a9b3f5aa8d0776f42cfcc5c49dbdaf0941cf9e8f03dcb6d6d068d652",
+      "baselineSha256": "15d587c9d557d725b823126b8deb740bfafecefe13085c38aca1e6e5c689a988",
+      "handling": "adapted"
+    },
+    {
+      "path": "apps/api/src/storage.ts",
+      "sourceBlob": "92ff8b89bc597a533998b4f53fb21a5e451fca8a",
+      "sourceSha256": "2817e01c50a2de11e8ad75c27d9fa22adabc745b77503b2429294c2c2c189ee3",
+      "baselineSha256": "af871b79b6c3ab0320471be8625d98947a28254d93c8cd96cf15b1afbf0042a6",
+      "handling": "adapted"
+    },
+    {
+      "path": "apps/web/package.json",
+      "sourceBlob": "9f723ed441d80e564c50bba49d296893c90b78b3",
+      "sourceSha256": "f48af279c18b137b3ecb84eb04529e395f4e17be5bd9989778803dadf87c70b2",
+      "baselineSha256": "04176dbc43a8faf81a3596877865a87d8c3905e595c558cf387d82d137062eba",
+      "handling": "adapted"
+    },
+    {
+      "path": "apps/web/index.html",
+      "sourceBlob": "02c1249677067c8efc0df45fa090971407ef7a01",
+      "sourceSha256": "a015d8532986eb4c77b2e1b97a3ba35e455722e2b76cc28494aa71601a929193",
+      "baselineSha256": "a015d8532986eb4c77b2e1b97a3ba35e455722e2b76cc28494aa71601a929193",
+      "handling": "unchanged"
+    },
+    {
+      "path": "apps/web/vite.config.ts",
+      "sourceBlob": "bf5780f405cf8795c168af319d368ad458666dd5",
+      "sourceSha256": "3304316ada8385aec5ec9c026f9fe8cbdaf53eaf378b2d073a724d81584fbc45",
+      "baselineSha256": "3304316ada8385aec5ec9c026f9fe8cbdaf53eaf378b2d073a724d81584fbc45",
+      "handling": "unchanged"
+    },
+    {
+      "path": "packages/contracts/package.json",
+      "sourceBlob": "0670b31afd20c4cb11e8ad4473e8e7e53e0c0f73",
+      "sourceSha256": "6ba754df27455fa9387192ce0fe5181f61aa0a77399419bafeffb227bc2552dc",
+      "baselineSha256": "6ba754df27455fa9387192ce0fe5181f61aa0a77399419bafeffb227bc2552dc",
+      "handling": "unchanged"
+    },
+    {
+      "path": "packages/contracts/src/booth.ts",
+      "sourceBlob": "ceb40eddff120261356b1955961a94e32d1d1f40",
+      "sourceSha256": "df574bb1e58fe5c86ae9aae0d470fe4f78b8cef02ae146ec41ea19fde9976fc1",
+      "baselineSha256": "df574bb1e58fe5c86ae9aae0d470fe4f78b8cef02ae146ec41ea19fde9976fc1",
+      "handling": "unchanged"
+    },
+    {
+      "path": "config/booth-catalog.example.json",
+      "sourceBlob": "88184147a66e3b753f1d406b56f1d4bfb6dc89d6",
+      "sourceSha256": "d0be90eb5ae7a1fe257b9c316ea0ba44390830fb87667e8fbcf96b64040c8cf2",
+      "baselineSha256": "d0be90eb5ae7a1fe257b9c316ea0ba44390830fb87667e8fbcf96b64040c8cf2",
+      "handling": "unchanged"
+    },
+    {
+      "path": "docs/接口文档.md",
+      "sourceBlob": "013377326d9c41dd24e4193334323061f5883c51",
+      "sourceSha256": "a01d24d215eee9a7f2066e412f31a161efefe91c9499eda3b758e799873fdfa3",
+      "baselineSha256": "a01d24d215eee9a7f2066e412f31a161efefe91c9499eda3b758e799873fdfa3",
+      "handling": "unchanged"
+    },
+    {
+      "path": "docs/agents/issue-tracker.md",
+      "sourceBlob": "ec8db0e3e9f6277058e807e892e87a7a582d5941",
+      "sourceSha256": "820271c230ddc9e9bd50c4cbbd6e9ad003dc881d79f8265b3f8088c0815a14f2",
+      "baselineSha256": "d7863f7245f7a5b126039e1458e2d5eb888bb771d5bc4537721e04e23766053e",
+      "handling": "adapted"
+    },
+    {
+      "path": "docs/agents/domain.md",
+      "sourceBlob": "f2446d6d92650f2879066a9e493c9fe6d71954b2",
+      "sourceSha256": "3e6dca97684de048c661868e9096f29feddf8d9a15fb32c3d37ca311ea793b10",
+      "baselineSha256": "9306b492aaecefd3c421761f0b98f56caa92b930b40d1029ed32eaf03ce3dddb",
+      "handling": "adapted"
+    },
+    {
+      "path": "scripts/booth-acceptance.cjs",
+      "sourceBlob": "dfd2547fb06b7dca660b12c359a28d71ac9c4cab",
+      "sourceSha256": "f1e57fb346129a41b6f9f6206002890c9138c453f28af5ba2027451ba4ddd1d6",
+      "baselineSha256": "f1e57fb346129a41b6f9f6206002890c9138c453f28af5ba2027451ba4ddd1d6",
+      "handling": "unchanged"
+    },
+    {
+      "path": "scripts/robot-simulator.ts",
+      "sourceBlob": "ecb3dc8d0c84f531112c6c841797c5c25ae724e3",
+      "sourceSha256": "d6d08d97ee4d7dafea0da50fd00e96b64378c92d87be2b4b8cae633ed3ea7f3b",
+      "baselineSha256": "d6d08d97ee4d7dafea0da50fd00e96b64378c92d87be2b4b8cae633ed3ea7f3b",
+      "handling": "unchanged"
+    },
+    {
+      "path": "apps/api/src/booth/config.ts",
+      "sourceBlob": "ab6a562ea2fa4a8534a0ab198e8749dacca1f286",
+      "sourceSha256": "c4a21c0c25ea1cd721b0ba54580856c90bfa5c2ff08f0cf4f11bd7dd05e4b798",
+      "baselineSha256": "c4a21c0c25ea1cd721b0ba54580856c90bfa5c2ff08f0cf4f11bd7dd05e4b798",
+      "handling": "unchanged"
+    },
+    {
+      "path": "apps/api/src/booth/index.ts",
+      "sourceBlob": "0827cca6f856064b468c6d6f6b07624a79e3fc3c",
+      "sourceSha256": "fe86b7dfd3038219fff5f4961e81fff0abb7bbbb19a81eca05a8b8794e0192b2",
+      "baselineSha256": "fe897231ae633b5944acc2dbf6493ec0c25152676b4a55db8d4e700a806221d0",
+      "handling": "adapted"
+    },
+    {
+      "path": "apps/api/src/booth/openai.ts",
+      "sourceBlob": "d854d1f1ff45b88b83436661389057a80e2f69c8",
+      "sourceSha256": "6d82cfca89175f68032f750b1f19e8c3383fc0b6af99c64fe92200a22a0d39e1",
+      "baselineSha256": "6d82cfca89175f68032f750b1f19e8c3383fc0b6af99c64fe92200a22a0d39e1",
+      "handling": "unchanged"
+    },
+    {
+      "path": "apps/api/src/booth/server.ts",
+      "sourceBlob": "ba0494db3ddb9c076201af2e9363d46754a9f8e0",
+      "sourceSha256": "955bf07a7d2b076add34a7f49001013aafa8727787d618ccb034d6c3ea7c0189",
+      "baselineSha256": "955bf07a7d2b076add34a7f49001013aafa8727787d618ccb034d6c3ea7c0189",
+      "handling": "unchanged"
+    },
+    {
+      "path": "apps/api/src/booth/service.ts",
+      "sourceBlob": "f7f21310fd53548e64cf73f38d3a749d91e26e10",
+      "sourceSha256": "2315ceb88729f0ee25dc604952059ab92106a3a6026b84febd7e4d83da6cf764",
+      "baselineSha256": "2315ceb88729f0ee25dc604952059ab92106a3a6026b84febd7e4d83da6cf764",
+      "handling": "unchanged"
+    },
+    {
+      "path": "apps/api/src/booth/booth.test.ts",
+      "sourceBlob": "94a3f2c7440a5369d99f55af4cb17448fb19ace0",
+      "sourceSha256": "a464c5b7981756958e5b6044a200ecc4601fd01b2dbb386e168aecf7290adecf",
+      "baselineSha256": "a464c5b7981756958e5b6044a200ecc4601fd01b2dbb386e168aecf7290adecf",
+      "handling": "unchanged"
+    },
+    {
+      "path": "apps/web/src/BoothApp.tsx",
+      "sourceBlob": "da25e292945535caca4ca7b3e7d1cb1e7b4c9054",
+      "sourceSha256": "f62a7ebc38af6a9a55f40d14e018583477172ca7dff5fa16c5fae001fafa59f4",
+      "baselineSha256": "f62a7ebc38af6a9a55f40d14e018583477172ca7dff5fa16c5fae001fafa59f4",
+      "handling": "unchanged"
+    },
+    {
+      "path": "apps/web/src/ProductArt.tsx",
+      "sourceBlob": "847c9c04c07934c528a5828d41c0fa3f52a0df50",
+      "sourceSha256": "ee0b371b9545d38677afdad04d47bc8486f6caa45839b224ca25dc06bf12b2f0",
+      "baselineSha256": "ee0b371b9545d38677afdad04d47bc8486f6caa45839b224ca25dc06bf12b2f0",
+      "handling": "unchanged"
+    },
+    {
+      "path": "apps/web/src/booth.css",
+      "sourceBlob": "75f0fb1c4e8d1e33b4c4d1fe6896dcf7441549a5",
+      "sourceSha256": "f4f1b301296505cd35c5f1891961b79651524e40e551e607dac02606e28df9ba",
+      "baselineSha256": "f4f1b301296505cd35c5f1891961b79651524e40e551e607dac02606e28df9ba",
+      "handling": "unchanged"
+    },
+    {
+      "path": "apps/web/src/main.tsx",
+      "sourceBlob": "f2d41ac756ab2ed8d55cb1bf96dcd43101a43181",
+      "sourceSha256": "f8a03c0b1fea1b6fd0ba99d5f70c2b2533926fe37d18c7610778eaacd915957a",
+      "baselineSha256": "f8a03c0b1fea1b6fd0ba99d5f70c2b2533926fe37d18c7610778eaacd915957a",
+      "handling": "unchanged"
+    },
+    {
+      "path": "apps/web/src/vite-env.d.ts",
+      "sourceBlob": "11f02fe2a0061d6e6e1f271b21da95423b448b32",
+      "sourceSha256": "65996936fbb042915f7b74a200fcdde7e410f32a669b1ab9597cfaa4b0faddb5",
+      "baselineSha256": "65996936fbb042915f7b74a200fcdde7e410f32a669b1ab9597cfaa4b0faddb5",
+      "handling": "unchanged"
+    },
+    {
+      "path": ".gitignore",
+      "sourceBlob": "b47a53bfd6f7b1973991460f0de49089b9e9ec89",
+      "sourceSha256": "9f9758c993cc58ea323f65278ebc2686fd176d0e1b6fe7cf9aced94a39d77ced",
+      "baselineSha256": "9f9758c993cc58ea323f65278ebc2686fd176d0e1b6fe7cf9aced94a39d77ced",
+      "handling": "unchanged"
+    }
+  ]
+}

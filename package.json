@@ -1,0 +1,33 @@
+{
+  "name": "bluesword-gateway",
+  "private": true,
+  "version": "0.1.0",
+  "engines": {
+    "node": ">=24.13.0"
+  },
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "dev": "concurrently --names api,web \"pnpm dev:api\" \"pnpm --filter @bluesword/web dev\"",
+    "dev:api": "node --env-file-if-exists=.env --import tsx apps/api/src/booth/index.ts",
+    "start": "node --env-file-if-exists=.env --import tsx apps/api/src/booth/index.ts",
+    "dev:demo": "concurrently --names api,robot,web \"node --env-file-if-exists=.env --import tsx apps/api/src/booth/index.ts --simulator\" \"node --import tsx scripts/robot-simulator.ts\" \"pnpm --filter @bluesword/web dev\"",
+    "dev:robot": "node --import tsx scripts/robot-simulator.ts",
+    "build": "pnpm typecheck && pnpm --filter @bluesword/web build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run apps/api/src/booth/booth.test.ts",
+    "test:interfaces": "vitest run apps/api/src/booth/booth.test.ts -t 正式三接口与任务事实",
+    "test:ai": "vitest run apps/api/src/booth/booth.test.ts -t OpenAI",
+    "test:browser": "node scripts/booth-acceptance.cjs",
+    "test:booth:browser": "node scripts/booth-acceptance.cjs"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "concurrently": "9.2.4",
+    "playwright": "1.62.1",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  }
+}

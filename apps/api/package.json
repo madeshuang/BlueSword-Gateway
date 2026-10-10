@@ -1,0 +1,12 @@
+{
+  "name": "@bluesword/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "cd ../.. && pnpm dev:api",
+    "start": "cd ../.. && pnpm start"
+  },
+  "dependencies": {
+    "@bluesword/contracts": "workspace:*"
+  }
+}
