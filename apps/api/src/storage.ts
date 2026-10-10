@@ -33,4 +33,3 @@ export class ApplicationStorage {
 
   close(): void { this.db.close(); }
 }
-
