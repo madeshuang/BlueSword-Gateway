@@ -1,0 +1,15 @@
+node_modules/
+.pnpm-store/
+dist/
+.vite/
+.env
+.env.*
+!.env.example
+*.log
+*.tsbuildinfo
+coverage/
+.claude/
+.codex/
+.tmp/
+.data/
+.scratch/
