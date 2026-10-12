@@ -17,11 +17,172 @@ async function fakeRobot(reply:{success:boolean;data:string}={success:true,data:
   robot=createServer(async(req,res)=>{let body="";for await(const c of req)body+=c;received.push({method:req.method,path:req.url,body:JSON.parse(body)});await beforeReply?.();res.writeHead(200,{"Content-Type":"application/json"});res.end(JSON.stringify({code:1,...reply}));});
   await new Promise<void>(resolve=>robot!.listen(0,"127.0.0.1",resolve));return "http://127.0.0.1:"+((robot!.address() as {port:number}).port)+"/api/task/dispatch";
 }
-async function start(c:BoothConfig){app=createBoothApplication(c);base="http://127.0.0.1:"+await app.listen(0);}
+async function start(c:BoothConfig,options:Parameters<typeof createBoothApplication>[1]={}){app=createBoothApplication(c,options);base="http://127.0.0.1:"+await app.listen(0);}
 async function post(path:string,body:unknown={},headers:Record<string,string>={}){return fetch(base+path,{method:"POST",headers:{"Content-Type":"application/json",...headers},body:JSON.stringify(body)});}
 const command=(requestId="request-one",count=1,productId="water")=>({requestId,count,productId});
 
 describe("正式三接口与任务事实",()=>{
+  it("工作人员配置只公开是否启用，未配置时明确拒绝且不改变任务",async()=>{
+    await start(config({operatorToken:undefined}));
+    const snapshot=await (await fetch(base+"/api/booth")).json();
+    expect(snapshot.operator).toEqual({configured:false});
+    const response=await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止"});
+    expect(response.status).toBe(503);
+    expect((await response.json()).data).toBe("工作人员操作凭据尚未配置");
+    expect((await (await fetch(base+"/api/booth")).json()).tasks).toEqual(snapshot.tasks);
+    await app!.close();app=undefined;
+    await start(config());
+    const enabled=await (await fetch(base+"/api/booth")).text();
+    expect(JSON.parse(enabled).operator).toEqual({configured:true});
+    expect(enabled).not.toContain("test-operator");
+    expect((await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止"})).status).toBe(403);
+  });
+  it("P9快照提前说明发单配置缺口，不暴露地址或产生任务",async()=>{
+    await start(config({dispatchUrl:undefined,catalogConfirmed:true}));
+    const snapshot=await (await fetch(base+"/api/booth")).json();
+    expect(snapshot.dispatch).toEqual({ready:false,reason:"机器人连接尚未配置，暂不能提交任务"});
+    expect(snapshot.tasks).toEqual([]);
+    expect((await post("/api/booth/requests",command())).status).toBe(503);
+    expect((await (await fetch(base+"/api/booth")).json()).tasks).toEqual([]);
+    await app!.close();app=undefined;
+    const dispatchUrl=await fakeRobot();
+    await start(config({dispatchUrl,catalogConfirmed:false}));
+    expect((await (await fetch(base+"/api/booth")).json()).dispatch).toEqual({ready:false,reason:"现场物品位置尚未确认，暂不能提交任务"});
+    expect((await post("/api/booth/requests",command())).status).toBe(503);expect(received).toEqual([]);
+    await app!.close();app=undefined;
+    await start(config({dispatchUrl,catalogConfirmed:true}));
+    const ready=await (await fetch(base+"/api/booth")).text();
+    expect(JSON.parse(ready).dispatch).toEqual({ready:true,reason:null});
+    expect(ready).not.toContain(dispatchUrl);expect(ready).not.toContain("test-operator");
+  });
+
+  it("P3审计写入失败不更新任务，恢复后可接收同一通知",async()=>{
+    const d=mkdtempSync(join(tmpdir(),"booth-audit-failure-"));directories.push(d);
+    const c=config({databasePath:join(d,"state.sqlite"),dispatchUrl:await fakeRobot()});await start(c);
+    await post("/api/booth/requests",command());const fixture=new ApplicationStorage(c.databasePath);
+    try{
+      fixture.db.exec(`CREATE TRIGGER refuse_audit BEFORE INSERT ON records WHEN NEW.scope='booth_callbacks'
+        BEGIN SELECT RAISE(ABORT,'injected audit write failure'); END;`);
+      const rejected=await post("/api/task/finished",{result:"success"});expect(rejected.status).toBe(500);
+      expect((await rejected.json()).success).toBe(false);
+      expect((await (await fetch(base+"/api/booth")).json()).active.status).toBe("executing");
+      fixture.db.exec("DROP TRIGGER refuse_audit");
+      expect(await (await post("/api/task/finished",{result:"success"})).json()).toEqual({code:1,data:"OK",success:true});
+      expect((await (await fetch(base+"/api/booth")).json()).active).toBeNull();
+    }finally{fixture.close();}
+  });
+  it("P3提交失败不确认或发布未提交状态；SSE只收到恢复后的真实故障",async()=>{
+    const d=mkdtempSync(join(tmpdir(),"booth-commit-atomic-"));directories.push(d);
+    const c=config({databasePath:join(d,"state.sqlite"),dispatchUrl:await fakeRobot()});await start(c);
+    await post("/api/booth/requests",command());
+    const controller=new AbortController();
+    const events=await fetch(base+"/api/booth/events",{signal:controller.signal});const reader=events.body!.getReader();
+    expect(new TextDecoder().decode((await reader.read()).value)).toContain('"status":"executing"');
+    const fixture=new ApplicationStorage(c.databasePath);
+    try{
+      // Deferred foreign-key violation fails COMMIT after both callback writes succeeded.
+      fixture.db.exec(`CREATE TABLE injected_parent(id INTEGER PRIMARY KEY);
+        CREATE TABLE injected_child(parent_id INTEGER REFERENCES injected_parent(id) DEFERRABLE INITIALLY DEFERRED);
+        CREATE TRIGGER refuse_commit AFTER INSERT ON records WHEN NEW.scope='booth_callbacks'
+        BEGIN INSERT INTO injected_child VALUES (123); END;`);
+      expect((await post("/api/task/error",{message:"未提交的故障"})).status).toBe(500);
+      expect((await (await fetch(base+"/api/booth")).json()).active.status).toBe("executing");
+      fixture.db.exec("DROP TRIGGER refuse_commit");
+      expect((await post("/api/task/error",{message:"已提交的故障"})).status).toBe(200);
+      const pushed=new TextDecoder().decode((await reader.read()).value);
+      expect(pushed).toContain("已提交的故障");expect(pushed).not.toContain("未提交的故障");
+    }finally{fixture.close();controller.abort();await reader.cancel().catch(()=>{});}
+    await app!.close();app=undefined;await start(c);
+    expect((await (await fetch(base+"/api/booth")).json()).active).toMatchObject({status:"fault",message:"已提交的故障"});
+  });
+  it("P3无任务告警写入失败不留孤立审计，恢复后仍阻止发单",async()=>{
+    const d=mkdtempSync(join(tmpdir(),"booth-alert-atomic-"));directories.push(d);
+    const c=config({databasePath:join(d,"state.sqlite"),dispatchUrl:await fakeRobot()});await start(c);
+    const fixture=new ApplicationStorage(c.databasePath);
+    try{
+      fixture.db.exec(`CREATE TRIGGER refuse_alert BEFORE INSERT ON records
+        WHEN NEW.scope='booth' AND NEW.key='alert'
+        BEGIN SELECT RAISE(ABORT,'injected alert write failure'); END;`);
+      expect((await post("/api/task/error",{message:"系统故障"})).status).toBe(500);
+      expect((await (await fetch(base+"/api/booth")).json()).alert).toBeNull();
+      fixture.db.exec(`DROP TRIGGER refuse_alert;
+        CREATE TRIGGER refuse_orphan_audit BEFORE INSERT ON records
+        WHEN NEW.scope='booth_callbacks' AND EXISTS (SELECT 1 FROM records WHERE scope='booth_callbacks')
+        BEGIN SELECT RAISE(ABORT,'prior uncommitted callback audit survived'); END;`);
+      expect((await post("/api/task/error",{message:"系统故障"})).status).toBe(200);
+      fixture.db.exec("DROP TRIGGER refuse_orphan_audit");
+    }finally{fixture.close();}
+    await app!.close();app=undefined;await start(c);
+    expect((await (await fetch(base+"/api/booth")).json()).alert).toBe("系统故障");
+    expect((await post("/api/booth/requests",command())).status).toBe(409);
+    expect(received).toHaveLength(0);
+  });
+  it("P3故障状态写入失败应回滚审计；重试与重启不解除占用",async()=>{
+    const d=mkdtempSync(join(tmpdir(),"booth-fault-atomic-"));directories.push(d);
+    const c=config({databasePath:join(d,"state.sqlite"),dispatchUrl:await fakeRobot()});
+    await start(c);const original=(await (await post("/api/booth/requests",command())).json()).task;
+    const fixture=new ApplicationStorage(c.databasePath);
+    try{
+      fixture.db.exec(`CREATE TRIGGER refuse_fault BEFORE UPDATE ON records
+        WHEN NEW.scope='booth_tasks' AND json_extract(NEW.value,'$.status')='fault'
+        BEGIN SELECT RAISE(ABORT,'injected fault write failure'); END;`);
+      expect((await post("/api/task/error",{message:"机械臂故障"})).status).toBe(500);
+      expect((await (await fetch(base+"/api/booth")).json()).active).toMatchObject({id:original.id,status:"executing"});
+      fixture.db.exec(`DROP TRIGGER refuse_fault;
+        CREATE TRIGGER refuse_orphan_audit BEFORE INSERT ON records
+        WHEN NEW.scope='booth_callbacks' AND EXISTS (
+          SELECT 1 FROM records WHERE scope='booth_callbacks' AND json_extract(value,'$.kind')='error')
+        BEGIN SELECT RAISE(ABORT,'prior uncommitted callback audit survived'); END;`);
+      expect((await post("/api/task/error",{message:"机械臂故障"})).status).toBe(200);
+      fixture.db.exec("DROP TRIGGER refuse_orphan_audit");
+    }finally{fixture.close();}
+    await app!.close();app=undefined;await start(c);
+    expect((await (await fetch(base+"/api/booth")).json()).active).toMatchObject({id:original.id,status:"fault",message:"机械臂故障"});
+    expect((await post("/api/task/error",{message:"机械臂故障"})).status).toBe(200);
+    expect((await post("/api/booth/requests",command("request-two"))).status).toBe(409);
+    expect(received).toHaveLength(1);
+  });
+  it("P3完成状态写入失败应回滚审计；重试与重启保持已提交事实",async()=>{
+    const d=mkdtempSync(join(tmpdir(),"booth-atomic-"));directories.push(d);
+    const c=config({databasePath:join(d,"state.sqlite"),dispatchUrl:await fakeRobot()});
+    await start(c);
+    const original=(await (await post("/api/booth/requests",command())).json()).task;
+    const fixture=new ApplicationStorage(c.databasePath);
+    try{
+      // Real SQLite fault injection. Assertions below use only HTTP responses/snapshots.
+      fixture.db.exec(`CREATE TRIGGER refuse_completion BEFORE UPDATE ON records
+        WHEN NEW.scope='booth_tasks' AND json_extract(NEW.value,'$.status')='succeeded'
+        BEGIN SELECT RAISE(ABORT,'injected task write failure'); END;`);
+      expect((await post("/api/task/finished",{result:"success"})).status).toBe(500);
+      expect((await (await fetch(base+"/api/booth")).json()).active).toMatchObject({id:original.id,status:"executing"});
+      fixture.db.exec(`DROP TRIGGER refuse_completion;
+        CREATE TRIGGER refuse_orphan_audit BEFORE INSERT ON records
+        WHEN NEW.scope='booth_callbacks' AND EXISTS (
+          SELECT 1 FROM records WHERE scope='booth_callbacks' AND json_extract(value,'$.kind')='finished')
+        BEGIN SELECT RAISE(ABORT,'prior uncommitted callback audit survived'); END;`);
+      // A successful retry proves the failed callback left no audit behind.
+      expect((await post("/api/task/finished",{result:"success"})).status).toBe(200);
+      fixture.db.exec("DROP TRIGGER refuse_orphan_audit");
+    }finally{fixture.close();}
+    await app!.close();app=undefined;await start(c);
+    const restored=await (await fetch(base+"/api/booth")).json();
+    expect(restored.active).toBeNull();expect(restored.tasks[0]).toMatchObject({id:original.id,status:"succeeded"});
+    expect((await post("/api/task/finished",{result:"success"})).status).toBe(200);
+    expect(received).toHaveLength(1);
+  });
+  it("P1已知限制复现：A完成后开始B，A的迟到完成误结束B（不是修复验收）",async()=>{
+    await start(config({dispatchUrl:await fakeRobot()}));
+    const first=(await (await post("/api/booth/requests",command("request-a"))).json()).task;
+    await post("/api/task/finished",{result:"success"});
+    const second=(await (await post("/api/booth/requests",command("request-b",1,"gift"))).json()).task;
+    expect((await (await fetch(base+"/api/booth")).json()).active.id).toBe(second.id);
+    // The current protocol provides no way to distinguish a retry from A from a completion for B.
+    await post("/api/task/finished",{result:"success"});
+    const snapshot=await (await fetch(base+"/api/booth")).json();
+    expect(snapshot.active).toBeNull();
+    expect(snapshot.tasks.find((t:{id:string})=>t.id===second.id).status).toBe("succeeded");
+    expect(snapshot.tasks.find((t:{id:string})=>t.id===first.id).status).toBe("succeeded");
+  });
   it("发送且仅发送三字段；受理不完成；完成与重复完成按示例确认",async()=>{
     await start(config({dispatchUrl:await fakeRobot()}));
     const response=await post("/api/booth/requests",command());expect(response.status).toBe(200);
@@ -115,11 +276,244 @@ describe("OpenAI Responses选品接入（可控对端，不冒充真实GPT）",(
     await expect(new OpenAIBoothAssistant(config({openaiKey:undefined})).advise([])).rejects.toThrow("暂未连接");
     await expect(new OpenAIBoothAssistant(config({openaiKey:"test"}),vi.fn<typeof fetch>().mockRejectedValue(new Error("timeout"))).advise([])).rejects.toThrow("超时");
     for(const value of [{...answer,selection:{productId:"missing",count:1}},{...answer,selection:{productId:"water",count:99}}]){
-      await expect(new OpenAIBoothAssistant(config({openaiKey:"test"}),vi.fn<typeof fetch>().mockResolvedValue(response(value))).advise([])).rejects.toThrow("有效建议");
+      await expect(new OpenAIBoothAssistant(config({openaiKey:"test"}),vi.fn<typeof fetch>().mockResolvedValue(response(value))).advise([])).rejects.toThrow("回复暂时无法处理");
     }
-    await expect(new OpenAIBoothAssistant(config({openaiKey:"test"}),vi.fn<typeof fetch>().mockResolvedValue(Response.json({status:"incomplete"}))).advise([])).rejects.toThrow("有效建议");
+    await expect(new OpenAIBoothAssistant(config({openaiKey:"test"}),vi.fn<typeof fetch>().mockResolvedValue(Response.json({status:"incomplete"}))).advise([])).rejects.toThrow("回复暂时无法处理");
   });
   it("目录配置拒绝重复ID和非法取值",()=>{
     const p=config().products[0]!;expect(()=>validateCatalog([p,p])).toThrow();expect(()=>validateCatalog([{...p,maxCount:0}])).toThrow();
   });
+});
+
+describe("双供应商建议 HTTP 边界（可控对端，不冒充真实供应商）",()=>{
+  it("DeepSeek后端配置在快照生效，不使用OpenAI密钥也不泄漏凭据",async()=>{
+    vi.stubEnv("BOOTH_AI_PROVIDER","deepseek");vi.stubEnv("DEEPSEEK_API_KEY","deepseek-fixture-secret");vi.stubEnv("DEEPSEEK_MODEL","deepseek-flash");
+    await start(config({openaiKey:"openai-fixture-secret"}));
+    const response=await fetch(base+"/api/booth");const body=await response.text();
+    expect(JSON.parse(body).ai).toEqual({provider:"DeepSeek",model:"deepseek-flash",configured:true});
+    expect(body).not.toContain("fixture-secret");
+  });
+  it("DeepSeek通过统一聊天HTTP返回合法建议，使用选中供应商凭据且不发单",async()=>{
+    const answer={reply:"请确认两瓶矿泉水。",selection:{productId:"water",count:2}};
+    const transport=vi.fn<typeof fetch>().mockResolvedValue(Response.json({choices:[{finish_reason:"stop",message:{content:JSON.stringify(answer)}}]}));
+    await start(config({aiProvider:"deepseek",deepseekKey:"deepseek-fixture-secret",openaiKey:undefined}),{assistantTransport:transport});
+    const response=await post("/api/booth/chat",{messages:[{role:"user",content:"两瓶矿泉水"}]});
+    expect(response.status).toBe(200);expect(await response.json()).toEqual(answer);
+    expect(transport).toHaveBeenCalledTimes(1);
+    const [url,options]=transport.mock.calls[0]!;expect(url).toBe("https://api.deepseek.com/chat/completions");
+    expect(new Headers(options!.headers).get("Authorization")).toBe("Bearer deepseek-fixture-secret");
+    const body=JSON.parse(options!.body as string);expect(body.model).toBe("deepseek-flash");
+    expect(body.response_format).toEqual({type:"json_object"});expect(body.thinking).toEqual({type:"disabled"});
+    expect(body.messages[0].role).toBe("system");expect(body.messages[0].content).toContain("JSON");
+    expect(body.messages.at(-1)).toEqual({role:"user",content:"两瓶矿泉水"});expect(body.tools).toBeUndefined();
+    expect((await (await fetch(base+"/api/booth")).json()).tasks).toEqual([]);expect(received).toHaveLength(0);
+  });
+
+  it.each(["openai","deepseek"] as const)("%s拒绝目录/数量越界和额外输出字段，失败后仍可继续提问",async provider=>{
+    const answer={reply:"请确认矿泉水。",selection:{productId:"water",count:1}};
+    const transport=vi.fn<typeof fetch>();
+    await start(config({aiProvider:provider,openaiKey:"openai-fixture",deepseekKey:"deepseek-fixture"}),{assistantTransport:transport});
+    const output=(value:unknown)=>provider==="openai"
+      ? Response.json({status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify(value)}]}]})
+      : Response.json({choices:[{finish_reason:"stop",message:{content:JSON.stringify(value)}}]});
+    for(const invalid of [{...answer,debug:"不应返回给访客"},{...answer,selection:{productId:"unknown",count:1}},
+      {...answer,selection:{productId:"water",count:99}},{...answer,selection:{productId:"water",count:1.5}},
+      {...answer,selection:{productId:"water",count:1,extra:"secret"}},{reply:"漏掉selection"}]){
+      transport.mockResolvedValueOnce(output(invalid));
+      const response=await post("/api/booth/chat",{messages:[{role:"user",content:"一瓶水"}]});
+      expect(response.status).toBe(502);expect(await response.text()).not.toContain("不应返回给访客");
+    }
+    transport.mockResolvedValueOnce(output({reply:"您想取几瓶矿泉水？",selection:null}));
+    expect(await (await post("/api/booth/chat",{messages:[{role:"user",content:"想要水"}]})).json()).toEqual({reply:"您想取几瓶矿泉水？",selection:null});
+    expect((await (await fetch(base+"/api/booth")).json()).tasks).toEqual([]);
+  });
+
+  it.each(["openai","deepseek"] as const)("%s聊天记录区分配置与返回模型，仅读取安全用量字段",async provider=>{
+    const info=vi.spyOn(console,"info").mockImplementation(()=>{});
+    const advice={reply:"private-answer",selection:{productId:"water",count:1}};
+    const usage=provider==="openai"
+      ? {input_tokens:37,output_tokens:11,total_tokens:48,input_tokens_details:{cached_tokens:5},output_tokens_details:{reasoning_tokens:0},secret:"private-secret"}
+      : {prompt_tokens:37,completion_tokens:11,total_tokens:48,secret:"private-secret"};
+    const payload=provider==="openai"
+      ? {status:"completed",model:"returned-model-2026",usage,output:[{type:"message",content:[{type:"output_text",text:JSON.stringify(advice)}]}]}
+      : {model:"returned-model-2026",usage,choices:[{finish_reason:"stop",message:{content:JSON.stringify(advice)}}]};
+    const transport=vi.fn<typeof fetch>().mockResolvedValue(Response.json(payload));
+    await start(config({aiProvider:provider,openaiKey:"private-secret",deepseekKey:"private-secret",openaiModel:"requested-model",deepseekModel:"requested-model"}),{assistantTransport:transport});
+    const response=await post("/api/booth/chat",{messages:[{role:"user",content:"private-dialogue"}]});
+    expect(response.status).toBe(200);expect(await response.json()).toEqual(advice);
+    const event=JSON.parse(String(info.mock.calls.at(-1)?.[0]));
+    expect(event).toMatchObject({model:"requested-model",returnedModel:"returned-model-2026",usage:{inputTokens:37,outputTokens:11,totalTokens:48},structureValidated:true,upstreamStatus:200});
+    expect(JSON.stringify(event)).not.toMatch(/private-secret|private-answer|private-dialogue/);
+    expect((await (await fetch(base+"/api/booth")).json()).tasks).toEqual([]);
+  });
+
+  it("诊断消费者异步失败不影响本次或后续聊天",async()=>{
+    const info=vi.spyOn(console,"info").mockImplementation(()=>{});
+    const advice={reply:"请确认一瓶水",selection:{productId:"water",count:1}};
+    const transport=vi.fn<typeof fetch>().mockImplementation(async()=>Response.json({status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify(advice)}]}]}));
+    await start(config({aiProvider:"openai",openaiKey:"fixture"}),{assistantTransport:transport,onAiCall:async()=>{throw new Error("诊断消费者异常");}});
+    for(let i=0;i<2;i++){
+      const response=await post("/api/booth/chat",{messages:[{role:"user",content:"一瓶水"}]});
+      expect(response.status).toBe(200);expect(await response.json()).toEqual(advice);
+      await new Promise(resolve=>setImmediate(resolve));
+    }
+    expect(info).toHaveBeenCalledTimes(2);
+    expect((await (await fetch(base+"/api/booth")).json()).tasks).toEqual([]);
+  });
+
+  it("连接失败仅记录允许的网络错误码，不记录异常详情",async()=>{
+    const warn=vi.spyOn(console,"warn").mockImplementation(()=>{});
+    const transport=vi.fn<typeof fetch>().mockRejectedValue(new Error("private-secret",{cause:{code:"UND_ERR_CONNECT_TIMEOUT",address:"private-address"}}));
+    await start(config({aiProvider:"openai",openaiKey:"private-secret"}),{assistantTransport:transport});
+    expect((await post("/api/booth/chat",{messages:[{role:"user",content:"一瓶水"}]})).status).toBe(504);
+    const event=JSON.parse(String(warn.mock.calls.at(-1)?.[0]));
+    expect(event).toMatchObject({category:"connection",connectionCode:"UND_ERR_CONNECT_TIMEOUT",upstreamStatus:null});
+    expect(JSON.stringify(event)).not.toMatch(/private-secret|private-address/);
+    expect((await (await fetch(base+"/api/booth")).json()).tasks).toEqual([]);
+  });
+
+  it("OpenAI路径或参数错误安全分类，不记录上游错误正文",async()=>{
+    const warn=vi.spyOn(console,"warn").mockImplementation(()=>{});
+    const transport=vi.fn<typeof fetch>();
+    await start(config({aiProvider:"openai",openaiKey:"private-secret"}),{assistantTransport:transport});
+    for(const status of [400,404,405,422]){
+      transport.mockResolvedValueOnce(new Response("private-secret 上游错误正文",{status}));
+      expect((await post("/api/booth/chat",{messages:[{role:"user",content:"一瓶水"}]})).status).toBe(502);
+      expect(JSON.parse(String(warn.mock.calls.at(-1)?.[0]))).toMatchObject({category:"configuration",upstreamStatus:status,structureValidated:false,returnedModel:null,usage:null});
+    }
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("private-secret");
+    expect((await (await fetch(base+"/api/booth")).json()).tasks).toEqual([]);
+  });
+
+  it.each(["openai","deepseek"] as const)("%s认证、限流、上游失败与连接失败安全分类，不回退另一家或记录敏感内容",async provider=>{
+    const info=vi.spyOn(console,"info").mockImplementation(()=>{}),warn=vi.spyOn(console,"warn").mockImplementation(()=>{});
+    const transport=vi.fn<typeof fetch>();
+    await start(config({aiProvider:provider,openaiKey:"openai-private-secret",deepseekKey:"deepseek-private-secret",openaiModel:"configured-openai-model",deepseekModel:"configured-deepseek-model"}),{assistantTransport:transport});
+    const categories=[[401,"authentication"],[403,"authentication"],[429,"rate_limit"],[500,"upstream"]] as const;
+    for(const [status,category] of categories){
+      transport.mockResolvedValueOnce(new Response("private-secret 上游内部详情",{status}));
+      const response=await post("/api/booth/chat",{messages:[{role:"user",content:"private-dialogue 一瓶水"}]});
+      expect(response.status).toBe(502);expect(await response.text()).not.toContain("private-secret");
+      const event=JSON.parse(String(warn.mock.calls.at(-1)?.[0]));
+      expect(event).toMatchObject({event:"ai_call",provider:provider==="openai"?"OpenAI":"DeepSeek",category,upstreamStatus:status,outcome:"failed"});
+      expect(event.requestId).toMatch(/^[0-9a-f-]{36}$/);expect(event.elapsedMs).toBeGreaterThanOrEqual(0);
+    }
+    transport.mockRejectedValueOnce(new Error("private-secret"));
+    expect((await post("/api/booth/chat",{messages:[{role:"user",content:"private-dialogue"}]})).status).toBe(504);
+    expect(JSON.parse(String(warn.mock.calls.at(-1)?.[0]))).toMatchObject({category:"connection",upstreamStatus:null});
+    const output={reply:"请确认。",selection:{productId:"water",count:1}};
+    transport.mockResolvedValueOnce(provider==="openai"
+      ? Response.json({status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify(output)}]}]})
+      : Response.json({choices:[{finish_reason:"stop",message:{content:JSON.stringify(output)}}]}));
+    expect((await post("/api/booth/chat",{messages:[{role:"user",content:"private-dialogue"}]})).status).toBe(200);
+    expect(JSON.parse(String(info.mock.calls.at(-1)?.[0]))).toMatchObject({event:"ai_call",category:null,upstreamStatus:200,outcome:"succeeded"});
+    expect(transport).toHaveBeenCalledTimes(6);
+    for(const [url,init] of transport.mock.calls){
+      expect(url).toBe(provider==="openai"?"https://api.openai.com/v1/responses":"https://api.deepseek.com/chat/completions");
+      expect(new Headers(init!.headers).get("Authorization")).toBe("Bearer "+provider+"-private-secret");
+      const body=JSON.parse(init!.body as string);
+      expect(body.model).toBe("configured-"+provider+"-model");
+      expect(init!.redirect).toBe("error");
+      if(provider==="openai"){expect(body.store).toBe(false);expect(body.text.format).toMatchObject({type:"json_schema",strict:true});}
+    }
+    const logs=JSON.stringify([...info.mock.calls,...warn.mock.calls]);
+    expect(logs).not.toContain("private-secret");expect(logs).not.toContain("private-dialogue");expect(logs).not.toContain("请确认");
+    expect((await (await fetch(base+"/api/booth")).json()).tasks).toEqual([]);
+  });
+
+  it.each(["openai","deepseek"] as const)("%s超时预算覆盖响应正文；真实回环慢正文中止后恢复聊天",async provider=>{
+    const warn=vi.spyOn(console,"warn").mockImplementation(()=>{});let slow=true;
+    const answer={reply:"请确认一瓶水。",selection:{productId:"water",count:1}};
+    robot=createServer((req,res)=>{
+      req.resume();res.writeHead(200,{"Content-Type":"application/json"});
+      if(slow){res.flushHeaders();return;}
+      res.end(JSON.stringify(provider==="openai"
+        ? {status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify(answer)}]}]}
+        : {choices:[{finish_reason:"stop",message:{content:JSON.stringify(answer)}}]}));
+    });
+    await new Promise<void>(resolve=>robot!.listen(0,"127.0.0.1",resolve));
+    const url="http://127.0.0.1:"+(robot.address() as {port:number}).port;
+    const transport:typeof fetch=(_input,init)=>fetch(url,init);
+    await start(config({aiProvider:provider,openaiKey:"test-openai",deepseekKey:"test-deepseek",openaiTimeoutMs:100,deepseekTimeoutMs:100}),{assistantTransport:transport});
+    const response=await post("/api/booth/chat",{messages:[{role:"user",content:"一瓶水"}]});
+    expect(response.status).toBe(504);
+    expect(JSON.parse(String(warn.mock.calls.at(-1)?.[0]))).toMatchObject({category:"timeout",upstreamStatus:200});
+    slow=false;expect(await (await post("/api/booth/chat",{messages:[{role:"user",content:"一瓶水"}]})).json()).toEqual(answer);
+    expect((await (await fetch(base+"/api/booth")).json()).tasks).toEqual([]);
+  });
+
+  it.each(["openai","deepseek"] as const)("%s未配置时不借用另一家凭据，返回503和未连接快照",async provider=>{
+    const transport=vi.fn<typeof fetch>();
+    await start(config({aiProvider:provider,openaiKey:provider==="openai"?undefined:"other-key",deepseekKey:provider==="deepseek"?undefined:"other-key"}),{assistantTransport:transport});
+    const snapshot=await (await fetch(base+"/api/booth")).json();
+    expect(snapshot.ai).toMatchObject({provider:provider==="openai"?"OpenAI":"DeepSeek",configured:false});
+    const response=await post("/api/booth/chat",{messages:[{role:"user",content:"你好"}]});
+    expect(response.status).toBe(503);expect(await response.text()).toContain("暂未连接");expect(transport).not.toHaveBeenCalled();
+    expect(snapshot.tasks).toEqual([]);
+  });
+  it.each(["openai","deepseek"] as const)("%s截断、拒绝、非JSON与空回答均不冒充成功建议",async provider=>{
+    const transport=vi.fn<typeof fetch>();
+    await start(config({aiProvider:provider,openaiKey:"test-openai",deepseekKey:"test-deepseek"}),{assistantTransport:transport});
+    const text=(content:string,complete=true)=>provider==="openai"
+      ? {status:complete?"completed":"incomplete",output:[{type:"message",content:[{type:"output_text",text:content}]}]}
+      : {choices:[{finish_reason:complete?"stop":"length",message:{content}}]};
+    const valid=JSON.stringify({reply:"请确认。",selection:{productId:"water",count:1}});
+    const refusal=provider==="openai"?{status:"completed",output:[{type:"message",content:[{type:"refusal",refusal:"拒绝"}]}]}
+      : {choices:[{finish_reason:"content_filter",message:{content:null}}]};
+    for(const body of [text(valid,false),refusal,text("这不是JSON"),text(JSON.stringify({reply:" ",selection:null}))]){
+      transport.mockResolvedValueOnce(Response.json(body));
+      const response=await post("/api/booth/chat",{messages:[{role:"user",content:"一瓶水"}]});
+      expect(response.status).toBe(502);expect(await response.text()).toContain("回复暂时无法处理");
+    }
+    expect(transport).toHaveBeenCalledTimes(4);expect((await (await fetch(base+"/api/booth")).json()).tasks).toEqual([]);
+  });
+
+});
+describe("等待提醒 HTTP 边界",()=>{
+  it("超过提醒阈值仍执行且阻止新单，重启保留等待起点，完成后清除提醒",async()=>{
+    const d=mkdtempSync(join(tmpdir(),"booth-reminder-"));directories.push(d);
+    const c=config({databasePath:join(d,"state.sqlite"),dispatchUrl:await fakeRobot(),taskReminderMs:1000});
+    await start(c);const task=(await (await post("/api/booth/requests",command())).json()).task;
+    expect((await (await fetch(base+"/api/booth")).json()).waiting).toMatchObject({taskId:task.id,overdue:false,remindAfterMs:1000});
+    vi.spyOn(Date,"now").mockReturnValue(Date.parse(task.createdAt)+2000);
+    expect((await (await fetch(base+"/api/booth")).json()).waiting).toMatchObject({taskId:task.id,overdue:true,elapsedMs:2000});
+    expect((await post("/api/booth/requests",command("next-request"))).status).toBe(409);
+    expect((await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止"},{"X-Operator-Token":"test-operator"})).status).toBe(409);
+    await app!.close();app=undefined;await start(c);
+    const restored=await (await fetch(base+"/api/booth")).json();
+    expect(restored.active).toMatchObject({id:task.id,status:"executing"});expect(restored.waiting.overdue).toBe(true);
+    await post("/api/task/finished",{result:"success"});expect((await (await fetch(base+"/api/booth")).json()).waiting).toBeNull();
+    expect(received).toHaveLength(1);
+  });
+});
+
+describe("OpenAI 独立端点 HTTP 边界",()=>{
+  it("明确配置的Base URL只影响OpenAI，Luna关闭推理且保留结构化参数",async()=>{
+    vi.stubEnv("OPENAI_BASE_URL","https://verified-relay.example/compatible/v1/");
+    vi.stubEnv("OPENAI_MODEL","gpt-6-luna");
+    const answer={reply:"请确认水。",selection:{productId:"water",count:1}};
+    const transport=vi.fn<typeof fetch>().mockResolvedValue(Response.json({status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify(answer)}]}]}));
+    await start(config({aiProvider:"openai",openaiKey:"fixture"}),{assistantTransport:transport});
+    expect(await (await post("/api/booth/chat",{messages:[{role:"user",content:"1瓶水"}]})).json()).toEqual(answer);
+    expect(transport.mock.calls[0]![0]).toBe("https://verified-relay.example/compatible/v1/responses");
+    const body=JSON.parse(transport.mock.calls[0]![1]!.body as string);
+    expect(body.model).toBe("gpt-6-luna");expect(body.reasoning).toEqual({effort:"none"});expect(body.text.format.strict).toBe(true);
+    await app!.close();app=undefined;
+    transport.mockResolvedValueOnce(Response.json({choices:[{finish_reason:"stop",message:{content:JSON.stringify(answer)}}]}));
+    await start(config({aiProvider:"deepseek",deepseekKey:"deepseek-fixture"}),{assistantTransport:transport});
+    await post("/api/booth/chat",{messages:[{role:"user",content:"1瓶水"}]});
+    expect(transport.mock.calls.at(-1)![0]).toBe("https://api.deepseek.com/chat/completions");
+  });
+  it("未配置Base URL保持官方直连，Sol只使用支持的低推理设置",async()=>{
+    vi.stubEnv("OPENAI_BASE_URL","");vi.stubEnv("OPENAI_MODEL","gpt-6.1-sol");
+    const answer={reply:"请确认。",selection:null};
+    const transport=vi.fn<typeof fetch>().mockResolvedValue(Response.json({status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify(answer)}]}]}));
+    await start(config({aiProvider:"openai",openaiKey:"fixture"}),{assistantTransport:transport});
+    expect((await post("/api/booth/chat",{messages:[{role:"user",content:"想要水"}]})).status).toBe(200);
+    expect(transport.mock.calls[0]![0]).toBe("https://api.openai.com/v1/responses");
+    const body=JSON.parse(transport.mock.calls[0]![1]!.body as string);
+    expect(body.reasoning).toEqual({effort:"low"});expect(body.max_output_tokens).toBe(2000);
+    expect(body.text.format.strict).toBe(true);
+  });
+
 });

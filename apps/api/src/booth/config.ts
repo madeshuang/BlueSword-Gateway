@@ -5,10 +5,16 @@ import type { BoothProduct } from "@bluesword/contracts";
 export interface BoothConfig {
   mode: "http" | "simulator"; dispatchUrl: string | undefined; databasePath: string;
   catalogConfirmed: boolean; products: BoothProduct[]; robotTimeoutMs: number;
+  aiProvider: "openai" | "deepseek";
+  deepseekKey: string | undefined; deepseekModel: string; deepseekTimeoutMs: number;
+  openaiBaseUrl: string;
   openaiKey: string | undefined; openaiModel: string; openaiTimeoutMs: number;
+  taskReminderMs: number;
   operatorToken: string | undefined;
 }
 export function readBoothConfig(): BoothConfig {
+  const aiProvider = process.env.BOOTH_AI_PROVIDER?.trim() || "openai";
+  if (aiProvider !== "openai" && aiProvider !== "deepseek") throw new Error("BOOTH_AI_PROVIDER 必须为 openai 或 deepseek");
   const mode = process.env.BOOTH_ROBOT_MODE ?? "http";
   if (mode !== "http" && mode !== "simulator") throw new Error("BOOTH_ROBOT_MODE 必须为 http 或 simulator");
   const dispatchUrl = process.env.ROBOT_DISPATCH_URL;
@@ -20,11 +26,17 @@ export function readBoothConfig(): BoothConfig {
   const products = JSON.parse(readFileSync(resolve(process.env.BOOTH_CATALOG_PATH ?? "config/booth-catalog.example.json"), "utf8")) as unknown;
   validateCatalog(products);
   return {
+    aiProvider,
+    deepseekKey: process.env.DEEPSEEK_API_KEY?.trim() || undefined,
+    deepseekModel: process.env.DEEPSEEK_MODEL?.trim() || "deepseek-flash",
+    deepseekTimeoutMs: positive("DEEPSEEK_TIMEOUT_MS", 20000),
     mode, dispatchUrl, products, databasePath: resolve(process.env.BOOTH_DB_PATH ?? ".data/booth.sqlite"),
     catalogConfirmed: process.env.BOOTH_CATALOG_CONFIRMED === "true",
     robotTimeoutMs: positive("ROBOT_TIMEOUT_MS", 8000), openaiTimeoutMs: positive("OPENAI_TIMEOUT_MS", 20000),
+    openaiBaseUrl: openaiBaseUrl(),
     openaiKey: process.env.OPENAI_API_KEY?.trim() || undefined,
     openaiModel: process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mini",
+    taskReminderMs: reminderThreshold(),
     operatorToken: process.env.BOOTH_OPERATOR_TOKEN?.trim() || undefined,
   };
 }
@@ -45,4 +57,20 @@ export function validateCatalog(value: unknown): asserts value is BoothProduct[]
     if (p.imageUrl !== undefined && (typeof p.imageUrl !== "string" || !p.imageUrl.startsWith("/products/") || p.imageUrl.includes(".."))) throw new Error("商品照片须使用 /products/ 下本地素材");
     ids.add(p.id);
   }
+}
+
+function reminderThreshold(): number {
+  const value = Number(process.env.BOOTH_TASK_REMINDER_MS ?? 120000);
+  if (!Number.isSafeInteger(value) || value < 100 || value > 86400000) throw new Error("BOOTH_TASK_REMINDER_MS 必须为 100–86400000 毫秒");
+  return value;
+}
+
+function openaiBaseUrl(): string {
+  const raw = process.env.OPENAI_BASE_URL?.trim() || "https://api.openai.com/v1";
+  try {
+    const url = new URL(raw);
+    const local = ["localhost","127.0.0.1","[::1]"].includes(url.hostname);
+    if ((url.protocol !== "https:" && !(local && url.protocol === "http:")) || url.username || url.password || url.search || url.hash) throw new Error();
+    return url.href.replace(/\/+$/,"");
+  } catch { throw new Error("OPENAI_BASE_URL 必须为无凭据、无查询参数的 HTTPS API 基址（回环测试可用 HTTP）"); }
 }

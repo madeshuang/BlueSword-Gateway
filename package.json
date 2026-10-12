@@ -14,11 +14,13 @@
     "dev:robot": "node --import tsx scripts/robot-simulator.ts",
     "build": "pnpm typecheck && pnpm --filter @bluesword/web build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run apps/api/src/booth/booth.test.ts",
+    "test": "vitest run apps/api/src/booth/booth.test.ts scripts/verify-ai.test.ts",
     "test:interfaces": "vitest run apps/api/src/booth/booth.test.ts -t 正式三接口与任务事实",
-    "test:ai": "vitest run apps/api/src/booth/booth.test.ts -t OpenAI",
+    "test:ai": "vitest run apps/api/src/booth/booth.test.ts -t \"OpenAI|双供应商\"",
+    "verify:ai": "node --env-file-if-exists=.env --import tsx scripts/verify-ai.ts",
     "test:browser": "node scripts/booth-acceptance.cjs",
-    "test:booth:browser": "node scripts/booth-acceptance.cjs"
+    "test:booth:browser": "node scripts/booth-acceptance.cjs",
+    "verify:relay": "node scripts/verify-relay.cjs"
   },
   "devDependencies": {
     "@types/node": "24.13.6",

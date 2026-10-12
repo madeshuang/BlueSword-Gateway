@@ -4,12 +4,17 @@ import type { BoothChatMessage } from "@bluesword/contracts";
 import { ApplicationStorage } from "../storage.js";
 import type { BoothConfig } from "./config.js";
 import { BoothError, BoothService } from "./service.js";
+import { DeepSeekBoothAssistant } from "./deepseek.js";
 import { OpenAIBoothAssistant } from "./openai.js";
 
-export function createBoothApplication(config: BoothConfig, options: { transport?: typeof fetch; assistant?: OpenAIBoothAssistant } = {}) {
+import type { AiCallObserver } from "./advice.js";
+
+export function createBoothApplication(config: BoothConfig, options: { transport?: typeof fetch; assistantTransport?: typeof fetch; onAiCall?: AiCallObserver; assistant?: Pick<OpenAIBoothAssistant, "advise"> } = {}) {
   const storage = new ApplicationStorage(config.databasePath);
   const service = new BoothService(storage, config, options.transport);
-  const assistant = options.assistant ?? new OpenAIBoothAssistant(config);
+  const assistant = options.assistant ?? (config.aiProvider === "deepseek"
+    ? new DeepSeekBoothAssistant(config,options.assistantTransport,options.onAiCall)
+    : new OpenAIBoothAssistant(config,options.assistantTransport,options.onAiCall));
   const streams = new Set<ServerResponse>();
   const work = new Set<Promise<unknown>>();
   let closing = false, aiBusy = false;

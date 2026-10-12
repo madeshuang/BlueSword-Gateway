@@ -19,13 +19,27 @@ export class BoothService {
     const task = id ? this.storage.get<BoothTask>("booth_tasks", id) : undefined;
     return task && blocks(task) ? task : null;
   }
+  private dispatchBlockReason(): string | null {
+    if (!this.config.dispatchUrl) return "机器人连接尚未配置，暂不能提交任务";
+    if (this.config.mode === "http" && !this.config.catalogConfirmed) return "现场物品位置尚未确认，暂不能提交任务";
+    return null;
+  }
   snapshot(): BoothSnapshot {
+    const active = this.active();
+    const elapsedMs = active ? Math.max(0,Date.now()-Date.parse(active.createdAt)) : 0;
+    const waiting = active && ["submitting","executing","uncertain"].includes(active.status)
+      ? { taskId: active.id, elapsedMs, remindAfterMs: this.config.taskReminderMs, overdue: elapsedMs >= this.config.taskReminderMs } : null;
+    const reason = this.dispatchBlockReason();
     return {
-      products: this.config.products, active: this.active(),
+      dispatch: { ready: reason === null, reason },
+      products: this.config.products, active, waiting,
       tasks: this.storage.list<BoothTask>("booth_tasks").sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0,12),
       alert: this.storage.get<string | null>("booth", "alert") ?? null,
       mode: this.config.mode, catalogConfirmed: this.config.catalogConfirmed,
-      ai: { provider: "OpenAI", model: this.config.openaiModel, configured: !!this.config.openaiKey },
+      operator: { configured: !!this.config.operatorToken },
+      ai: this.config.aiProvider === "deepseek"
+        ? { provider: "DeepSeek", model: this.config.deepseekModel, configured: !!this.config.deepseekKey }
+        : { provider: "OpenAI", model: this.config.openaiModel, configured: !!this.config.openaiKey },
     };
   }
   subscribe(listener: () => void): () => void {
@@ -48,8 +62,8 @@ export class BoothService {
         db.exec("COMMIT"); return prior;
       }
       if (this.active() || this.storage.get("booth", "alert")) throw new BoothError("当前任务尚未结束，请等待或联系工作人员",409);
-      if (!this.config.dispatchUrl) throw new BoothError("机器人连接尚未配置，暂不能提交任务",503);
-      if (this.config.mode === "http" && !this.config.catalogConfirmed) throw new BoothError("现场物品位置尚未确认，暂不能提交任务",503);
+      const reason = this.dispatchBlockReason();
+      if (reason) throw new BoothError(reason,503);
       const now = new Date().toISOString();
       task = { id: randomUUID(), requestId, productId: product.id, command, status: "submitting", createdAt: now, updatedAt: now, message: "正在等待机器人受理" };
       this.storage.set("booth_tasks", task.id, task);
@@ -58,15 +72,20 @@ export class BoothService {
       db.exec("COMMIT");
     } catch (error) { db.exec("ROLLBACK"); throw error; }
     this.publish();
+    const started = performance.now();
+    let upstreamStatus: number | undefined;
     try {
       const response = await this.transport(this.config.dispatchUrl!, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(command), signal: AbortSignal.timeout(this.config.robotTimeoutMs),
         redirect: "error",
       });
+      upstreamStatus = response.status;
       if (!response.ok) throw new Error("机器人接口未返回成功的HTTP响应");
       const receipt = await response.json() as { success?: unknown; data?: unknown };
       if (!receipt || typeof receipt.success !== "boolean") throw new Error("机器人受理响应格式不明");
+      console.info(JSON.stringify({ event: "robot_receipt", taskId: task.id, requestId: task.requestId, upstreamStatus,
+        accepted: receipt.success, durationMs: Math.round(performance.now() - started) }));
       const current = this.storage.get<BoothTask>("booth_tasks", task.id)!;
       // An early callback is stronger evidence than the delayed acceptance response.
       if (current.status === "submitting") {
@@ -75,21 +94,44 @@ export class BoothService {
           typeof receipt.data === "string" ? receipt.data.slice(0,1000) : "机器人未受理本次任务");
       }
     } catch {
+      console.warn(JSON.stringify({ event: "robot_receipt_failed", taskId: task.id, requestId: task.requestId, upstreamStatus,
+        errorCategory: "dispatch_result_unconfirmed", durationMs: Math.round(performance.now() - started) }));
       const current = this.storage.get<BoothTask>("booth_tasks", task.id)!;
       if (current.status === "submitting") this.update(current, "uncertain", "暂未确认机器人是否受理，请工作人员核对；系统不会自动重发");
     }
     return this.storage.get<BoothTask>("booth_tasks", task.id)!;
   }
   finished(): void {
-    const task = this.active();
-    this.audit("finished", { activeId: task?.id ?? null });
-    if (task) this.update(task, "succeeded", "取物任务已完成，请在交付处领取");
+    this.receiveCallback("finished", "取物任务已完成，请在交付处领取");
   }
   error(message: string): void {
-    const task = this.active();
-    this.audit("error", { activeId: task?.id ?? null, message });
-    if (task) this.update(task, "fault", message);
-    else { this.storage.set("booth", "alert", message); this.publish(); }
+    this.receiveCallback("error", message);
+  }
+  private receiveCallback(kind: "finished" | "error", message: string): void {
+    const db = this.storage.db, callbackId = randomUUID(), started = performance.now();
+    let task: BoothTask | null = null;
+    const status = kind === "finished" ? "succeeded" : "fault";
+    try {
+      db.exec("BEGIN IMMEDIATE");
+      task = this.active();
+      this.storage.set("booth_callbacks", callbackId, {
+        kind, at: new Date().toISOString(), payload: { activeId: task?.id ?? null, ...(kind === "error" ? { message } : {}) },
+      });
+      if (task) this.storage.set("booth_tasks", task.id, {
+        ...task, status, message, updatedAt: new Date().toISOString(),
+      });
+      else if (kind === "error") this.storage.set("booth", "alert", message);
+      db.exec("COMMIT");
+    } catch (error) {
+      if (db.isTransaction) db.exec("ROLLBACK");
+      console.error(JSON.stringify({ event: "callback_failed", callbackId, kind, taskId: task?.id ?? null,
+        requestId: task?.requestId ?? null, errorCategory: "storage", durationMs: Math.round(performance.now() - started) }));
+      throw error;
+    }
+    console.info(JSON.stringify({ event: "callback_committed", callbackId, kind, taskId: task?.id ?? null,
+      requestId: task?.requestId ?? null, from: task?.status ?? null, to: task ? status : kind === "error" ? "alert" : null,
+      durationMs: Math.round(performance.now() - started) }));
+    if (task || kind === "error") this.publish();
   }
   resolve(confirmed: unknown): void {
     if (confirmed !== "已核对机器人停止") throw new BoothError("请先完成现场核对");
@@ -101,6 +143,7 @@ export class BoothService {
   }
   private update(task: BoothTask, status: BoothTask["status"], message: string): void {
     this.storage.set("booth_tasks", task.id, { ...task, status, message, updatedAt: new Date().toISOString() });
+    console.info(JSON.stringify({ event: "task_transition", taskId: task.id, requestId: task.requestId, from: task.status, to: status }));
     this.publish();
   }
   private audit(kind: string, payload: unknown): void {

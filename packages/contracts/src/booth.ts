@@ -13,7 +13,12 @@ export interface BoothTask {
 export interface BoothSnapshot {
   products: BoothProduct[]; tasks: BoothTask[]; active: BoothTask | null; alert: string | null;
   mode: "http" | "simulator"; catalogConfirmed: boolean;
-  ai: { provider: "OpenAI"; model: string; configured: boolean };
+  /** Configuration readiness only; does not assert robot reachability or task availability. */
+  dispatch: { ready: boolean; reason: string | null };
+  waiting: { taskId: string; elapsedMs: number; remindAfterMs: number; overdue: boolean } | null;
+  ai: { provider: "OpenAI" | "DeepSeek"; model: string; configured: boolean };
+  /** Exposes availability only, never the staff credential. */
+  operator: { configured: boolean };
 }
 export interface BoothAdvice { reply: string; selection: { productId: string; count: number } | null }
 export interface BoothChatMessage { role: "user" | "assistant"; content: string }
