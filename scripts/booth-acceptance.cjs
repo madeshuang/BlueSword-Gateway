@@ -41,6 +41,19 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   const chatRequests=[];page.on('request',request=>{if(request.url().endsWith('/api/booth/chat'))chatRequests.push(request.postDataJSON());});
   const notices=page.getByLabel('任务状态通知');
+  // Inspect rendered styles and accessible icons, rather than class names alone.
+  async function assertStatusAppearance(panel,notice,color,icon){
+    const backgrounds={'等待选择':'rgb(240, 242, 244)','等待受理':'rgb(240, 242, 244)','正在执行':'rgb(238, 244, 250)','取物完成':'rgb(238, 245, 236)','未受理':'rgb(255, 246, 231)','需要核对':'rgb(255, 246, 231)','需要协助':'rgb(252, 240, 238)','工作人员处理':'rgb(240, 242, 244)'};
+    const status=panel.locator('.task-status');
+    assert.equal(await status.evaluate(el=>getComputedStyle(el).color),color,'任务卡应使用对应状态颜色');
+    assert.equal(await panel.evaluate(el=>getComputedStyle(el).backgroundColor),backgrounds[icon],'任务卡背景也应符合状态语义');
+    await panel.getByRole('img',{name:icon,exact:true}).waitFor();
+    if(notice){
+      assert.equal(await notice.evaluate(el=>getComputedStyle(el).color),color,'对话通知与任务卡应使用相同状态颜色');
+      assert.equal(await notice.evaluate(el=>getComputedStyle(el).backgroundColor),backgrounds[icon],'对话通知背景应与任务卡一致');
+      await notice.getByRole('img',{name:icon,exact:true}).waitFor();
+    }
+  }
   // P9: missing dispatch URL must be visible before the visitor submits.
   await stop(api);api=launch(['--import','tsx','apps/api/src/booth/index.ts'],{...env,ROBOT_DISPATCH_URL:'',BOOTH_OPERATOR_TOKEN:''});await ready(apiUrl+'/api/health',api);
   await page.goto(webUrl);await page.getByRole('textbox',{name:'告诉助手你的需求'}).waitFor();
@@ -59,23 +72,27 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
   await stop(api);api=launch(['--import','tsx','apps/api/src/booth/index.ts'],env);await ready(apiUrl+'/api/health',api);
   await page.reload();await page.getByRole('textbox',{name:'告诉助手你的需求'}).waitFor();
   assert.equal(await page.getByRole('textbox',{name:'告诉助手你的需求'}).isDisabled(),true);
+  await assertStatusAppearance(page.locator('.task-panel'),null,'rgb(82, 96, 109)','等待选择');
   await page.screenshot({path:join(output,'desktop-initial.png'),fullPage:true});
   await page.getByRole('button',{name:'选择矿泉水',exact:true}).click();
   await page.getByRole('button',{name:'增加数量',exact:true}).click();
   assert.equal(await page.getByLabel('已选数量').innerText(),'2');
   mode='receipt-pending';await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.submitting').waitFor();
   assert.equal(await notices.count(),0,'点击确认而未取得受理回执时不能播报受理或完成');
+  await assertStatusAppearance(page.locator('.task-panel'),null,'rgb(82, 96, 109)','等待受理');
   await until(()=>typeof releaseReceipt==='function');mode='success';releaseReceipt();await page.locator('.task-panel.executing').waitFor();
   assert.equal(requests[0].count,2);
-  await notices.filter({hasText:'任务已受理，正在等待执行结果'}).waitFor();
-  assert.equal(await notices.filter({hasText:'取物任务已完成'}).count(),0,'受理不能显示完成通知');
+  await notices.filter({hasText:'请求已受理，请等待取物结果'}).waitFor();
+  await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(49, 95, 134)','正在执行');
+  assert.equal(await notices.filter({hasText:'取物已完成'}).count(),0,'受理不能显示完成通知');
   await page.locator('.task-panel.succeeded').waitFor();await page.screenshot({path:join(output,'desktop-success.png'),fullPage:true});
-  await notices.filter({hasText:'取物任务已完成，可以开始下一次选择'}).waitFor();
-  assert.equal(await notices.filter({hasText:'任务已受理'}).count(),1);
-  assert.equal(await notices.filter({hasText:'取物任务已完成'}).count(),1);
+  await notices.filter({hasText:'取物已完成，请到交付处领取'}).waitFor();
+  await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(63, 107, 67)','取物完成');
+  assert.equal(await notices.filter({hasText:'请求已受理'}).count(),1);
+  assert.equal(await notices.filter({hasText:'取物已完成'}).count(),1);
   assert.equal(chatRequests.length,0,'任务通知不得触发模型请求');
   await fetch(apiUrl+'/api/task/finished',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({result:'success'})});
-  assert.equal(await notices.filter({hasText:'取物任务已完成'}).count(),1,'重复完成回调不重播通知');
+  assert.equal(await notices.filter({hasText:'取物已完成'}).count(),1,'重复完成回调不重播通知');
   await page.setViewportSize({width:390,height:844});await pause(100);
   assert.equal(await page.getByRole('log',{name:'访客对话'}).evaluate(el=>Math.abs(el.scrollHeight-el.clientHeight-el.scrollTop)<2),true,'已有完成通知缩窗换行后仍须停在最新消息');
   await page.setViewportSize({width:1440,height:900});
@@ -89,18 +106,41 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
   }finally{await freshVisitor.close();}
 
   mode='rejected';await page.getByRole('button',{name:'选择纪念品',exact:true}).click();await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.rejected').waitFor();
+  await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(133, 98, 40)','未受理');
+  assert.match(await page.locator('.task-panel').innerText(),/这次取物暂未受理/);
+  assert.doesNotMatch(await page.locator('.task-panel').innerText(),/测试拒绝|取物已完成/);
+  await page.getByRole('link',{name:'工作人员入口'}).click();
+  await page.getByRole('dialog').getByText('测试拒绝',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'关闭工作人员入口'}).click();
   mode='error';await page.getByRole('button',{name:'选择小面包',exact:true}).click();await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.fault').waitFor();
-  await notices.filter({hasText:'任务发生故障'}).waitFor();
+  await notices.filter({hasText:'这次取物需要工作人员协助'}).waitFor();
+  await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(158, 69, 62)','需要协助');
   await fetch(apiUrl+'/api/task/error',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'重复故障：仍需核对'})});
-  await page.locator('.task-panel').getByText('重复故障：仍需核对',{exact:true}).waitFor();
-  assert.equal(await notices.filter({hasText:'任务发生故障'}).count(),1,'相同任务故障状态重复推送不重播');
-  assert.equal(await notices.filter({hasText:'取物任务已完成'}).count(),1,'故障不能冒充完成');
+  await until(async()=>(await (await fetch(apiUrl+'/api/booth')).json()).active.message==='重复故障：仍需核对');
+  assert.equal(await page.getByRole('main').getByText('重复故障：仍需核对',{exact:true}).count(),0,'异常原文只在工作人员入口展示');
+  assert.equal(await page.locator('.task-panel').getByText('测试故障：机械臂无法自动恢复',{exact:true}).count(),0);
+  assert.match(await page.locator('.task-panel').innerText(),/是否结束尚未确认/);
+  assert.match(await notices.last().innerText(),/尚未确认机器人是否停止/);
+  await page.getByRole('link',{name:'工作人员入口'}).click();
+  await page.getByRole('dialog').getByText('重复故障：仍需核对',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'关闭工作人员入口'}).click();
+  assert.equal(await notices.filter({hasText:'这次取物需要工作人员协助'}).count(),1,'相同任务故障状态重复推送不重播');
+  assert.equal(await notices.filter({hasText:'取物已完成'}).count(),1,'故障不能冒充完成');
   await page.screenshot({path:join(output,'desktop-fault.png'),fullPage:true});
   await page.getByRole('link',{name:'工作人员入口'}).click();await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox').check();await page.getByRole('button',{name:'解除本地占用'}).click();await page.locator('.task-panel.resolved').waitFor();await page.getByRole('button',{name:'关闭工作人员入口'}).click();
-  await notices.filter({hasText:'工作人员已解除本地占用；这不代表机器人已停止'}).waitFor();
+  await notices.filter({hasText:'本次请求已由工作人员处理，领取情况请向现场工作人员确认'}).waitFor();
+  assert.match(await page.locator('.task-panel').innerText(),/领取情况请向现场工作人员确认/);
+  assert.doesNotMatch(await page.locator('.task-panel').innerText(),/取物已完成|占用|本地/);
+  await page.getByRole('link',{name:'工作人员入口'}).click();
+  await page.getByRole('dialog').getByText('工作人员已现场核对并解除本地占用',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'关闭工作人员入口'}).click();
+  await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(82, 96, 109)','工作人员处理');
   mode='uncertain';await page.getByRole('button',{name:'选择矿泉水',exact:true}).click();await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.uncertain').waitFor();
-  await notices.filter({hasText:'尚未确认机器人是否受理'}).waitFor();
-  assert.equal(await notices.filter({hasText:'取物任务已完成'}).count(),1,'受理不明不能冒充完成');
+  await notices.filter({hasText:'这次请求是否受理、是否结束尚未确认'}).waitFor();
+  await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(133, 98, 40)','需要核对');
+  assert.match(await page.locator('.task-panel').innerText(),/是否结束尚未确认/);
+  assert.doesNotMatch(await page.locator('.task-panel').innerText(),/占用|本地/);
+  assert.equal(await notices.filter({hasText:'取物已完成'}).count(),1,'受理不明不能冒充完成');
   assert.equal(chatRequests.length,0,'故障、收尾与受理不明也不得调用模型');
   await page.getByRole('link',{name:'工作人员入口'}).click();await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox').check();await page.getByRole('button',{name:'解除本地占用'}).click();await page.locator('.task-panel.resolved').waitFor();await page.getByRole('button',{name:'关闭工作人员入口'}).click();
 
@@ -114,7 +154,9 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
   await otherContext.close();
   const taskId=(await (await fetch(apiUrl+'/api/booth')).json()).active.id;
   await page.getByRole('alert').filter({hasText:'等待时间较长'}).waitFor({timeout:5000});
-  assert.equal(await notices.filter({hasText:'任务已受理'}).count(),3,'等待提醒不能新增任务通知');
+  assert.match(await page.locator('.waiting-reminder').innerText(),/是否结束尚未确认/);
+  assert.doesNotMatch(await page.locator('.waiting-reminder').innerText(),/占用|本地/);
+  assert.equal(await notices.filter({hasText:'请求已受理'}).count(),3,'等待提醒不能新增任务通知');
   assert.equal((await (await fetch(apiUrl+'/api/booth')).json()).active.status,'executing');
   assert.equal(requests.length,before+1);
   await page.getByRole('button',{name:'联系工作人员核对',exact:true}).click();
@@ -184,7 +226,7 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
     assert(elapsed<60,'浏览器快1小时不能显示等待1小时');
   });
   assert.equal(await page.getByRole('button',{name:'选择纪念品',exact:true}).getAttribute('aria-pressed'),'true');
-  assert.equal(await notices.filter({hasText:'任务已受理'}).count(),1,'迟到AI回复不得移除任务通知');
+  assert.equal(await notices.filter({hasText:'请求已受理'}).count(),1,'迟到AI回复不得移除任务通知');
   const activeBeforeReset=(await (await fetch(apiUrl+'/api/booth')).json()).active;
   await page.getByRole('button',{name:'开始新体验',exact:true}).click();
   assert.equal((await (await fetch(apiUrl+'/api/booth')).json()).active.id,activeBeforeReset.id);
@@ -195,21 +237,28 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
     await fetch(apiUrl+'/api/task/finished',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({result:'success'})});await page.locator('.task-panel.succeeded').waitFor();
   });
   assert.equal(await page.getByRole('button',{name:'选择纪念品',exact:true}).getAttribute('aria-pressed'),'true');
-  assert.equal(await notices.filter({hasText:'取物任务已完成'}).count(),1,'新体验中的实际完成通知不能被迟到AI回复覆盖');
+  assert.equal(await notices.filter({hasText:'取物已完成'}).count(),1,'新体验中的实际完成通知不能被迟到AI回复覆盖');
   await page.unroute('**/api/booth/chat');await page.route('**/api/booth/chat',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({data:'测试：助手暂不可用'})}));
   await input.fill('再帮我看看');await page.getByRole('button',{name:'发送需求'}).click();await page.getByRole('alert').filter({hasText:'助手暂不可用'}).waitFor();assert.equal(await input.inputValue(),'再帮我看看');
   assert.equal(chatRequests.length,10,'只有十次显式聊天操作产生请求，状态变化没有额外请求');
   for(const {messages} of chatRequests){
     assert(messages.every(message=>['user','assistant'].includes(message.role)),'系统事件不得进入AI请求');
-    assert(messages.every(message=>!/(任务已受理，正在等待执行结果|取物任务已完成，可以开始下一次选择|任务发生故障|尚未确认机器人是否受理|工作人员已解除本地占用)/.test(message.content)),'固定通知文本不得消耗模型token');
+    assert(messages.every(message=>!/(请求已受理，请等待取物结果|取物已完成，请到交付处领取|这次取物需要工作人员协助|这次请求是否受理、是否结束尚未确认|本次请求已由工作人员处理)/.test(message.content)),'固定通知文本不得消耗模型token');
   }
 
   await fetch(apiUrl+'/api/task/error',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'测试全局告警'})});
-  await notices.filter({hasText:'现场需要人工核对'}).waitFor();
+  await notices.filter({hasText:'取物服务暂需工作人员核对'}).waitFor();
+  await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(158, 69, 62)','需要协助');
+  assert.equal(await page.getByRole('main').getByText('测试全局告警',{exact:true}).count(),0,'全局告警原文不出现在访客主界面');
+  assert.match(await page.locator('.task-panel').innerText(),/尚未确认机器人是否停止/);
+  await page.getByRole('link',{name:'工作人员入口'}).click();
+  await page.getByRole('dialog').getByText('测试全局告警',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'关闭工作人员入口'}).click();
+  assert.equal(await page.locator('.task-panel').getByRole('img',{name:'取物完成',exact:true}).count(),0,'全局告警不能保留上一单完成图标');
   await fetch(apiUrl+'/api/task/error',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'测试全局告警'})});
   await fetch(apiUrl+'/api/booth/operator/resolve',{method:'POST',headers:{'Content-Type':'application/json','X-Operator-Token':'browser-test-operator'},body:JSON.stringify({confirmation:'已核对机器人停止'})});
-  await page.locator('.task-panel').getByText('取物任务已完成，请在交付处领取',{exact:true}).waitFor();
-  assert.equal(await notices.filter({hasText:'现场需要人工核对'}).count(),1,'重复全局告警不刷屏');
+  await page.locator('.task-panel').getByText('取物已完成，请到交付处领取。',{exact:true}).waitFor();
+  assert.equal(await notices.filter({hasText:'取物服务暂需工作人员核对'}).count(),1,'重复全局告警不刷屏');
   assert.equal(chatRequests.length,10);
 
   // A delayed GET must not roll a committed completion back to executing.
@@ -246,10 +295,10 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
     mode='silent';
     const dispatched=await fetch(apiUrl+'/api/booth/requests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requestId:'sse-reconnect-notification',productId:'water',count:1})});assert.equal(dispatched.status,200);
     releaseStream();
-    await reconnectPage.getByLabel('任务状态通知').filter({hasText:'任务已受理'}).waitFor();
+    await reconnectPage.getByLabel('任务状态通知').filter({hasText:'请求已受理'}).waitFor();
     await until(()=>sseRequests>=2);
     await reconnectPage.getByRole('link',{name:'工作人员入口'}).click();await reconnectPage.getByText('网关状态同步正常',{exact:false}).waitFor();
-    assert.equal(await reconnectPage.getByLabel('任务状态通知').filter({hasText:'任务已受理'}).count(),1,'原生SSE重连的重复快照不能重播受理通知');
+    assert.equal(await reconnectPage.getByLabel('任务状态通知').filter({hasText:'请求已受理'}).count(),1,'原生SSE重连的重复快照不能重播受理通知');
     assert.equal(reconnectChatRequests,0);
     await fetch(apiUrl+'/api/task/finished',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({result:'success'})});
     await page.locator('.task-panel.succeeded').waitFor();
@@ -405,6 +454,7 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
     taskNotifications:{actualAcceptanceAndCompletion:true,duplicateCallbackAndSnapshotDeduplicated:true,nativeSseReconnectDeduplicated:true,staleHttpSnapshotIgnored:true,experienceIsolation:true,excludedFromModelHistory:true,automaticModelRequests:0},
     catalogLayout:{defaultExpanded:true,desktopConfirmationInViewport:true,largeCatalogIndependentScroll:true,mouseAndKeyboardScroll:true,manualCollapse:true},
     visitorPresentation:{idleWithoutHistoricalTask:true,historyPreserved:true,fixedDialogueHeight:true,latestMessageVisible:true,mouseKeyboardAndTouchScroll:true,conversationFixtures:17,realAiCalls:0},
+    statusPresentation:{stateColorsAndIcons:true,globalAlertOverridesCompletion:true,visitorCopyPreservesUncertainty:true,rawDetailsInOperatorDialog:true},
     flows:['任务通知等待实际受理及完成','故障/受理不明/人工处理/全局告警通知','任务通知去重与SSE重连','任务通知不进入AI历史且零额外请求','紧凑任务卡、目录与确认自适应排列及插画保留','顶部精简与工作人员凭据缺失提示','配置缺口提前提示与零发单','受理后等待回调','完成','拒绝','故障与现场释放','反馈丢失零重发','跨浏览器锁','独立进程重启','GPT建议界面（可控响应）','GPT错误保留输入','迟到AI不覆盖改选/数量/已确认发单','新体验隔离旧回复/错误并保留任务','跨浏览器任务变化保护','设备时钟快慢1小时仍正确提醒','等待提醒与重连保持占用','执行中人工入口不取消','目录默认展开与手动折叠','分类'],realOpenAICall:false,artifacts:output};
   writeFileSync(join(output,'api.log'),api.logs);
   writeFileSync(join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));

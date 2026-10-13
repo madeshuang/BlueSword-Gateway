@@ -10,6 +10,10 @@
 
 ```powershell
 Set-Location 'E:\Sevenova\BlueSword-Gateway'
+$pnpmUserPath = Join-Path $env:LOCALAPPDATA 'pnpm-global'
+$env:Path = $pnpmUserPath + ';' + $env:Path
+node --version
+pnpm.cmd --version
 Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
     Where-Object { $_.LocalPort -in 4100,4200,5173 } |
     Select-Object LocalAddress,LocalPort,OwningProcess,
@@ -18,7 +22,23 @@ Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
 
 没有输出表示这三个端口目前没有监听。若有输出，先回到原启动终端确认服务用途：已有本项目演示可直接使用；需要重启时先在原终端按 Ctrl+C。不要直接结束不明进程，也不要另开一组 API 共用演示数据库。
 
-首次使用需有 Node.js >=24.13.0、pnpm 11.25.0 和已安装依赖；缺少依赖时执行 `pnpm install --frozen-lockfile`，不升级锁文件。
+以上 PATH 设置采用本机已由用户安装成功的 pnpm 用户目录，每次新开终端均执行，无需管理员权限或永久修改环境变量。Node.js 应至少为 24.13.0，pnpm 应输出 `11.25.0`。若版本不符，先处理工具版本，再启动；缺少依赖时执行 `pnpm.cmd install --frozen-lockfile`，不升级锁文件。
+
+先执行 `node --version` 和 `pnpm.cmd --version` 核对工具。若 PowerShell 找不到 pnpm，可为日常手动启动独立安装项目指定版本，不依赖 Codex 的缓存目录。下面采用 npm 全局安装并显式固定 `11.25.0`，是本项目的安装建议。[pnpm 当前官方安装页](https://pnpm.io/installation) 的 npm 入口为 `npx get-pnpm`，页面说明未指定版本的安装命令采用 pnpm 12；本项目保持 `package.json` 中固定的 pnpm 11.25.0，不直接采用安装最新版的命令。
+
+```powershell
+$pnpmUserPath = Join-Path $env:LOCALAPPDATA 'pnpm-global'
+npm.cmd install --global --prefix "$pnpmUserPath" pnpm@11.25.0
+```
+
+先等待安装结束；若报错，停止并核对错误，不继续后面的命令。安装成功后，在同一个终端执行：
+
+```powershell
+$env:Path = $pnpmUserPath + ';' + $env:Path
+pnpm.cmd --version
+```
+
+最后应输出 `11.25.0`。安装只需进行一次，日常启动不重复安装。`--prefix` 指定本次安装位置，不修改 npm 默认全局目录，避免原全局目录权限不足导致的 `EPERM`。使用 `.cmd` 入口可以避免 PowerShell 脚本执行策略拦截同名 `.ps1` 文件；上述 PATH 调整只影响当前终端。工具与项目可以位于不同盘，无需安装到仓库内；不要为解决命令查找问题升级项目依赖或锁文件。
 
 ### 2. 选择 DeepSeek，启动三个服务
 
@@ -28,11 +48,18 @@ Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
 Get-ChildItem Env: | Where-Object { $_.Name -match '^(OPENAI_|DEEPSEEK_|NODE_OPTIONS$)' } |
     ForEach-Object { Remove-Item -LiteralPath ('Env:' + $_.Name) }
 $env:BOOTH_AI_PROVIDER = 'deepseek'
-node --input-type=module -e 'import {readFileSync} from "node:fs"; import {parseEnv} from "node:util"; const e=parseEnv(readFileSync(".env","utf8")); console.log(e.DEEPSEEK_API_KEY?.trim() ? "DeepSeek 凭据存在且可读取" : "DeepSeek 凭据缺失");'
-pnpm dev:demo
+@'
+import {readFileSync} from "node:fs";
+import {parseEnv} from "node:util";
+const e = parseEnv(readFileSync(".env", "utf8"));
+console.log(e.DEEPSEEK_API_KEY?.trim() ? "KEY_PRESENT" : "KEY_MISSING");
+'@ | node --input-type=module
+pnpm.cmd dev:demo
 ```
 
-凭据检查只输出结果，不显示密钥；读文件失败时先核对文件权限。启动输出应分别显示 API、模拟器和 Vite 已监听。当前默认地址如下；若本机配置改过端口，以启动输出为准。
+凭据检查只输出英文结果，避免终端编码导致中文显示为问号；不显示密钥。`KEY_PRESENT` 表示 `.env` 中存在非空 DeepSeek 密钥，`KEY_MISSING` 表示缺失或为空；存在不代表密钥有效或真实调用成功。出现 `KEY_MISSING` 时先补齐本地配置，再启动服务；读文件失败时先核对文件权限。以上多行代码通过标准输入交给 Node，避免 Windows PowerShell 5.1 或旧式参数传递模式在 `node -e` 中丢失双引号。复制时保留 `@'` 和 `'@` 各自所在的行，并让结束标记 `'@` 位于行首。
+
+若旧命令报 `SyntaxError: Unexpected identifier 'node'`，表示检查代码的引号在传递时丢失，尚未读取 `.env`，不能据此判断凭据缺失。`pnpm dev:demo` 会自行加载 `.env`，不依赖这条检查命令的结果；已经启动时，先核对启动输出，无需重复启动。启动输出应分别显示 API、模拟器和 Vite 已监听。当前默认地址如下；若本机配置改过端口，以启动输出为准。
 
 | 地址 | 用途 |
 | --- | --- |
@@ -62,18 +89,69 @@ Set-Location 'E:\Sevenova\BlueSword-Gateway'
 Get-ChildItem Env: | Where-Object { $_.Name -match '^(OPENAI_|DEEPSEEK_|NODE_OPTIONS$)' } |
     ForEach-Object { Remove-Item -LiteralPath ('Env:' + $_.Name) }
 $env:BOOTH_AI_PROVIDER = 'openai'
-node --env-file=.env.relay --import tsx --input-type=module -e 'for (const n of Object.keys(process.env)) { if (n.startsWith("DEEPSEEK_")) delete process.env[n]; } process.argv.push("--simulator"); await import("./apps/api/src/booth/index.ts");'
+@'
+for (const n of Object.keys(process.env)) {
+    if (n.startsWith("DEEPSEEK_")) delete process.env[n];
+}
+process.argv.push("--simulator");
+await import("./apps/api/src/booth/index.ts");
+'@ | node --env-file=.env.relay --import tsx --input-type=module
 ```
 
-模拟器终端执行 `pnpm dev:robot`；前端终端执行 `pnpm --filter @bluesword/web dev`。停止时在三个终端分别按 Ctrl+C，并检查端口。不要再同时启动 `pnpm dev:demo`。
+第二个 PowerShell 终端（模拟器）：
+
+```powershell
+Set-Location 'E:\Sevenova\BlueSword-Gateway'
+$pnpmUserPath = Join-Path $env:LOCALAPPDATA 'pnpm-global'
+$env:Path = $pnpmUserPath + ';' + $env:Path
+pnpm.cmd dev:robot
+```
+
+第三个 PowerShell 终端（前端）：
+
+```powershell
+Set-Location 'E:\Sevenova\BlueSword-Gateway'
+$pnpmUserPath = Join-Path $env:LOCALAPPDATA 'pnpm-global'
+$env:Path = $pnpmUserPath + ';' + $env:Path
+pnpm.cmd --filter @bluesword/web dev
+```
+
+三个终端分别运行一组命令，不能把三组依次粘贴到同一个终端：服务启动后会持续占用该终端，未停止前无法继续输入下一组。API 终端直接使用 Node，不需要 pnpm PATH；另外两个终端各自设置 PATH，因为当前终端的环境变量修改不会传递给独立新开的终端。三项服务分别显示监听 4100、4200、5173 后，在浏览器打开 `http://127.0.0.1:5173/`。若配置改过端口，以启动输出为准。
+
+停止时在三个终端分别按 Ctrl+C，然后在任意一个已停止服务的终端执行第 1 步的端口检查。不要再同时启动 `pnpm.cmd dev:demo`。
 
 Node 优先使用已有进程环境，所以切换前要清除旧的供应商变量。`.env.relay` 自身也包含 DeepSeek 字段，以上命令在读取它之后移除这些字段，再加载 API；OpenAI 地址、模型和密钥只采用该文件中的配置。配置在 API 启动时读取，必须重启才生效；前端不接触密钥。
+
+中转请求若日志显示 `category:"timeout"`、耗时约 20000 毫秒，表示达到我方默认 20 秒请求期限；`upstreamStatus:null` 表示超时前没有取得 HTTP 响应状态，不能据此区分本机网络、中转排队或中转上游延迟，也不能断定必须使用代理。先保留错误记录，不把偶尔成功当作稳定性验证。
+
+仅在需要比较代理线路、且已确认本机代理提供 HTTP 或混合代理端口时，才在 API 终端启动前加入以下可选设置。这里的 7897 是示例，须以代理软件实际配置为准；端口监听不代表代理功能或线路已验证：
+
+```powershell
+Get-NetTCPConnection -State Listen -LocalPort 7897 -ErrorAction SilentlyContinue
+$env:HTTP_PROXY = 'http://127.0.0.1:7897'
+$env:HTTPS_PROXY = 'http://127.0.0.1:7897'
+$env:NO_PROXY = 'localhost,127.0.0.1,::1'
+```
+
+若端口检查没有输出，先核对代理软件，不继续采用该地址。项目使用 Node 内置 `fetch`；仅设置 `HTTP_PROXY` / `HTTPS_PROXY` 不足以启用代理，还要把上面 API 启动命令的最后一行替换为：
+
+```powershell
+'@ | node --use-env-proxy --env-file=.env.relay --import tsx --input-type=module
+```
+
+此行必须与原来的 `@'` 多行代码一起执行，不能单独粘贴。项目要求的 Node 24.13.0 及以上支持该选项；行为依据为 [Node 代理选项文档](https://nodejs.org/api/cli.html#--use-env-proxy)。`NO_PROXY` 使本机模拟器请求绕过代理。停止 API 后，可以移除本终端的上述设置：
+
+```powershell
+Remove-Item Env:HTTP_PROXY,Env:HTTPS_PROXY,Env:NO_PROXY -ErrorAction SilentlyContinue
+```
+
+代理线路是否改善真实响应速度须另行验证；本说明没有执行新增付费请求，也没有提高默认超时时间。
 
 本机已核对的备用 API 基址为 `https://vip.auto-code.net/v1`，配置模型为 `gpt-6-luna`；这是中转配置，不是官方 OpenAI 直连或底层模型身份的独立证明。该适配器使用 Responses 接口，供应商须支持 `/responses` 及结构化输出。`.env.relay` 必须继续被 Git 忽略，并保留仅本人和系统可读取的权限。`pnpm verify:relay` 是付费验证命令，不是启动命令，不应每次启动自动执行。
 
 ### 5. 工作人员凭据由服务负责人设置
 
-当前本机没有配置 `BOOTH_OPERATOR_TOKEN`。入口仍可查看说明，但凭据输入和解除按钮被禁用；直接请求接口会返回 503“工作人员操作凭据尚未配置”。配置后仍需输入正确凭据，否则接口返回 403。不要在大屏分享凭据，不要把它写入前端、聊天或文档。
+未配置 `BOOTH_OPERATOR_TOKEN` 时，入口仍可查看说明，但凭据输入和解除按钮被禁用；直接请求接口会返回 503“工作人员操作凭据尚未配置”。配置后仍需输入正确凭据，否则接口返回 403。是否已配置以当前页面提示为准，不沿用此前本机未配置的状态。不要在大屏分享凭据，不要把它写入前端、聊天或文档。
 
 如确需演示异常收尾，由启动服务的负责人提供本地专用凭据。在 API 所在终端、启动之前输入；以下方式不把凭据写入命令历史，也不修改环境文件：
 
@@ -81,11 +159,106 @@ Node 优先使用已有进程环境，所以切换前要清除旧的供应商变
 $staffSecret = Read-Host '输入负责人提供的工作人员凭据' -AsSecureString
 $env:BOOTH_OPERATOR_TOKEN = [System.Net.NetworkCredential]::new('', $staffSecret).Password
 Remove-Variable staffSecret
-# 随后按上面的 DeepSeek 或中转方式启动；使用完并停止服务后：
-# Remove-Item Env:BOOTH_OPERATOR_TOKEN
 ```
 
 凭据只授权工作人员解除故障、受理不明或全局告警造成的本地占用。必须先核对机器人停止及物品情况并勾选确认；执行中任务继续禁止解除。解除不发停止或取消指令，也不能证明机器人已停止或不会再回调。仅配置凭据不会放开执行中解除能力。
+
+#### DeepSeek 模式：在一个服务终端设置凭据并重启
+
+以下步骤仅用于本地模拟器演示，先确认没有正在执行或尚未核对的任务。
+
+1. 如果 `pnpm.cmd dev:demo` 正在运行，在该终端按 Ctrl+C，停止 API、模拟器和前端；按第 1 步检查 4100、4200、5173 均已释放。尚未启动时无需停止。
+2. 在同一个终端执行上面的凭据输入代码。服务负责人可为本地演示设置专用凭据，并记住输入值，稍后在工作人员页面输入。
+3. 在同一个终端执行第 2 步的 DeepSeek 启动命令。清除供应商变量不会删除 `BOOTH_OPERATOR_TOKEN`；新启动的 API 会读取它。保持这个服务终端运行。
+4. 另开一个 PowerShell 作为控制窗口，按下面“模拟故障与恢复”的步骤操作。这个窗口不需要进入项目目录或设置 pnpm PATH。
+
+#### OpenAI 协议中转模式：只重启 API 终端
+
+1. 如果第 4 步的 API 正在运行，在 API 终端按 Ctrl+C，并确认 4100 端口已释放。模拟器和前端终端保持运行，无需停止。尚未启动时先设置凭据，再按第 4 步启动三个服务。
+2. 在同一个 API 终端执行上面的凭据输入代码，再执行第 4 步的 API 启动命令。凭据必须设置在启动 API 的终端，设置在前端或模拟器终端不会生效。若已选择代理线路，仍按第 4 步的可选代理方式启动。
+3. 保持三个服务终端运行，另开一个 PowerShell 作为控制窗口，按下面的步骤操作。控制窗口不需要进入项目目录或设置 pnpm PATH。
+
+两种模式都运行 API、模拟器和前端三个服务。DeepSeek 的 `dev:demo` 脚本通过一个终端同时启动它们；该脚本固定加载 `.env`，所以中转模式采用三个终端，让 API 单独加载 `.env.relay`。这是当前脚本的安排，不是中转供应商要求三个终端。每个终端的环境变量相互独立。
+
+#### 两种模式共用：模拟故障与恢复
+
+确认页面标明本地模拟器、没有活动任务，且三个服务均已启动。默认模拟器采用成功场景；正常完成后没有占用可解除，需要先制造模拟故障才能演示工作人员收尾。以下命令访问本机 HTTP 服务，与 PowerShell 当前目录无关；使用默认端口 4200，改过模拟器端口时须同步调整 URL。
+
+1. 在额外打开的控制窗口执行以下命令。服务终端全部保持运行，不按 Ctrl+C，也不暂停模拟器：
+
+   ```powershell
+   Invoke-RestMethod -Method Post `
+       -Uri 'http://127.0.0.1:4200/simulation/scenario' `
+       -ContentType 'application/json' `
+       -Body '{"scenario":"error"}'
+   ```
+
+   命令返回后应看到 `success: True`、`data: error`，并回到 PowerShell 提示符。若报连接失败或其他错误，先核对模拟器终端，不继续提交任务。
+
+2. 在访客页面手动选品并点击“确认取物”，无需发送 AI 对话。模拟器受理后约 2.5 秒发送模拟故障通知，页面应显示“需要协助”，任务仍保持占用。此时再打开工作人员入口，输入刚才设置的凭据；核对当前仅为本地模拟故障、没有真实机器人动作后，勾选“已现场核对机器人停止及物品情况”，点击“解除本地占用”。预期任务变为“工作人员已处理”，占用解除；访客看到领取情况需向工作人员确认，不会显示取物完成。等待期间处于“正在执行”时不能解除。
+
+3. 解除成功后，回到同一个控制窗口执行以下命令。无需新开窗口、设置目录或重启任何服务：
+
+   ```powershell
+   Invoke-RestMethod -Method Post `
+       -Uri 'http://127.0.0.1:4200/simulation/scenario' `
+       -ContentType 'application/json' `
+       -Body '{"scenario":"success"}'
+   ```
+
+   返回应为 `success: True`、`data: success`。它只让后续模拟任务恢复成功场景，不解除已有故障任务、不修改已经产生的结果。需要继续验证时，可再手动确认一单，等待模拟完成。
+
+4. 演示结束后，DeepSeek 模式在服务终端按 Ctrl+C；中转模式在三个服务终端分别按 Ctrl+C。核对端口已释放后，在设置凭据的终端清除凭据：
+
+   ```powershell
+   Remove-Item Env:BOOTH_OPERATOR_TOKEN -ErrorAction SilentlyContinue
+   ```
+
+以上是操作说明，不表示本次已经执行故障或解除验证。模拟任务和人工处理会写入演示数据库，保留历史记录，不通过删库清理；本地模拟结果不能作为真实机器人故障收尾的验证依据。
+
+## 录屏前界面行为与录制顺序（2026-10-12）
+
+本节描述录屏前最小调整后的当前行为；后面的历次验证记录保留为历史。任务卡和对话通知仅在完成时使用绿色及完成勾；执行中使用蓝色和加载图标，未受理、等待核对使用琥珀色及对应提示图标，需要协助和全局告警使用红色，工作人员处理使用中性色及人员图标。全局告警优先覆盖任务卡外观，不会保留上一单的绿色完成图标。等待选择和等待受理使用中性色。
+
+访客只看到状态说明。需要协助时提示“这次取物需要工作人员协助，是否结束尚未确认，请勿再次提交。当前尚未确认机器人是否停止。”；人工处理后提示“本次请求已由工作人员处理，领取情况请向现场工作人员确认。”。未受理不会显示完成，等待较长也不会自动结束任务。异常原文、任务记录原文和任务标识可在现有工作人员入口查看；该入口另显示当前助手配置，但配置存在不代表本次调用成功。入口、凭据认证、现场确认、执行中禁止解除和后端记录均沿用原实现。工作人员详情是现有弹窗的展示区域，没有新增登录后台或接口。
+
+本次针对录屏前调整实际执行 `pnpm test`（45 项、2 个文件通过）、`pnpm typecheck`、`pnpm build` 和 `pnpm test:browser`，均退出码 0。浏览器回归新增计算后的文字色、背景色、可访问图标、访客文案、工作人员原文及全局告警覆盖完成外观的断言；原有六种视口、触摸与键盘、通知去重、SSE 重连、新体验和任务保护回归继续通过。最终报告为 `.tmp/booth-acceptance-aixDQC/report.json`，使用隔离数据库及 9 次本地可控机器人请求，真实 AI 和真实机器人调用均为 0。状态颜色和新文案分别先通过失败断言复现，再完成实现；固定基线 `b4058ef7e227626a973ee3bcaddafb5514682b65` 的本轮工作区增量经 Standards、Spec 两轴只读审查，均未发现必须修复项。此前真实供应商记录未重跑，不作为本次界面验证结果；P1 及真实机器人、真实手机和现场投屏仍未验证或解决。
+
+### 启动后先执行只读检查
+
+先按前面的 DeepSeek 启动步骤运行服务；默认端口下，在另一个 PowerShell 执行以下代码。它只读取健康和快照，不发送 AI 对话或取物请求，不显示密钥。
+
+```powershell
+try {
+    $demoHealth = Invoke-RestMethod 'http://127.0.0.1:4100/api/health' -TimeoutSec 5
+    $demoState = Invoke-RestMethod 'http://127.0.0.1:5173/api/booth' -TimeoutSec 5
+    [pscustomobject]@{
+        ApiAlive = [bool]$demoHealth.ok
+        SimulatorMode = ($demoState.mode -eq 'simulator')
+        Provider = $demoState.ai.provider
+        AiConfigured = [bool]$demoState.ai.configured
+        DispatchConfigured = [bool]$demoState.dispatch.ready
+        NoActiveTask = ($null -eq $demoState.active)
+        NoAlert = [string]::IsNullOrEmpty($demoState.alert)
+        OperatorConfigured = [bool]$demoState.operator.configured
+    }
+} catch {
+    Write-Output 'PRECHECK_FAILED：请检查启动终端和服务地址'
+}
+```
+
+预期为当前选择的供应商，其余布尔项为 True；只有不录工作人员解除操作时，OperatorConfigured 可以为 False。已有任务或告警时先核对，不能删库或使用“开始新体验”解除。健康、配置标志和端口监听均不能证明真实 AI 调用成功或机器人在线；模拟器场景没有只读查询接口，正常录制前可按前面的控制命令明确设为 success。`pnpm verify:relay` 和真实对话回归均会产生真实调用，不纳入日常只读预检。修改后的常规测试和浏览器回归只需执行一次，不必每次录制前重跑。
+
+### 建议录成四个章节
+
+| 章节 | 操作顺序与输入 | 预期画面和旁白 | 真实调用及失败处理 |
+| --- | --- | --- | --- |
+| 访客对话与确认 | 先展示目录分类、折叠和展开、蔬菜礼盒数量上限；点击“开始新体验”。发送“这里有什么？”、“你是谁”、“给我矿泉水”，待数量询问后回复“两瓶”。将数量减到 1 再加回 2，亲自确认 | 同一对话连续理解上下文，澄清后选中矿泉水 × 2；确认前不发单。受理后执行中，约 2.5 秒收到模拟完成通知后才显示完成。字幕说明真实 AI 加本地模拟器，未连接现场机器人 | 四次 DeepSeek 真实请求。失败或建议不符时如实说明并手动选择，不循环重试。确认仅调用本地模拟器；受理不明时不重复提交 |
+| 手动体验与窗口适配 | 完成后开始新体验，手动选择小面包，增减数量并确认；完成后短暂缩窄浏览器再恢复 | 展示不依赖 AI 的取物流程。新体验清空本页对话、选择及已结束结果，不取消活动任务，也不删除后台历史；当前没有历史对话列表。窄窗口只证明布局适配 | 无模型调用；确认会调用模拟器。状态不明时停止下一单并核对 |
+| GPT 中转单次验证 | 无活动任务且没有 AI 请求时暂停录制，停止 DeepSeek 服务组，按第 4 步启动中转三终端方案；刷新并重做只读预检，在工作人员入口展示当前助手配置后关闭。新对话发送“请给我一瓶矿泉水”一次 | 只有本次正常回复、候选为矿泉水 × 1，且对应 ai_call 日志 outcome:succeeded、structureValidated:true 时，才称本次验证成功。不要将中转配置当成真实机器人或底层模型身份验证 | 一次真实中转请求；超时或其他失败后不重试、不临时改代理或超时。字幕说明“此前已有真实成功记录；本次调用未成功”，转手动选品并完成模拟任务，保留错误画面 |
+| 工作人员异常处理（可选） | 所有任务结束后按前文将模拟器设为 error，手动确认小面包 × 1；收到异常后打开工作人员入口查看原文。暂停录制输入凭据，核对仅为本地模拟场景后勾选并解除；最后恢复 success | 红色“需要协助”，不能继续发单；人工处理后使用中性色，不显示完成。字幕说明解除仅改变网关保护，不发送停止或取消指令 | 无模型调用。未配置凭据或认证失败时停止操作；不要绕过保护。不要使用 silent 场景录主片，执行中任务无法通过该入口解除 |
+
+“等待受理”可能很短，不为了拍到它改变模拟器延时。旁白和说明使用录屏字幕或章节标题，不在聊天框发送解释文字：单纯输入不调用 AI，按 Enter、点击发送或快捷问题会调用，已发送文字会进入当前对话。当前中转已有真实网页成功调用和历史补验记录，先前两次网页超时的根因仍未知；历史成功和本次录制成功分别表述。切换配置必须重启 API，不能同时运行两组 API 共用演示数据库；此前启动与凭据命令保持有效。
 
 ## 当前可以演示什么
 
