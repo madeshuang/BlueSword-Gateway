@@ -30,7 +30,7 @@ async function until(check){for(let i=0;i<100;i++){if(await check())return;await
 async function presentation(page){return page.evaluate(()=>{
   const style=el=>{const s=getComputedStyle(el);return {background:s.backgroundColor,color:s.color,opacity:s.opacity,filter:s.filter};};
   return {sections:['.booth-shell','.assistant-panel','.chat-messages','.chat-composer'].map(selector=>({selector,...style(document.querySelector(selector))})),
-    send:style(document.querySelector('.chat-composer button')),inputDisabled:document.querySelector('.chat-composer input').disabled,
+    send:style(document.querySelector('.chat-composer button')),inputDisabled:document.querySelector('.chat-composer textarea').disabled,
     bootScreens:document.querySelectorAll('.boot-screen').length,modals:document.querySelectorAll('.modal-backdrop').length};
 });}
 (async()=>{
@@ -47,6 +47,18 @@ async function presentation(page){return page.evaluate(()=>{
     page.on('request',r=>{if(r.url().endsWith('/api/booth/chat'))requests.push(r.postDataJSON());});
     await page.goto(webUrl);const input=page.getByRole('textbox',{name:'告诉助手你的需求'}),send=page.getByRole('button',{name:'发送需求',exact:true});
     await input.waitFor();await until(()=>input.isEnabled());
+    const emptyHeight=(await input.boundingBox()).height;
+    await input.fill('第一行\n第二行\n第三行');
+    assert((await input.boundingBox()).height>emptyHeight,'多行草稿应自动增高');
+    await input.fill(Array.from({length:30},(_,i)=>'第'+(i+1)+'行：长文本输入检查').join('\n'));
+    const capped=await input.evaluate(el=>({height:el.getBoundingClientRect().height,overflow:getComputedStyle(el).overflowY,scrollHeight:el.scrollHeight,clientHeight:el.clientHeight}));
+    assert(capped.height<=120&&capped.scrollHeight>capped.clientHeight,'长草稿应限制高度并保留内部滚动');
+    assert.equal(capped.overflow,'auto');
+    await input.focus();await page.keyboard.press('Control+End');
+    assert(await input.evaluate(el=>el.scrollTop>0),'输入框内应能滚动到末尾');
+    await page.screenshot({path:join(output,'desktop-long-draft.png'),fullPage:true});
+    await input.fill('短消息');assert.equal((await input.boundingBox()).height,emptyHeight,'删短后应收回高度');
+    await input.fill('');
     async function heldChat(action,reply='可控回复',status=200){
       let release,arrived,finished,completed,routeStarted=false;const held=new Promise(r=>release=r),started=new Promise(r=>arrived=r),done=new Promise(r=>finished=r);
       const routeHandler=async route=>{routeStarted=true;completed=page.waitForResponse(r=>r.url().endsWith('/api/booth/chat'));arrived();try{await held;await route.fulfill({status,contentType:'application/json',body:JSON.stringify(status===200?{reply,selection:null}:{data:reply})});}finally{finished();}};
@@ -55,6 +67,67 @@ async function presentation(page){return page.evaluate(()=>{
         await action(started,()=>release());
       }finally{release();if(routeStarted){await done;await completed;await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));}await page.unroute('**/api/booth/chat',routeHandler);}
     }
+    await heldChat(async started=>{
+      await input.fill('第一行');await input.press('Shift+Enter');await input.pressSequentially('第二行');
+      assert.equal(await input.inputValue(),'第一行\n第二行');
+      const before=requests.length;await input.press('Enter');await started;
+      assert.equal(requests.length,before+1);assert.equal(requests.at(-1).messages.at(-1).content,'第一行\n第二行');
+      assert.equal(await input.inputValue(),'');assert.equal((await input.boundingBox()).height,emptyHeight);
+    },'键盘发送成功');
+    await page.getByText('键盘发送成功',{exact:true}).waitFor();passed.push('Shift+Enter换行与Enter发送');
+    await input.fill('中文候选词');const beforeComposition=requests.length;
+    await input.dispatchEvent('compositionstart',{data:'中文'});
+    await input.dispatchEvent('keydown',{key:'Enter',code:'Enter',isComposing:true});
+    await input.press('Enter');
+    assert.equal(requests.length,beforeComposition,'组合输入期间Enter不得发送');
+    await input.dispatchEvent('compositionend',{data:'中文候选词'});
+    await input.dispatchEvent('keydown',{key:'Enter',code:'Enter',keyCode:229});
+    assert.equal(requests.length,beforeComposition,'候选确认的229键码不得误发送');
+    await heldChat(async started=>{await input.press('Enter');await started;},'中文提交成功');
+    await page.getByText('中文提交成功',{exact:true}).waitFor();passed.push('中文组合事件和候选确认保护');
+    for(const reducedMotion of ['no-preference','reduce']){
+      await page.emulateMedia({reducedMotion});
+      await heldChat(async started=>{
+        await input.fill('等待反馈检查');await send.click();await started;
+        assert.equal(await send.isDisabled(),true);assert.equal(await input.isEnabled(),true);
+        await page.getByText('正在回复你',{exact:true}).waitFor();
+        if(reducedMotion==='reduce'){
+          assert.equal(await page.locator('.chat-send-waiting').isVisible(),true,'减少动态效果时应显示文字等待提示');
+          assert.equal(await page.locator('.chat-send-spinner').isVisible(),false,'减少动态效果时不能留下静止转圈图标');
+        }else{
+          const spinner=page.locator('.chat-composer button .spin');
+          assert.equal(await spinner.isVisible(),true);
+          const before=await spinner.evaluate(el=>getComputedStyle(el).transform);await pause(100);
+          assert.notEqual(await spinner.evaluate(el=>getComputedStyle(el).transform),before,'正常动画模式转圈应持续变化');
+        }
+        const beforeDraft=requests.length;await input.fill('等待期间的下一条草稿');await input.press('Enter');
+        assert.equal(requests.length,beforeDraft,'等待期间Enter不得重复发送');
+        assert.equal(await input.inputValue(),'等待期间的下一条草稿');
+        await page.screenshot({path:join(output,'waiting-'+reducedMotion+'.png'),fullPage:true});
+        await page.locator('.assistant-panel').screenshot({path:join(output,'waiting-panel-'+reducedMotion+'.png')});
+      },'等待反馈检查完成');
+      await page.getByText('等待反馈检查完成',{exact:true}).last().waitFor();
+    }
+    await page.emulateMedia({reducedMotion:'no-preference'});await input.fill('');
+    await input.fill('自然换行检查。'.repeat(10));
+    const wideDraftHeight=(await input.boundingBox()).height;
+    await page.setViewportSize({width:390,height:844});
+    await until(async()=>(await input.boundingBox()).height>wideDraftHeight);
+    assert.equal(await input.inputValue(),'自然换行检查。'.repeat(10),'窗口缩窄应重新计算高度并保留草稿');
+    await input.fill('');
+    for(const width of [1440,390]){
+      await page.setViewportSize({width,height:width===390?844:900});
+      const shellHeight=(await page.locator('.assistant-panel').boundingBox()).height;
+      await input.fill('这是需要自然换行的长草稿。'.repeat(50));
+      assert((await input.boundingBox()).height<=120);assert((await input.boundingBox()).height>emptyHeight);
+      assert.equal((await page.locator('.assistant-panel').boundingBox()).height,shellHeight);
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+      await input.evaluate(el=>{el.scrollTop=0;});
+      await page.screenshot({path:join(output,'long-draft-'+width+'.png'),fullPage:true});
+      await page.locator('.assistant-panel').screenshot({path:join(output,'long-draft-panel-'+width+'.png')});
+    }
+    passed.push('自动增高、上限滚动、窄屏换行及两种等待反馈');
+    await page.setViewportSize({width:1440,height:900});await input.fill('');
     let readyStyle,waitingStyle;
     // Hold the HTTP response: input must be cleared before any AI answer exists.
     await heldChat(async started=>{
@@ -70,10 +143,11 @@ async function presentation(page){return page.evaluate(()=>{
     },'成功回复');
     await page.getByText('成功回复',{exact:true}).waitFor();assert.equal(await input.inputValue(),'');passed.push('立即清空与请求成功');
     await heldChat(async started=>{
-      await input.fill('  请帮我看看  ');await send.click();await started;assert.equal(await input.inputValue(),'');
+      await input.fill('  请帮我看看\n第二行需求  ');await send.click();await started;assert.equal(await input.inputValue(),'');
     },'测试失败：请重试',503);
     await page.getByRole('alert').filter({hasText:'测试失败：请重试'}).waitFor();
-    assert.equal(await input.inputValue(),'  请帮我看看  ','失败时恢复原始输入，包括用户原来的空格');passed.push('请求失败恢复原始输入');
+    assert.equal(await input.inputValue(),'  请帮我看看\n第二行需求  ','失败时恢复原始输入，包括用户原来的空格和换行');
+    assert((await input.boundingBox()).height>emptyHeight,'恢复多行输入后也应自动增高');passed.push('请求失败恢复原始输入');
     await heldChat(async started=>{
       await input.fill('失败前的输入');await send.click();await started;
       assert.equal(await input.isEnabled(),true,'等待回复时可编辑下一条草稿');

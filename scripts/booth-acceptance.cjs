@@ -129,6 +129,8 @@ async function testStorageSubmission(browser,webUrl){
   assert.equal(await page.getByRole('textbox',{name:'告诉助手你的需求'}).isDisabled(),true);
   await assertStatusAppearance(page.locator('.task-panel'),null,'rgb(82, 96, 109)','等待选择');
   await page.screenshot({path:join(output,'desktop-initial.png'),fullPage:true});
+  assert.equal(await page.getByText('物品较多时，可在列表内滚动浏览。',{exact:true}).count(),0);
+  assert.equal(await page.locator('.site-footer').getByText('当前为模拟演示，未连接现场机器人。',{exact:true}).count(),0);
   await testStorageSubmission(browser,webUrl);
   await page.getByRole('button',{name:'选择矿泉水',exact:true}).click();
   await page.getByRole('button',{name:'增加数量',exact:true}).click();
@@ -138,17 +140,18 @@ async function testStorageSubmission(browser,webUrl){
   await assertStatusAppearance(page.locator('.task-panel'),null,'rgb(82, 96, 109)','等待机器人接单');
   await until(()=>typeof releaseReceipt==='function');mode='success';releaseReceipt();await page.locator('.task-panel.executing').waitFor();
   assert.equal(requests[0].count,2);
-  await notices.filter({hasText:'机器人已接单，请等待取物结果'}).waitFor();
+  await notices.filter({hasText:'已接单，请稍候'}).waitFor();
+  await notices.last().getByText('取物进度',{exact:true}).waitFor();
   await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(49, 95, 134)','机器人已接单');
-  assert.equal(await notices.filter({hasText:'取物已完成'}).count(),0,'受理不能显示完成通知');
+  assert.equal(await notices.filter({hasText:'已取好'}).count(),0,'受理不能显示完成通知');
   await page.locator('.task-panel.succeeded').waitFor();await page.screenshot({path:join(output,'desktop-success.png'),fullPage:true});
-  await notices.filter({hasText:'取物已完成，请到交付处领取'}).waitFor();
+  await notices.filter({hasText:'已取好，请到交付处领取'}).waitFor();
   await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(63, 107, 67)','取物完成');
-  assert.equal(await notices.filter({hasText:'机器人已接单'}).count(),1);
-  assert.equal(await notices.filter({hasText:'取物已完成'}).count(),1);
+  assert.equal(await notices.filter({hasText:'已接单，请稍候'}).count(),1);
+  assert.equal(await notices.filter({hasText:'已取好'}).count(),1);
   assert.equal(chatRequests.length,0,'任务通知不得触发模型请求');
   await fetch(apiUrl+'/api/task/finished',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({result:'success'})});
-  assert.equal(await notices.filter({hasText:'取物已完成'}).count(),1,'重复完成回调不重播通知');
+  assert.equal(await notices.filter({hasText:'已取好'}).count(),1,'重复完成回调不重播通知');
   await page.setViewportSize({width:390,height:844});await pause(100);
   assert.equal(await page.getByRole('log',{name:'访客对话'}).evaluate(el=>Math.abs(el.scrollHeight-el.clientHeight-el.scrollTop)<2),true,'已有完成通知缩窗换行后仍须停在最新消息');
   await page.setViewportSize({width:1440,height:900});
@@ -164,7 +167,7 @@ async function testStorageSubmission(browser,webUrl){
   mode='rejected';await page.getByRole('button',{name:'选择纪念品',exact:true}).click();await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.rejected').waitFor();
   await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(133, 98, 40)','机器人未接单');
   assert.match(await page.locator('.task-panel').innerText(),/机器人未接下这次取物/);
-  assert.doesNotMatch(await page.locator('.task-panel').innerText(),/测试拒绝|取物已完成/);
+  assert.doesNotMatch(await page.locator('.task-panel').innerText(),/测试拒绝|已取好/);
   await page.getByRole('link',{name:'工作人员入口'}).click();
   await page.getByRole('dialog').getByText('测试拒绝',{exact:true}).waitFor();
   await page.getByRole('button',{name:'关闭工作人员入口'}).click();
@@ -181,12 +184,12 @@ async function testStorageSubmission(browser,webUrl){
   await page.getByRole('dialog').getByText('重复故障：仍需核对',{exact:true}).waitFor();
   await page.getByRole('button',{name:'关闭工作人员入口'}).click();
   assert.equal(await notices.filter({hasText:'这次取物需要工作人员协助'}).count(),1,'相同任务故障状态重复推送不重播');
-  assert.equal(await notices.filter({hasText:'取物已完成'}).count(),1,'故障不能冒充完成');
+  assert.equal(await notices.filter({hasText:'已取好'}).count(),1,'故障不能冒充完成');
   await page.screenshot({path:join(output,'desktop-fault.png'),fullPage:true});
   await page.getByRole('link',{name:'工作人员入口'}).click();await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox').check();await page.getByRole('button',{name:'解除本地占用'}).click();await page.locator('.task-panel.resolved').waitFor();await page.getByRole('button',{name:'关闭工作人员入口'}).click();
   await notices.filter({hasText:'这次取物已由工作人员处理，领取情况请向现场工作人员确认'}).waitFor();
   assert.match(await page.locator('.task-panel').innerText(),/领取情况请向现场工作人员确认/);
-  assert.doesNotMatch(await page.locator('.task-panel').innerText(),/取物已完成|占用|本地/);
+  assert.doesNotMatch(await page.locator('.task-panel').innerText(),/已取好|占用|本地/);
   await page.getByRole('link',{name:'工作人员入口'}).click();
   await page.getByRole('dialog').getByText('工作人员已现场核对并解除本地占用',{exact:true}).waitFor();
   await page.getByRole('button',{name:'关闭工作人员入口'}).click();
@@ -196,7 +199,7 @@ async function testStorageSubmission(browser,webUrl){
   await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(133, 98, 40)','需要核对');
   assert.match(await page.locator('.task-panel').innerText(),/是否结束尚未确认/);
   assert.doesNotMatch(await page.locator('.task-panel').innerText(),/占用|本地/);
-  assert.equal(await notices.filter({hasText:'取物已完成'}).count(),1,'受理不明不能冒充完成');
+  assert.equal(await notices.filter({hasText:'已取好'}).count(),1,'受理不明不能冒充完成');
   assert.equal(chatRequests.length,0,'故障、收尾与受理不明也不得调用模型');
   await page.getByRole('link',{name:'工作人员入口'}).click();await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox').check();await page.getByRole('button',{name:'解除本地占用'}).click();await page.locator('.task-panel.resolved').waitFor();await page.getByRole('button',{name:'关闭工作人员入口'}).click();
 
@@ -212,7 +215,7 @@ async function testStorageSubmission(browser,webUrl){
   await page.getByRole('alert').filter({hasText:'等待时间较长'}).waitFor({timeout:5000});
   assert.match(await page.locator('.waiting-reminder').innerText(),/是否结束尚未确认/);
   assert.doesNotMatch(await page.locator('.waiting-reminder').innerText(),/占用|本地/);
-  assert.equal(await notices.filter({hasText:'机器人已接单'}).count(),3,'等待提醒不能新增任务通知');
+  assert.equal(await notices.filter({hasText:'已接单，请稍候'}).count(),3,'等待提醒不能新增任务通知');
   assert.equal((await (await fetch(apiUrl+'/api/booth')).json()).active.status,'executing');
   assert.equal(requests.length,before+1);
   await page.getByRole('button',{name:'联系工作人员核对',exact:true}).click();
@@ -232,6 +235,7 @@ async function testStorageSubmission(browser,webUrl){
   await stop(api);api=launch(['--import','tsx','apps/api/src/booth/index.ts'],{...env,OPENAI_API_KEY:'browser-fixture-not-a-real-key'});await ready(apiUrl+'/api/health',api);
   await page.route('**/api/booth/chat',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({reply:'已为你选择两瓶矿泉水，请在取物栏确认。',selection:{productId:'water',count:2}})}));
   await page.reload();const input=page.getByRole('textbox',{name:'告诉助手你的需求'});await until(()=>input.isEnabled());
+  assert.equal(await input.getAttribute('placeholder'),'想了解什么？');
   assert.equal(await notices.count(),0,'首次快照不播报历史完成任务');
   const dialogueOrder=await page.evaluate(()=>{const chat=document.querySelector('[aria-label="告诉助手你的需求"]');const catalog=document.getElementById('catalog-title');return Boolean(chat.compareDocumentPosition(catalog)&Node.DOCUMENT_POSITION_FOLLOWING);});
   assert.equal(dialogueOrder,true,'对话应在选品目录之前');
@@ -282,7 +286,7 @@ async function testStorageSubmission(browser,webUrl){
     assert(elapsed<60,'浏览器快1小时不能显示等待1小时');
   });
   assert.equal(await page.getByRole('button',{name:'选择纪念品',exact:true}).getAttribute('aria-pressed'),'true');
-  assert.equal(await notices.filter({hasText:'机器人已接单'}).count(),1,'迟到AI回复不得移除任务通知');
+  assert.equal(await notices.filter({hasText:'已接单，请稍候'}).count(),1,'迟到AI回复不得移除任务通知');
   const activeBeforeReset=(await (await fetch(apiUrl+'/api/booth')).json()).active;
   await page.getByRole('button',{name:'开始新体验',exact:true}).click();
   assert.equal((await (await fetch(apiUrl+'/api/booth')).json()).active.id,activeBeforeReset.id);
@@ -293,13 +297,13 @@ async function testStorageSubmission(browser,webUrl){
     await fetch(apiUrl+'/api/task/finished',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({result:'success'})});await page.locator('.task-panel.succeeded').waitFor();
   });
   assert.equal(await page.getByRole('button',{name:'选择纪念品',exact:true}).getAttribute('aria-pressed'),'true');
-  assert.equal(await notices.filter({hasText:'取物已完成'}).count(),1,'新体验中的实际完成通知不能被迟到AI回复覆盖');
+  assert.equal(await notices.filter({hasText:'已取好'}).count(),1,'新体验中的实际完成通知不能被迟到AI回复覆盖');
   await page.unroute('**/api/booth/chat');await page.route('**/api/booth/chat',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({data:'测试：助手暂不可用'})}));
   await input.fill('再帮我看看');await page.getByRole('button',{name:'发送需求'}).click();await page.getByRole('alert').filter({hasText:'助手暂不可用'}).waitFor();assert.equal(await input.inputValue(),'再帮我看看');
   assert.equal(chatRequests.length,10,'只有十次显式聊天操作产生请求，状态变化没有额外请求');
   for(const {messages} of chatRequests){
     assert(messages.every(message=>['user','assistant'].includes(message.role)),'系统事件不得进入AI请求');
-    assert(messages.every(message=>!/(机器人已接单，请等待取物结果|取物已完成，请到交付处领取|这次取物需要工作人员协助|机器人是否接单、这次取物是否结束尚未确认|这次取物已由工作人员处理)/.test(message.content)),'固定通知文本不得消耗模型token');
+    assert(messages.every(message=>!/(已接单，请稍候|已取好，请到交付处领取|这次取物需要工作人员协助|机器人是否接单、这次取物是否结束尚未确认|这次取物已由工作人员处理)/.test(message.content)),'固定通知文本不得消耗模型token');
   }
 
   await fetch(apiUrl+'/api/task/error',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'测试全局告警'})});
@@ -313,7 +317,7 @@ async function testStorageSubmission(browser,webUrl){
   assert.equal(await page.locator('.task-panel').getByRole('img',{name:'取物完成',exact:true}).count(),0,'全局告警不能保留上一单完成图标');
   await fetch(apiUrl+'/api/task/error',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'测试全局告警'})});
   await fetch(apiUrl+'/api/booth/operator/resolve',{method:'POST',headers:{'Content-Type':'application/json','X-Operator-Token':'browser-test-operator'},body:JSON.stringify({confirmation:'已核对机器人停止'})});
-  await page.locator('.task-panel').getByText('取物已完成，请到交付处领取。',{exact:true}).waitFor();
+  await page.locator('.task-panel').getByText('已取好，请到交付处领取。',{exact:true}).waitFor();
   assert.equal(await notices.filter({hasText:'取物服务暂需工作人员核对'}).count(),1,'重复全局告警不刷屏');
   assert.equal(chatRequests.length,10);
 
@@ -351,10 +355,10 @@ async function testStorageSubmission(browser,webUrl){
     mode='silent';
     const dispatched=await fetch(apiUrl+'/api/booth/requests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requestId:'sse-reconnect-notification',productId:'water',count:1})});assert.equal(dispatched.status,200);
     releaseStream();
-    await reconnectPage.getByLabel('任务状态通知').filter({hasText:'机器人已接单'}).waitFor();
+    await reconnectPage.getByLabel('任务状态通知').filter({hasText:'已接单，请稍候'}).waitFor();
     await until(()=>sseRequests>=2);
     await reconnectPage.getByRole('link',{name:'工作人员入口'}).click();await reconnectPage.getByText('网关状态同步正常',{exact:false}).waitFor();
-    assert.equal(await reconnectPage.getByLabel('任务状态通知').filter({hasText:'机器人已接单'}).count(),1,'原生SSE重连的重复快照不能重播受理通知');
+    assert.equal(await reconnectPage.getByLabel('任务状态通知').filter({hasText:'已接单，请稍候'}).count(),1,'原生SSE重连的重复快照不能重播受理通知');
     assert.equal(reconnectChatRequests,0);
     await fetch(apiUrl+'/api/task/finished',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({result:'success'})});
     await page.locator('.task-panel.succeeded').waitFor();
@@ -396,7 +400,8 @@ async function testStorageSubmission(browser,webUrl){
       await proportionPage.getByRole('button',{name:'选择矿泉水',exact:true}).click();
       await proportionPage.getByRole('button',{name:'增加数量',exact:true}).click();
       const chat=await proportionPage.locator('.assistant-panel').boundingBox(),order=await proportionPage.getByRole('region',{name:'取物确认'}).boundingBox();
-      assert(chat&&order&&Math.abs(chat.y+chat.height-order.y-order.height)<=12,'初始桌面对话区应延伸到确认卡底部附近 '+JSON.stringify({width,chat,order}));
+      assert(chat&&order);assert.equal(chat.height,540,'删除目录说明后仍保持桌面对话区高度稳定');
+      assert(order.y+order.height<=height,'确认卡应保持桌面首屏可见 '+JSON.stringify({width,chat,order}));
       const input=await proportionPage.getByRole('textbox',{name:'告诉助手你的需求'}).boundingBox();
       assert(input&&input.y+input.height<=height,'加高后的桌面对话输入仍在首屏可见');
       assert.equal(await proportionPage.getByLabel('已选数量').textContent(),'2');

@@ -1,4 +1,4 @@
-import {useEffect,useRef,useState} from "react";
+import {useEffect,useLayoutEffect,useRef,useState} from "react";
 import {ArrowRight,ArrowUpRight,Check,CheckCircle2,ChevronRight,Clock3,LoaderCircle,Minus,Plus,RefreshCw,Send,ShieldCheck,Sparkles,X,AlertCircle,AlertTriangle,CircleX,UserRoundCheck} from "lucide-react";
 import type {BoothSnapshot,BoothProduct,BoothTask,BoothChatMessage,BoothAdvice} from "@bluesword/contracts";
 import {ProductArt} from "./ProductArt";
@@ -16,8 +16,8 @@ function StatusIcon({status}:{status:DisplayStatus}){
   return <Icon role="img" aria-label={names[status]} size={22} className={status==="submitting"||status==="executing"?"spin":undefined}/>;
 }
 const taskNotices:Partial<Record<BoothTask["status"],string>>={
-  executing:"机器人已接单，请等待取物结果。",
-  succeeded:"取物已完成，请到交付处领取。",
+  executing:"已接单，请稍候。",
+  succeeded:"已取好，请到交付处领取。",
   rejected:"机器人未接下这次取物，请核对选择或联系现场工作人员。",
   uncertain:"机器人是否接单、这次取物是否结束尚未确认，请勿重复确认取物。请联系现场工作人员，当前尚未确认机器人是否停止。",
   fault:"这次取物需要工作人员协助，是否结束尚未确认，请勿重复确认取物。当前尚未确认机器人是否停止。",
@@ -29,6 +29,10 @@ async function api<T>(url:string,body?:unknown,headers?:Record<string,string>):P
   const data=await response.json();if(!response.ok)throw new RequestError(typeof data.data==="string"?data.data:"暂时无法连接，请稍后重试",response.status);return data as T;
 }
 function loadPending():Pending|null{try{const p=JSON.parse(localStorage.getItem(pendingKey)??"null");return p&&typeof p.productId==="string"&&Number.isSafeInteger(p.count)&&typeof p.requestId==="string"?p:null;}catch{return null;}}
+function resizeComposer(input:HTMLTextAreaElement){
+  input.style.height="32px";
+  input.style.height=input.scrollHeight+input.offsetHeight-input.clientHeight+"px";
+}
 export function BoothApp(){
   const [,setWaitingTick]=useState(0);
   const waitingAnchor=useRef<{waiting:NonNullable<BoothSnapshot["waiting"]>;at:number}|null>(null);
@@ -39,6 +43,7 @@ export function BoothApp(){
   const snapshotInitialized=useRef(false),snapshotRevision=useRef(0),observedTasks=useRef(new Map<string,BoothTask["status"]>()),notifiedStates=useRef(new Set<string>()),previousAlert=useRef<string|null>(null);
   const [operator,setOperator]=useState(location.hash==="#operations"),[token,setToken]=useState(""),[checked,setChecked]=useState(false);
   const messageList=useRef<HTMLDivElement>(null),selectionVersion=useRef(0),experienceVersion=useRef(0),draftVersion=useRef(0),currentState=useRef(state);
+  const composerInput=useRef<HTMLTextAreaElement>(null),composing=useRef(false);
   currentState.current=state;
   const selected=state?.products.find(p=>p.id===(pending?.productId??selectedId)),quantity=pending?.count??count;
   const [experienceTaskId,setExperienceTaskId]=useState<string|null>(null);
@@ -81,6 +86,13 @@ export function BoothApp(){
   const elapsedWaitMs=state?.waiting?state.waiting.elapsedMs+(waitingAnchor.current?.waiting===state.waiting?Math.max(0,performance.now()-waitingAnchor.current.at):0):0;
   const overdue=!!state?.waiting&&(state.waiting.overdue||elapsedWaitMs>=state.waiting.remindAfterMs);
   useEffect(()=>{const list=messageList.current;if(list)list.scrollTop=list.scrollHeight;},[messages,thinking]);
+  useLayoutEffect(()=>{if(composerInput.current)resizeComposer(composerInput.current);},[text,!!state]);
+  useEffect(()=>{
+    const input=composerInput.current;if(!input)return;
+    let width=input.clientWidth;
+    const observer=new ResizeObserver(()=>{if(input.clientWidth!==width){width=input.clientWidth;resizeComposer(input);}});
+    observer.observe(input);return()=>observer.disconnect();
+  },[!!state]);
   useEffect(()=>{
     const list=messageList.current;if(!list)return;
     let followLatest=true,width=list.clientWidth,height=list.clientHeight;
@@ -135,15 +147,15 @@ export function BoothApp(){
       <section className="welcome"><div className="welcome-copy"><div className="eyebrow"><span/> 兰剑展台服务</div><h1>选好喜欢的物品，<br/><span>确认后等候领取。</span></h1><p>可以自己选物品，也可以向助手提问。<br className="desktop-break"/>选好后，核对数量，再点击“确认取物”。</p><div className="welcome-note"><span className="round-icon"><ArrowUpRight size={17}/></span>取物完成后，请到交付处领取</div></div><section className={"task-panel "+displayStatus+" status-"+displayStatus} aria-label="当前取物任务" aria-live="polite"><div className="task-heading"><span className="eyebrow">取物状态</span>{latest&&<span className="task-updated">最近更新 <time>{new Date(latest.updatedAt).toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit"})}</time></span>}<span className="task-status">{state.alert?"需要协助":latest?labels[latest.status]:"等待你的选择"}</span></div><div className="task-illustration" aria-hidden="true"><div className="robot-sculpture"><div className="robot-head"><div className="robot-face"><i/><i/></div></div><div className="robot-neck"/><div className="robot-body"><span className="robot-insignia"/><div className="robot-arm left"/><div className="robot-arm right"/></div><div className="robot-base"/></div></div><div className="task-main-icon"><StatusIcon status={displayStatus}/></div><h3>{state.alert?"请联系现场工作人员":latest?latest.command.item+" × "+latest.command.count:"请选择物品"}</h3><p>{taskMessage}</p>{overdue&&<div role="alert" className="waiting-reminder"><strong>等待时间较长，请联系工作人员核对</strong><p>已等待约 {Math.max(1,Math.floor(elapsedWaitMs/1000))} 秒。本次取物是否结束尚未确认，请勿重复确认取物。当前尚未确认机器人是否停止。</p><button onClick={()=>{location.hash="operations";setOperator(true);}}>联系工作人员核对</button></div>}</section></section>
       <div className="experience-grid">
         <aside className="concierge-column"><section className="assistant-panel"><div className="assistant-heading"><span className="assistant-avatar"><Sparkles size={21}/></span><div><h2>展台助手</h2></div><button className="new-experience" onClick={startExperience} disabled={busy||!!pending}>开始新体验</button><span className="ai-label">AI</span></div>
-          <div className="chat-messages" ref={messageList} role="log" aria-label="访客对话" tabIndex={0} aria-live="polite">{messages.length===0?<div className="chat-welcome">欢迎来到兰剑展台。想了解物品或需要选品建议，都可以在这里提问。</div>:messages.map((m,i)=>m.role==="event"?<div key={i} className={"chat-event status-"+m.status} aria-label="任务状态通知"><StatusIcon status={m.status}/><p><span>取物通知</span>{m.content}</p></div>:<div key={i} className={"chat-bubble "+m.role}>{m.content}</div>)}{thinking&&<div className="chat-thinking"><span/><span/><span/>正在回复你</div>}</div>
+          <div className="chat-messages" ref={messageList} role="log" aria-label="访客对话" tabIndex={0} aria-live="polite">{messages.length===0?<div className="chat-welcome">欢迎来到兰剑展台。想了解物品或需要选品建议，都可以在这里提问。</div>:messages.map((m,i)=>m.role==="event"?<div key={i} className={"chat-event status-"+m.status} aria-label="任务状态通知"><StatusIcon status={m.status}/><p><span>取物进度</span>{m.content}</p></div>:<div key={i} className={"chat-bubble "+m.role}>{m.content}</div>)}{thinking&&<div className="chat-thinking"><span/><span/><span/>正在回复你</div>}</div>
           <div className="quick-prompts">{["我想要一瓶水","这里有什么？"].map(t=><button key={t} onClick={()=>void chat(t,true)} disabled={thinking||!state.ai.configured||text.length>0} title={text.length>0?"请先发送或清空输入框中的草稿":undefined}>{t}<ArrowUpRight size={12}/></button>)}</div>{chatError&&<p role="alert" className="chat-error">{chatError}</p>}
-          <form className="chat-composer" onSubmit={e=>{e.preventDefault();void chat();}}><input aria-label="告诉助手你的需求" placeholder={state.ai.configured?"告诉我你的需求…":"助手暂不可用，可直接选物品"} maxLength={2000} value={text} onChange={e=>{draftVersion.current++;setText(e.target.value);}} disabled={!state.ai.configured}/><button aria-label="发送需求" disabled={thinking||!state.ai.configured||!text.trim()}>{thinking?<LoaderCircle size={17} className="spin"/>:<Send size={17}/>}</button></form><div className="assistant-footnote"><ShieldCheck size={12}/>助手提供建议，取物前请确认物品和数量</div></section>
+          <form className="chat-composer" onSubmit={e=>{e.preventDefault();void chat();}}><textarea ref={composerInput} rows={1} aria-label="告诉助手你的需求" placeholder={state.ai.configured?"想了解什么？":"助手暂不可用，可直接选物品"} maxLength={2000} value={text} onCompositionStart={()=>{composing.current=true;}} onCompositionEnd={()=>{composing.current=false;}} onKeyDown={e=>{if(e.key!=="Enter"||e.shiftKey||e.nativeEvent.isComposing||composing.current||e.keyCode===229)return;e.preventDefault();void chat();}} onChange={e=>{draftVersion.current++;setText(e.target.value);}} disabled={!state.ai.configured}/><button aria-label="发送需求" aria-busy={thinking} disabled={thinking||!state.ai.configured||!text.trim()}>{thinking?<><LoaderCircle size={17} className="spin chat-send-spinner"/><span className="chat-send-waiting">稍候</span></>:<Send size={17}/>}</button></form><div className="assistant-footnote"><ShieldCheck size={12}/>助手提供建议，取物前请确认物品和数量</div></section>
         </aside>
         <aside className="service-column" aria-label="选品与任务状态">
 
         <details className="catalog-panel" open><summary id="catalog-title"><span>浏览物品 · 手动选择</span><span className="catalog-count">{state.products.length} 款</span></summary><div aria-labelledby="catalog-title">
           <div className="category-tabs" aria-label="物品分类">{categories.map(c=><button key={c} aria-pressed={category===c} onClick={()=>setCategory(c)} className={category===c?"active":""}>{c}</button>)}</div>
-          <div className="product-grid" role="region" aria-label="可选物品列表" tabIndex={0}>{visible.map((p,i)=><button className={"product-card "+(selected?.id===p.id?"selected":"")} key={p.id} onClick={()=>choose(p)} aria-label={"选择"+p.name} aria-pressed={selected?.id===p.id} disabled={busy||!!pending}><div className="product-scene" style={{background:p.color}}><span className="product-category">{p.category}</span><span className="product-number">{(i+1).toString().padStart(2,"0")}</span><ProductArt product={p}/><span className="choose-mark">{selected?.id===p.id?<Check size={17}/>:<Plus size={17}/>}</span></div><div className="product-copy"><h3>{p.name}<ArrowUpRight size={17}/></h3><p>{p.subtitle}</p></div></button>)}</div><p className="catalog-scroll-hint">物品较多时，可在列表内滚动浏览。</p>
+          <div className="product-grid" role="region" aria-label="可选物品列表" tabIndex={0}>{visible.map((p,i)=><button className={"product-card "+(selected?.id===p.id?"selected":"")} key={p.id} onClick={()=>choose(p)} aria-label={"选择"+p.name} aria-pressed={selected?.id===p.id} disabled={busy||!!pending}><div className="product-scene" style={{background:p.color}}><span className="product-category">{p.category}</span><span className="product-number">{(i+1).toString().padStart(2,"0")}</span><ProductArt product={p}/><span className="choose-mark">{selected?.id===p.id?<Check size={17}/>:<Plus size={17}/>}</span></div><div className="product-copy"><h3>{p.name}<ArrowUpRight size={17}/></h3><p>{p.subtitle}</p></div></button>)}</div>
         </div></details>
           <section className={"order-panel "+(selected?"has-selection":"")} aria-label="取物确认">{selected?<><div className="order-art" style={{background:selected.color}}><ProductArt product={selected} small/></div><div className="order-details"><span className="eyebrow">已选物品</span><h3>{selected.name}</h3><p>{selected.description}</p></div><div className="order-actions"><div className="quantity-control"><button aria-label="减少数量" onClick={()=>changeCount(Math.max(1,count-1))} disabled={quantity<=1||blocked||busy||!!pending}><Minus size={15}/></button><output aria-label="已选数量">{quantity}</output><button aria-label="增加数量" onClick={()=>changeCount(Math.min(selected.maxCount,count+1))} disabled={quantity>=selected.maxCount||blocked||busy||!!pending}><Plus size={15}/></button></div><button className="primary-button" onClick={()=>void submit()} disabled={busy||!connected||(blocked&&!pending)||(!state.dispatch.ready&&!pending)}>{busy?<><LoaderCircle size={17} className="spin"/>正在确认</>:<>{pending?"核对这次取物":blocked?"请等待当前任务":"确认取物"}<ArrowRight size={17}/></>}</button></div></>:<><span className="selection-placeholder"><ArrowUpRight size={22}/></span><div><h3>还未选择物品</h3><p>请在物品列表中选择，或让助手帮你选。</p></div></>}</section>
           {state.dispatch.reason&&!pending&&<p role="status" className="task-note">{state.dispatch.reason}</p>}
@@ -153,7 +165,7 @@ export function BoothApp(){
         </aside>
       </div>
     </main>
-    <footer className="site-footer"><span>BLUESWORD <i>×</i> SEVENOVA</span><p>{state.mode==="simulator"?"当前为模拟演示，未连接现场机器人。":!state.catalogConfirmed?"物品目录待现场确认，暂未开放取物。":"如需帮助，请联系现场工作人员。"}</p><a href="#operations">工作人员入口<ArrowUpRight size={12}/></a></footer>
+    <footer className="site-footer"><span>BLUESWORD <i>×</i> SEVENOVA</span><p>{state.mode==="simulator"?null:!state.catalogConfirmed?"物品目录待现场确认，暂未开放取物。":"如需帮助，请联系现场工作人员。"}</p><a href="#operations">工作人员入口<ArrowUpRight size={12}/></a></footer>
     {operator&&<div className="modal-backdrop"><section className="operator-modal" role="dialog" aria-modal="true" aria-labelledby="operator-title"><button className="modal-close" aria-label="关闭工作人员入口" onClick={()=>{setOperator(false);location.hash="";}}><X/></button><span className="eyebrow">STAFF ONLY</span><h2 id="operator-title">现场异常核对</h2><p className="operator-system-status">{connected?"网关状态同步正常":"网关状态同步中断"}。{state.mode==="simulator"?"当前使用本地机器人模拟器，未连接真实机器人。":"此状态不证明真实机器人在线或可接单。"}</p><section className="operator-details" aria-label="工作人员任务详情"><dl>
       <dt>当前助手配置</dt><dd>{state.ai.provider} · {state.ai.model}（{state.ai.configured?"凭据已配置":"凭据未配置"}；不代表本次调用成功）</dd>
       <dt>当前状态</dt><dd>{state.alert?"全局告警":latest?labels[latest.status]:"无当前任务"}</dd>
