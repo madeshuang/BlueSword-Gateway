@@ -19,6 +19,61 @@ function launch(args,env={},cwd=root){
 async function stop(p){if(p.exitCode!==null){children.delete(p);return;}const done=once(p,'exit');p.kill();await done;children.delete(p);}
 async function ready(url,p){for(let i=0;i<100;i++){if(p.exitCode!==null)throw new Error(p.logs);try{if((await fetch(url)).ok)return;}catch{}await pause(100);}throw new Error('Service not ready '+url+' '+p.logs);}
 async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause(100);}throw new Error('Assertion timed out');}
+async function testStorageSubmission(browser,webUrl){
+ const context=await browser.newContext(),page=await context.newPage(),errors=[],sent=[];
+ let status=502,gate=Promise.resolve(),release;
+ try{
+  await page.addInitScript(()=>{
+   const setItem=Storage.prototype.setItem;
+   window.failPendingWrite=true;
+   Storage.prototype.setItem=function(key,value){
+    if(key==='bluesword.booth.pending'&&window.failPendingWrite)throw new DOMException('测试：存储写入失败','QuotaExceededError');
+    return setItem.call(this,key,value);
+   };
+  });
+  page.on('pageerror',e=>errors.push(e.message));
+  await page.route('**/api/booth/requests',async route=>{
+   sent.push(route.request().postDataJSON());
+   await gate;
+   return route.fulfill({status,contentType:'application/json',body:JSON.stringify(status===200?{}:{data:'测试：未收到确认反馈'})});
+  });
+  await page.goto(webUrl);await page.getByRole('button',{name:'选择矿泉水',exact:true}).click();
+  const submit=page.locator('.order-panel .primary-button');await until(()=>submit.isEnabled());await submit.click();
+  await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+  console.log('Storage failure observation: '+JSON.stringify({disabled:await submit.isDisabled(),button:await submit.innerText(),sent:sent.length,errors}));
+  assert.equal(sent.length,0,'本地保存失败时不得发送取物请求');
+  assert.equal(await submit.isDisabled(),false,'本地保存失败后必须退出提交状态');
+  await page.getByRole('alert').filter({hasText:'无法保存取物信息'}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'选择纪念品',exact:true}).isEnabled(),true,'未发送的新取物信息不应锁定选品');
+  assert.equal(await page.evaluate(()=>localStorage.getItem('bluesword.booth.pending')),null);
+
+  // After storage recovers, uncertain HTTP feedback must retain the saved requestId.
+  await page.evaluate(()=>{window.failPendingWrite=false;});await submit.click();
+  await page.getByRole('alert').filter({hasText:'测试：未收到确认反馈'}).waitFor();
+  const saved=await page.evaluate(()=>localStorage.getItem('bluesword.booth.pending'));
+  assert.equal(sent.length,1);assert.deepEqual(JSON.parse(saved),sent[0]);
+  await page.evaluate(()=>{window.failPendingWrite=true;});await page.getByRole('button',{name:'核对这次取物',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'无法保存取物信息'}).waitFor();
+  assert.equal(sent.length,1,'已有待核对信息再次保存失败，也不得发送');
+  assert.equal(await submit.isEnabled(),true);
+  assert.equal(await page.evaluate(()=>localStorage.getItem('bluesword.booth.pending')),saved,'保存失败不得删除或替换已有请求标识');
+  assert.equal(await page.getByRole('button',{name:'选择纪念品',exact:true}).isDisabled(),true,'已有待核对信息仍须锁定选品');
+
+  await page.reload();await page.getByRole('button',{name:'核对这次取物',exact:true}).waitFor();await until(()=>submit.isEnabled());
+  assert.equal(sent.length,1,'刷新仅恢复待核对信息，不自动重新发送');
+  await submit.click();await page.getByRole('alert').filter({hasText:'无法保存取物信息'}).waitFor();
+  assert.equal(sent.length,1);assert.equal(await page.evaluate(()=>localStorage.getItem('bluesword.booth.pending')),saved);
+  await page.evaluate(()=>{window.failPendingWrite=false;});status=200;gate=new Promise(r=>release=r);
+  await submit.click();await until(()=>sent.length===2);
+  assert.deepEqual(sent[1],sent[0],'恢复存储后核对必须使用原请求标识及原选品数量');
+  assert.equal(await submit.isDisabled(),true,'等待反馈期间仍阻止重复确认');
+  release();await until(()=>page.getByRole('button',{name:'选择纪念品',exact:true}).isEnabled());
+  assert.equal(await page.evaluate(()=>localStorage.getItem('bluesword.booth.pending')),null);
+  assert.equal(await page.getByRole('button',{name:'选择纪念品',exact:true}).isEnabled(),true);
+  assert.deepEqual(errors,[],'保存失败不应产生未处理异常');
+  console.log('Storage submission regression passed: fresh failure, pending preservation, reload, same-ID retry, success cleanup');
+ }finally{release?.();await context.close();}
+}
 (async()=>{
  let browser,robot,releaseReceipt;const callbacks=new Set();let mode='success',requests=[],apiUrl='';
  try{
@@ -74,6 +129,7 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
   assert.equal(await page.getByRole('textbox',{name:'告诉助手你的需求'}).isDisabled(),true);
   await assertStatusAppearance(page.locator('.task-panel'),null,'rgb(82, 96, 109)','等待选择');
   await page.screenshot({path:join(output,'desktop-initial.png'),fullPage:true});
+  await testStorageSubmission(browser,webUrl);
   await page.getByRole('button',{name:'选择矿泉水',exact:true}).click();
   await page.getByRole('button',{name:'增加数量',exact:true}).click();
   assert.equal(await page.getByLabel('已选数量').innerText(),'2');
@@ -451,6 +507,7 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
   await page.screenshot({path:join(output,'large-catalog-fixture.png'),fullPage:true});
   assert.deepEqual(errors,[]);
   const report={passed:true,robotRequests:requests.length,viewports:6,touchEmulation:true,keyboardChat:true,
+    storageSubmission:{failureBlocksSend:true,busyRecovered:true,pendingPreserved:true,reloadWithoutSend:true,sameRequestIdOnRetry:true,successCleanup:true},
     taskNotifications:{actualAcceptanceAndCompletion:true,duplicateCallbackAndSnapshotDeduplicated:true,nativeSseReconnectDeduplicated:true,staleHttpSnapshotIgnored:true,experienceIsolation:true,excludedFromModelHistory:true,automaticModelRequests:0},
     catalogLayout:{defaultExpanded:true,desktopConfirmationInViewport:true,largeCatalogIndependentScroll:true,mouseAndKeyboardScroll:true,manualCollapse:true},
     visitorPresentation:{idleWithoutHistoricalTask:true,historyPreserved:true,fixedDialogueHeight:true,latestMessageVisible:true,mouseKeyboardAndTouchScroll:true,conversationFixtures:17,realAiCalls:0},

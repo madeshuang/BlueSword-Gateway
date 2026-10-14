@@ -99,7 +99,10 @@ export function BoothApp(){
   async function submit(){
     if(!selected||busy||!connected)return;selectionVersion.current++;setBusy(true);setError("");
     const request=pending??{productId:selected.id,count:quantity,requestId:crypto.randomUUID()};
-    setPending(request);localStorage.setItem(pendingKey,JSON.stringify(request));
+    // Do not send without a saved requestId that can be recovered after reload.
+    try{localStorage.setItem(pendingKey,JSON.stringify(request));}
+    catch{setError("无法保存取物信息，本次未发送。请检查浏览器存储设置后重试。");setBusy(false);return;}
+    setPending(request);
     try{await api("/api/booth/requests",request);setPending(null);localStorage.removeItem(pendingKey);await requestSnapshot("/api/booth");}
     catch(e){if(e instanceof RequestError&&[400,409,503].includes(e.status)){setPending(null);localStorage.removeItem(pendingKey);}setError(e instanceof RequestError?e.message:"尚未收到取物确认的反馈，请核对这次取物");}finally{setBusy(false);}
   }
