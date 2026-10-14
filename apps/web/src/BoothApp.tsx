@@ -3,7 +3,7 @@ import {ArrowRight,ArrowUpRight,Check,CheckCircle2,ChevronRight,Clock3,LoaderCir
 import type {BoothSnapshot,BoothProduct,BoothTask,BoothChatMessage,BoothAdvice} from "@bluesword/contracts";
 import {ProductArt} from "./ProductArt";
 import "./booth.css";
-const labels:Record<BoothTask["status"],string>={submitting:"等待受理",executing:"正在执行",succeeded:"已完成",rejected:"未受理",uncertain:"等待核对",fault:"需要协助",resolved:"工作人员已处理"};
+const labels:Record<BoothTask["status"],string>={submitting:"等待机器人接单",executing:"机器人已接单",succeeded:"已完成",rejected:"机器人未接单",uncertain:"等待核对",fault:"需要协助",resolved:"工作人员已处理"};
 class RequestError extends Error { constructor(message:string,readonly status:number){super(message);} }
 const pendingKey="bluesword.booth.pending";
 type Pending={productId:string;count:number;requestId:string};
@@ -11,17 +11,17 @@ type DisplayStatus=BoothTask["status"]|"idle"|"alert";
 type ConversationMessage=BoothChatMessage|{role:"event";content:string;status:DisplayStatus};
 function StatusIcon({status}:{status:DisplayStatus}){
   const icons={idle:Clock3,submitting:LoaderCircle,executing:LoaderCircle,succeeded:CheckCircle2,rejected:CircleX,uncertain:AlertTriangle,fault:AlertCircle,resolved:UserRoundCheck,alert:AlertCircle};
-  const names={idle:"等待选择",submitting:"等待受理",executing:"正在执行",succeeded:"取物完成",rejected:"未受理",uncertain:"需要核对",fault:"需要协助",resolved:"工作人员处理",alert:"需要协助"};
+  const names={idle:"等待选择",submitting:"等待机器人接单",executing:"机器人已接单",succeeded:"取物完成",rejected:"机器人未接单",uncertain:"需要核对",fault:"需要协助",resolved:"工作人员处理",alert:"需要协助"};
   const Icon=icons[status];
   return <Icon role="img" aria-label={names[status]} size={22} className={status==="submitting"||status==="executing"?"spin":undefined}/>;
 }
 const taskNotices:Partial<Record<BoothTask["status"],string>>={
-  executing:"请求已受理，请等待取物结果。",
+  executing:"机器人已接单，请等待取物结果。",
   succeeded:"取物已完成，请到交付处领取。",
-  rejected:"这次取物暂未受理，请核对选择或联系现场工作人员。",
-  uncertain:"这次请求是否受理、是否结束尚未确认，请勿再次提交。请联系现场工作人员，当前尚未确认机器人是否停止。",
-  fault:"这次取物需要工作人员协助，是否结束尚未确认，请勿再次提交。当前尚未确认机器人是否停止。",
-  resolved:"本次请求已由工作人员处理，领取情况请向现场工作人员确认。",
+  rejected:"机器人未接下这次取物，请核对选择或联系现场工作人员。",
+  uncertain:"机器人是否接单、这次取物是否结束尚未确认，请勿重复确认取物。请联系现场工作人员，当前尚未确认机器人是否停止。",
+  fault:"这次取物需要工作人员协助，是否结束尚未确认，请勿重复确认取物。当前尚未确认机器人是否停止。",
+  resolved:"这次取物已由工作人员处理，领取情况请向现场工作人员确认。",
 };
 const globalAlertNotice="取物服务暂需工作人员核对，请稍候。当前尚未确认机器人是否停止。";
 async function api<T>(url:string,body?:unknown,headers?:Record<string,string>):Promise<T>{
@@ -101,7 +101,7 @@ export function BoothApp(){
     const request=pending??{productId:selected.id,count:quantity,requestId:crypto.randomUUID()};
     setPending(request);localStorage.setItem(pendingKey,JSON.stringify(request));
     try{await api("/api/booth/requests",request);setPending(null);localStorage.removeItem(pendingKey);await requestSnapshot("/api/booth");}
-    catch(e){if(e instanceof RequestError&&[400,409,503].includes(e.status)){setPending(null);localStorage.removeItem(pendingKey);}setError(e instanceof RequestError?e.message:"提交反馈暂未取得，请核对这次请求");}finally{setBusy(false);}
+    catch(e){if(e instanceof RequestError&&[400,409,503].includes(e.status)){setPending(null);localStorage.removeItem(pendingKey);}setError(e instanceof RequestError?e.message:"尚未收到取物确认的反馈，请核对这次取物");}finally{setBusy(false);}
   }
   function startExperience(){
     experienceVersion.current++;selectionVersion.current++;
@@ -123,18 +123,18 @@ export function BoothApp(){
     setBusy(true);setError("");try{await requestSnapshot("/api/booth/operator/resolve",{confirmation:"已核对机器人停止"},{"X-Operator-Token":token});setChecked(false);setToken("");}
     catch(e){setError(e instanceof Error?e.message:"处理失败");}finally{setBusy(false);}
   }
-  if(!state)return <div className="boot-screen"><div className="brand-mark"/><h1>兰剑 · 智能体验</h1>{error?<><p role="alert">{error}</p><button onClick={()=>location.reload()}>重新连接</button></>:<><LoaderCircle className="spin"/><p>正在准备你的体验</p></>}</div>;
+  if(!state)return <div className="boot-screen"><div className="brand-mark"/><h1>兰剑 · 智能体验</h1>{error?<><p role="alert">{error}</p><button onClick={()=>location.reload()}>重新连接</button></>:<><LoaderCircle className="spin"/><p>正在加载，请稍候</p></>}</div>;
   const categories=["全部",...new Set(state.products.map(p=>p.category))],visible=state.products.filter(p=>category==="全部"||p.category===category);
   const displayStatus:DisplayStatus=state.alert?"alert":latest?.status??"idle";
-  const taskMessage=displayStatus==="alert"?globalAlertNotice:displayStatus==="idle"?"确认物品后，我们将在这里展示取物状态。":displayStatus==="submitting"?"正在提交，请稍候。":taskNotices[displayStatus];
+  const taskMessage=displayStatus==="alert"?globalAlertNotice:displayStatus==="idle"?"确认取物后，可以在这里查看进展。":displayStatus==="submitting"?"正在等待机器人接单，请稍候。":taskNotices[displayStatus];
   return <div className="booth-shell">
     <main>
-      <section className="welcome"><div className="welcome-copy"><div className="eyebrow"><span/> HUMAN × TECHNOLOGY</div><h1>选一份心意。<br/><span>余下，交给机器人。</span></h1><p>从一次简单的选择开始，体验智能服务的更多可能。<br className="desktop-break"/>挑选你喜欢的物品，我们为你送达。</p><div className="welcome-note"><span className="round-icon"><ArrowUpRight size={17}/></span>一起，探索服务的下一种方式</div></div><section className={"task-panel "+displayStatus+" status-"+displayStatus} aria-label="当前取物任务" aria-live="polite"><div className="task-heading"><span className="eyebrow">SERVICE MOMENT</span>{latest&&<span className="task-updated">最近更新 <time>{new Date(latest.updatedAt).toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit"})}</time></span>}<span className="task-status">{state.alert?"需要协助":latest?labels[latest.status]:"等待你的选择"}</span></div><div className="task-illustration" aria-hidden="true"><div className="robot-sculpture"><div className="robot-head"><div className="robot-face"><i/><i/></div></div><div className="robot-neck"/><div className="robot-body"><span className="robot-insignia"/><div className="robot-arm left"/><div className="robot-arm right"/></div><div className="robot-base"/></div></div><div className="task-main-icon"><StatusIcon status={displayStatus}/></div><h3>{state.alert?"请联系现场工作人员":latest?latest.command.item+" × "+latest.command.count:"你的下一份心意"}</h3><p>{taskMessage}</p>{overdue&&<div role="alert" className="waiting-reminder"><strong>等待时间较长，请联系工作人员核对</strong><p>已等待约 {Math.max(1,Math.floor(elapsedWaitMs/1000))} 秒。本次取物是否结束尚未确认，请勿再次提交。当前尚未确认机器人是否停止。</p><button onClick={()=>{location.hash="operations";setOperator(true);}}>联系工作人员核对</button></div>}</section></section>
+      <section className="welcome"><div className="welcome-copy"><div className="eyebrow"><span/> 兰剑展台服务</div><h1>选好喜欢的物品，<br/><span>确认后等候领取。</span></h1><p>可以自己选物品，也可以向助手提问。<br className="desktop-break"/>选好后，核对数量，再点击“确认取物”。</p><div className="welcome-note"><span className="round-icon"><ArrowUpRight size={17}/></span>取物完成后，请到交付处领取</div></div><section className={"task-panel "+displayStatus+" status-"+displayStatus} aria-label="当前取物任务" aria-live="polite"><div className="task-heading"><span className="eyebrow">取物状态</span>{latest&&<span className="task-updated">最近更新 <time>{new Date(latest.updatedAt).toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit"})}</time></span>}<span className="task-status">{state.alert?"需要协助":latest?labels[latest.status]:"等待你的选择"}</span></div><div className="task-illustration" aria-hidden="true"><div className="robot-sculpture"><div className="robot-head"><div className="robot-face"><i/><i/></div></div><div className="robot-neck"/><div className="robot-body"><span className="robot-insignia"/><div className="robot-arm left"/><div className="robot-arm right"/></div><div className="robot-base"/></div></div><div className="task-main-icon"><StatusIcon status={displayStatus}/></div><h3>{state.alert?"请联系现场工作人员":latest?latest.command.item+" × "+latest.command.count:"请选择物品"}</h3><p>{taskMessage}</p>{overdue&&<div role="alert" className="waiting-reminder"><strong>等待时间较长，请联系工作人员核对</strong><p>已等待约 {Math.max(1,Math.floor(elapsedWaitMs/1000))} 秒。本次取物是否结束尚未确认，请勿重复确认取物。当前尚未确认机器人是否停止。</p><button onClick={()=>{location.hash="operations";setOperator(true);}}>联系工作人员核对</button></div>}</section></section>
       <div className="experience-grid">
-        <aside className="concierge-column"><section className="assistant-panel"><div className="assistant-heading"><span className="assistant-avatar"><Sparkles size={21}/></span><div><h2>你的智能接待助手</h2></div><button className="new-experience" onClick={startExperience} disabled={busy||!!pending}>开始新体验</button><span className="ai-label">AI</span></div>
-          <div className="chat-messages" ref={messageList} role="log" aria-label="访客对话" tabIndex={0} aria-live="polite">{messages.length===0?<div className="chat-welcome">欢迎来到兰剑智能体验。可以告诉我你的需求，或直接浏览物品。</div>:messages.map((m,i)=>m.role==="event"?<div key={i} className={"chat-event status-"+m.status} aria-label="任务状态通知"><StatusIcon status={m.status}/><p><span>取物通知</span>{m.content}</p></div>:<div key={i} className={"chat-bubble "+m.role}>{m.content}</div>)}{thinking&&<div className="chat-thinking"><span/><span/><span/>正在回复你</div>}</div>
+        <aside className="concierge-column"><section className="assistant-panel"><div className="assistant-heading"><span className="assistant-avatar"><Sparkles size={21}/></span><div><h2>展台助手</h2></div><button className="new-experience" onClick={startExperience} disabled={busy||!!pending}>开始新体验</button><span className="ai-label">AI</span></div>
+          <div className="chat-messages" ref={messageList} role="log" aria-label="访客对话" tabIndex={0} aria-live="polite">{messages.length===0?<div className="chat-welcome">欢迎来到兰剑展台。想了解物品或需要选品建议，都可以在这里提问。</div>:messages.map((m,i)=>m.role==="event"?<div key={i} className={"chat-event status-"+m.status} aria-label="任务状态通知"><StatusIcon status={m.status}/><p><span>取物通知</span>{m.content}</p></div>:<div key={i} className={"chat-bubble "+m.role}>{m.content}</div>)}{thinking&&<div className="chat-thinking"><span/><span/><span/>正在回复你</div>}</div>
           <div className="quick-prompts">{["我想要一瓶水","这里有什么？"].map(t=><button key={t} onClick={()=>void chat(t,true)} disabled={thinking||!state.ai.configured||text.length>0} title={text.length>0?"请先发送或清空输入框中的草稿":undefined}>{t}<ArrowUpRight size={12}/></button>)}</div>{chatError&&<p role="alert" className="chat-error">{chatError}</p>}
-          <form className="chat-composer" onSubmit={e=>{e.preventDefault();void chat();}}><input aria-label="告诉助手你的需求" placeholder={state.ai.configured?"告诉我你的需求…":"助手尚未连接，可直接选品"} maxLength={2000} value={text} onChange={e=>{draftVersion.current++;setText(e.target.value);}} disabled={!state.ai.configured}/><button aria-label="发送需求" disabled={thinking||!state.ai.configured||!text.trim()}>{thinking?<LoaderCircle size={17} className="spin"/>:<Send size={17}/>}</button></form><div className="assistant-footnote"><ShieldCheck size={12}/>建议由你确认，取物由机器人完成</div></section>
+          <form className="chat-composer" onSubmit={e=>{e.preventDefault();void chat();}}><input aria-label="告诉助手你的需求" placeholder={state.ai.configured?"告诉我你的需求…":"助手暂不可用，可直接选物品"} maxLength={2000} value={text} onChange={e=>{draftVersion.current++;setText(e.target.value);}} disabled={!state.ai.configured}/><button aria-label="发送需求" disabled={thinking||!state.ai.configured||!text.trim()}>{thinking?<LoaderCircle size={17} className="spin"/>:<Send size={17}/>}</button></form><div className="assistant-footnote"><ShieldCheck size={12}/>助手提供建议，取物前请确认物品和数量</div></section>
         </aside>
         <aside className="service-column" aria-label="选品与任务状态">
 
@@ -142,15 +142,15 @@ export function BoothApp(){
           <div className="category-tabs" aria-label="物品分类">{categories.map(c=><button key={c} aria-pressed={category===c} onClick={()=>setCategory(c)} className={category===c?"active":""}>{c}</button>)}</div>
           <div className="product-grid" role="region" aria-label="可选物品列表" tabIndex={0}>{visible.map((p,i)=><button className={"product-card "+(selected?.id===p.id?"selected":"")} key={p.id} onClick={()=>choose(p)} aria-label={"选择"+p.name} aria-pressed={selected?.id===p.id} disabled={busy||!!pending}><div className="product-scene" style={{background:p.color}}><span className="product-category">{p.category}</span><span className="product-number">{(i+1).toString().padStart(2,"0")}</span><ProductArt product={p}/><span className="choose-mark">{selected?.id===p.id?<Check size={17}/>:<Plus size={17}/>}</span></div><div className="product-copy"><h3>{p.name}<ArrowUpRight size={17}/></h3><p>{p.subtitle}</p></div></button>)}</div><p className="catalog-scroll-hint">物品较多时，可在列表内滚动浏览。</p>
         </div></details>
-          <section className={"order-panel "+(selected?"has-selection":"")} aria-label="取物确认">{selected?<><div className="order-art" style={{background:selected.color}}><ProductArt product={selected} small/></div><div className="order-details"><span className="eyebrow">YOUR SELECTION</span><h3>{selected.name}</h3><p>{selected.description}</p></div><div className="order-actions"><div className="quantity-control"><button aria-label="减少数量" onClick={()=>changeCount(Math.max(1,count-1))} disabled={quantity<=1||blocked||busy||!!pending}><Minus size={15}/></button><output aria-label="已选数量">{quantity}</output><button aria-label="增加数量" onClick={()=>changeCount(Math.min(selected.maxCount,count+1))} disabled={quantity>=selected.maxCount||blocked||busy||!!pending}><Plus size={15}/></button></div><button className="primary-button" onClick={()=>void submit()} disabled={busy||!connected||(blocked&&!pending)||(!state.dispatch.ready&&!pending)}>{busy?<><LoaderCircle size={17} className="spin"/>等待受理</>:<>{pending?"核对这次请求":blocked?"请等待当前任务":"确认取物"}<ArrowRight size={17}/></>}</button></div></>:<><span className="selection-placeholder"><ArrowUpRight size={22}/></span><div><h3>从一份喜欢开始</h3><p>告诉助手需求，或直接浏览物品；选好后由你确认。</p></div></>}</section>
+          <section className={"order-panel "+(selected?"has-selection":"")} aria-label="取物确认">{selected?<><div className="order-art" style={{background:selected.color}}><ProductArt product={selected} small/></div><div className="order-details"><span className="eyebrow">已选物品</span><h3>{selected.name}</h3><p>{selected.description}</p></div><div className="order-actions"><div className="quantity-control"><button aria-label="减少数量" onClick={()=>changeCount(Math.max(1,count-1))} disabled={quantity<=1||blocked||busy||!!pending}><Minus size={15}/></button><output aria-label="已选数量">{quantity}</output><button aria-label="增加数量" onClick={()=>changeCount(Math.min(selected.maxCount,count+1))} disabled={quantity>=selected.maxCount||blocked||busy||!!pending}><Plus size={15}/></button></div><button className="primary-button" onClick={()=>void submit()} disabled={busy||!connected||(blocked&&!pending)||(!state.dispatch.ready&&!pending)}>{busy?<><LoaderCircle size={17} className="spin"/>正在确认</>:<>{pending?"核对这次取物":blocked?"请等待当前任务":"确认取物"}<ArrowRight size={17}/></>}</button></div></>:<><span className="selection-placeholder"><ArrowUpRight size={22}/></span><div><h3>还未选择物品</h3><p>请在物品列表中选择，或让助手帮你选。</p></div></>}</section>
           {state.dispatch.reason&&!pending&&<p role="status" className="task-note">{state.dispatch.reason}</p>}
-          {!connected&&<p role="status" className="task-note">取物状态暂未同步，请稍候再确认；已有任务请勿重复提交。</p>}
+          {!connected&&<p role="status" className="task-note">取物状态暂未更新，请稍候再确认；已有任务请勿重复确认取物。</p>}
           {error&&<div role="alert" className="feedback-error"><AlertCircle size={17}/><span>{error}</span><button onClick={()=>setError("")} aria-label="关闭提示"><X size={16}/></button></div>}
           <div className="experience-steps" aria-label="体验流程"><span><b>01</b>选择物品</span><ChevronRight size={14}/><span><b>02</b>确认数量</span><ChevronRight size={14}/><span><b>03</b>等待领取</span></div>
         </aside>
       </div>
     </main>
-    <footer className="site-footer"><span>BLUESWORD <i>×</i> SEVENOVA</span><p>{state.mode==="simulator"?"当前为独立测试对端演示，未连接现场机器人。":!state.catalogConfirmed?"展示目录待现场确认，暂未开放取物。":"智能服务，从一次简单的选择开始。"}</p><a href="#operations">工作人员入口<ArrowUpRight size={12}/></a></footer>
+    <footer className="site-footer"><span>BLUESWORD <i>×</i> SEVENOVA</span><p>{state.mode==="simulator"?"当前为模拟演示，未连接现场机器人。":!state.catalogConfirmed?"物品目录待现场确认，暂未开放取物。":"如需帮助，请联系现场工作人员。"}</p><a href="#operations">工作人员入口<ArrowUpRight size={12}/></a></footer>
     {operator&&<div className="modal-backdrop"><section className="operator-modal" role="dialog" aria-modal="true" aria-labelledby="operator-title"><button className="modal-close" aria-label="关闭工作人员入口" onClick={()=>{setOperator(false);location.hash="";}}><X/></button><span className="eyebrow">STAFF ONLY</span><h2 id="operator-title">现场异常核对</h2><p className="operator-system-status">{connected?"网关状态同步正常":"网关状态同步中断"}。{state.mode==="simulator"?"当前使用本地机器人模拟器，未连接真实机器人。":"此状态不证明真实机器人在线或可接单。"}</p><section className="operator-details" aria-label="工作人员任务详情"><dl>
       <dt>当前助手配置</dt><dd>{state.ai.provider} · {state.ai.model}（{state.ai.configured?"凭据已配置":"凭据未配置"}；不代表本次调用成功）</dd>
       <dt>当前状态</dt><dd>{state.alert?"全局告警":latest?labels[latest.status]:"无当前任务"}</dd>

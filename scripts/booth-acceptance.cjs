@@ -43,7 +43,7 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
   const notices=page.getByLabel('任务状态通知');
   // Inspect rendered styles and accessible icons, rather than class names alone.
   async function assertStatusAppearance(panel,notice,color,icon){
-    const backgrounds={'等待选择':'rgb(240, 242, 244)','等待受理':'rgb(240, 242, 244)','正在执行':'rgb(238, 244, 250)','取物完成':'rgb(238, 245, 236)','未受理':'rgb(255, 246, 231)','需要核对':'rgb(255, 246, 231)','需要协助':'rgb(252, 240, 238)','工作人员处理':'rgb(240, 242, 244)'};
+    const backgrounds={'等待选择':'rgb(240, 242, 244)','等待机器人接单':'rgb(240, 242, 244)','机器人已接单':'rgb(238, 244, 250)','取物完成':'rgb(238, 245, 236)','机器人未接单':'rgb(255, 246, 231)','需要核对':'rgb(255, 246, 231)','需要协助':'rgb(252, 240, 238)','工作人员处理':'rgb(240, 242, 244)'};
     const status=panel.locator('.task-status');
     assert.equal(await status.evaluate(el=>getComputedStyle(el).color),color,'任务卡应使用对应状态颜色');
     assert.equal(await panel.evaluate(el=>getComputedStyle(el).backgroundColor),backgrounds[icon],'任务卡背景也应符合状态语义');
@@ -79,16 +79,16 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
   assert.equal(await page.getByLabel('已选数量').innerText(),'2');
   mode='receipt-pending';await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.submitting').waitFor();
   assert.equal(await notices.count(),0,'点击确认而未取得受理回执时不能播报受理或完成');
-  await assertStatusAppearance(page.locator('.task-panel'),null,'rgb(82, 96, 109)','等待受理');
+  await assertStatusAppearance(page.locator('.task-panel'),null,'rgb(82, 96, 109)','等待机器人接单');
   await until(()=>typeof releaseReceipt==='function');mode='success';releaseReceipt();await page.locator('.task-panel.executing').waitFor();
   assert.equal(requests[0].count,2);
-  await notices.filter({hasText:'请求已受理，请等待取物结果'}).waitFor();
-  await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(49, 95, 134)','正在执行');
+  await notices.filter({hasText:'机器人已接单，请等待取物结果'}).waitFor();
+  await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(49, 95, 134)','机器人已接单');
   assert.equal(await notices.filter({hasText:'取物已完成'}).count(),0,'受理不能显示完成通知');
   await page.locator('.task-panel.succeeded').waitFor();await page.screenshot({path:join(output,'desktop-success.png'),fullPage:true});
   await notices.filter({hasText:'取物已完成，请到交付处领取'}).waitFor();
   await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(63, 107, 67)','取物完成');
-  assert.equal(await notices.filter({hasText:'请求已受理'}).count(),1);
+  assert.equal(await notices.filter({hasText:'机器人已接单'}).count(),1);
   assert.equal(await notices.filter({hasText:'取物已完成'}).count(),1);
   assert.equal(chatRequests.length,0,'任务通知不得触发模型请求');
   await fetch(apiUrl+'/api/task/finished',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({result:'success'})});
@@ -106,8 +106,8 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
   }finally{await freshVisitor.close();}
 
   mode='rejected';await page.getByRole('button',{name:'选择纪念品',exact:true}).click();await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.rejected').waitFor();
-  await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(133, 98, 40)','未受理');
-  assert.match(await page.locator('.task-panel').innerText(),/这次取物暂未受理/);
+  await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(133, 98, 40)','机器人未接单');
+  assert.match(await page.locator('.task-panel').innerText(),/机器人未接下这次取物/);
   assert.doesNotMatch(await page.locator('.task-panel').innerText(),/测试拒绝|取物已完成/);
   await page.getByRole('link',{name:'工作人员入口'}).click();
   await page.getByRole('dialog').getByText('测试拒绝',{exact:true}).waitFor();
@@ -128,7 +128,7 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
   assert.equal(await notices.filter({hasText:'取物已完成'}).count(),1,'故障不能冒充完成');
   await page.screenshot({path:join(output,'desktop-fault.png'),fullPage:true});
   await page.getByRole('link',{name:'工作人员入口'}).click();await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox').check();await page.getByRole('button',{name:'解除本地占用'}).click();await page.locator('.task-panel.resolved').waitFor();await page.getByRole('button',{name:'关闭工作人员入口'}).click();
-  await notices.filter({hasText:'本次请求已由工作人员处理，领取情况请向现场工作人员确认'}).waitFor();
+  await notices.filter({hasText:'这次取物已由工作人员处理，领取情况请向现场工作人员确认'}).waitFor();
   assert.match(await page.locator('.task-panel').innerText(),/领取情况请向现场工作人员确认/);
   assert.doesNotMatch(await page.locator('.task-panel').innerText(),/取物已完成|占用|本地/);
   await page.getByRole('link',{name:'工作人员入口'}).click();
@@ -136,7 +136,7 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
   await page.getByRole('button',{name:'关闭工作人员入口'}).click();
   await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(82, 96, 109)','工作人员处理');
   mode='uncertain';await page.getByRole('button',{name:'选择矿泉水',exact:true}).click();await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.uncertain').waitFor();
-  await notices.filter({hasText:'这次请求是否受理、是否结束尚未确认'}).waitFor();
+  await notices.filter({hasText:'机器人是否接单、这次取物是否结束尚未确认'}).waitFor();
   await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(133, 98, 40)','需要核对');
   assert.match(await page.locator('.task-panel').innerText(),/是否结束尚未确认/);
   assert.doesNotMatch(await page.locator('.task-panel').innerText(),/占用|本地/);
@@ -156,7 +156,7 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
   await page.getByRole('alert').filter({hasText:'等待时间较长'}).waitFor({timeout:5000});
   assert.match(await page.locator('.waiting-reminder').innerText(),/是否结束尚未确认/);
   assert.doesNotMatch(await page.locator('.waiting-reminder').innerText(),/占用|本地/);
-  assert.equal(await notices.filter({hasText:'请求已受理'}).count(),3,'等待提醒不能新增任务通知');
+  assert.equal(await notices.filter({hasText:'机器人已接单'}).count(),3,'等待提醒不能新增任务通知');
   assert.equal((await (await fetch(apiUrl+'/api/booth')).json()).active.status,'executing');
   assert.equal(requests.length,before+1);
   await page.getByRole('button',{name:'联系工作人员核对',exact:true}).click();
@@ -226,7 +226,7 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
     assert(elapsed<60,'浏览器快1小时不能显示等待1小时');
   });
   assert.equal(await page.getByRole('button',{name:'选择纪念品',exact:true}).getAttribute('aria-pressed'),'true');
-  assert.equal(await notices.filter({hasText:'请求已受理'}).count(),1,'迟到AI回复不得移除任务通知');
+  assert.equal(await notices.filter({hasText:'机器人已接单'}).count(),1,'迟到AI回复不得移除任务通知');
   const activeBeforeReset=(await (await fetch(apiUrl+'/api/booth')).json()).active;
   await page.getByRole('button',{name:'开始新体验',exact:true}).click();
   assert.equal((await (await fetch(apiUrl+'/api/booth')).json()).active.id,activeBeforeReset.id);
@@ -243,7 +243,7 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
   assert.equal(chatRequests.length,10,'只有十次显式聊天操作产生请求，状态变化没有额外请求');
   for(const {messages} of chatRequests){
     assert(messages.every(message=>['user','assistant'].includes(message.role)),'系统事件不得进入AI请求');
-    assert(messages.every(message=>!/(请求已受理，请等待取物结果|取物已完成，请到交付处领取|这次取物需要工作人员协助|这次请求是否受理、是否结束尚未确认|本次请求已由工作人员处理)/.test(message.content)),'固定通知文本不得消耗模型token');
+    assert(messages.every(message=>!/(机器人已接单，请等待取物结果|取物已完成，请到交付处领取|这次取物需要工作人员协助|机器人是否接单、这次取物是否结束尚未确认|这次取物已由工作人员处理)/.test(message.content)),'固定通知文本不得消耗模型token');
   }
 
   await fetch(apiUrl+'/api/task/error',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'测试全局告警'})});
@@ -295,10 +295,10 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
     mode='silent';
     const dispatched=await fetch(apiUrl+'/api/booth/requests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requestId:'sse-reconnect-notification',productId:'water',count:1})});assert.equal(dispatched.status,200);
     releaseStream();
-    await reconnectPage.getByLabel('任务状态通知').filter({hasText:'请求已受理'}).waitFor();
+    await reconnectPage.getByLabel('任务状态通知').filter({hasText:'机器人已接单'}).waitFor();
     await until(()=>sseRequests>=2);
     await reconnectPage.getByRole('link',{name:'工作人员入口'}).click();await reconnectPage.getByText('网关状态同步正常',{exact:false}).waitFor();
-    assert.equal(await reconnectPage.getByLabel('任务状态通知').filter({hasText:'请求已受理'}).count(),1,'原生SSE重连的重复快照不能重播受理通知');
+    assert.equal(await reconnectPage.getByLabel('任务状态通知').filter({hasText:'机器人已接单'}).count(),1,'原生SSE重连的重复快照不能重播受理通知');
     assert.equal(reconnectChatRequests,0);
     await fetch(apiUrl+'/api/task/finished',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({result:'success'})});
     await page.locator('.task-panel.succeeded').waitFor();
@@ -324,7 +324,7 @@ async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause
       assert(layout.orderWidth<=layout.chatWidth,'桌面右侧功能区不应宽于左侧对话区 '+JSON.stringify({width,layout}));
       const confirm=await page.getByRole('button',{name:'确认取物',exact:true}).boundingBox();
       assert(confirm&&confirm.y>=0&&confirm.y+confirm.height<=height,'默认展开目录时，桌面首屏应完整呈现确认取物按钮 '+JSON.stringify({width,height,confirm}));
-      const selection=await page.getByText('YOUR SELECTION',{exact:true}).boundingBox(),quantity=await page.getByLabel('已选数量').boundingBox();
+      const selection=await page.getByText('已选物品',{exact:true}).boundingBox(),quantity=await page.getByLabel('已选数量').boundingBox();
       assert(selection&&selection.y>=0&&selection.y+selection.height<=height,'选品标题应在首屏');
       assert(quantity&&quantity.y>=0&&quantity.y+quantity.height<=height,'数量调整应在首屏');
       const productTitle=await page.getByRole('button',{name:'选择矿泉水',exact:true}).locator('h3').boundingBox();
