@@ -38,7 +38,7 @@ export function BoothApp(){
   const [messages,setMessages]=useState<ConversationMessage[]>([]),[text,setText]=useState(""),[thinking,setThinking]=useState(false),[chatError,setChatError]=useState("");
   const snapshotInitialized=useRef(false),snapshotRevision=useRef(0),observedTasks=useRef(new Map<string,BoothTask["status"]>()),notifiedStates=useRef(new Set<string>()),previousAlert=useRef<string|null>(null);
   const [operator,setOperator]=useState(location.hash==="#operations"),[token,setToken]=useState(""),[checked,setChecked]=useState(false);
-  const messageList=useRef<HTMLDivElement>(null),selectionVersion=useRef(0),experienceVersion=useRef(0),currentState=useRef(state);
+  const messageList=useRef<HTMLDivElement>(null),selectionVersion=useRef(0),experienceVersion=useRef(0),draftVersion=useRef(0),currentState=useRef(state);
   currentState.current=state;
   const selected=state?.products.find(p=>p.id===(pending?.productId??selectedId)),quantity=pending?.count??count;
   const [experienceTaskId,setExperienceTaskId]=useState<string|null>(null);
@@ -108,16 +108,16 @@ export function BoothApp(){
     setMessages([]);setText("");setThinking(false);setChatError("");
     setSelectedId(null);setCount(1);setError("");setExperienceTaskId(null);
   }
-  async function chat(input=text){
-    if(!input.trim()||thinking)return;setThinking(true);setChatError("");
-    const version=selectionVersion.current,experience=experienceVersion.current,taskId=state?.tasks[0]?.id;
+  async function chat(input=text,fromQuickPrompt=false){
+    if(!input.trim()||thinking||(fromQuickPrompt&&text.length>0))return;setThinking(true);setChatError("");setText("");
+    const version=selectionVersion.current,experience=experienceVersion.current,draft=draftVersion.current,taskId=state?.tasks[0]?.id;
     const userMessage:BoothChatMessage={role:"user",content:input.trim()};
     const next:BoothChatMessage[]=[...messages.filter((message):message is BoothChatMessage=>message.role!=="event"),userMessage];
     setMessages(current=>[...current,userMessage]);
-    try{const advice=await api<BoothAdvice>("/api/booth/chat",{messages:next.slice(-11)});if(experience!==experienceVersion.current)return;setMessages(current=>[...current,{role:"assistant",content:advice.reply}]);setText("");
+    try{const advice=await api<BoothAdvice>("/api/booth/chat",{messages:next.slice(-11)});if(experience!==experienceVersion.current)return;setMessages(current=>[...current,{role:"assistant",content:advice.reply}]);
       const latestState=currentState.current,p=latestState?.products.find(p=>p.id===advice.selection?.productId);
       if(p&&advice.selection&&!blocked&&!latestState?.active&&!latestState?.alert&&taskId===latestState?.tasks[0]?.id&&version===selectionVersion.current)choose(p,advice.selection.count);}
-    catch(e){if(experience===experienceVersion.current){setChatError(e instanceof Error?e.message:"智能助手暂不可用");setText(input);}}finally{if(experience===experienceVersion.current)setThinking(false);}
+    catch(e){if(experience===experienceVersion.current){setChatError(e instanceof Error?e.message:"智能助手暂不可用");if(draft===draftVersion.current)setText(input);}}finally{if(experience===experienceVersion.current)setThinking(false);}
   }
   async function resolve(){
     setBusy(true);setError("");try{await requestSnapshot("/api/booth/operator/resolve",{confirmation:"已核对机器人停止"},{"X-Operator-Token":token});setChecked(false);setToken("");}
@@ -133,8 +133,8 @@ export function BoothApp(){
       <div className="experience-grid">
         <aside className="concierge-column"><section className="assistant-panel"><div className="assistant-heading"><span className="assistant-avatar"><Sparkles size={21}/></span><div><h2>你的智能接待助手</h2></div><button className="new-experience" onClick={startExperience} disabled={busy||!!pending}>开始新体验</button><span className="ai-label">AI</span></div>
           <div className="chat-messages" ref={messageList} role="log" aria-label="访客对话" tabIndex={0} aria-live="polite">{messages.length===0?<div className="chat-welcome">欢迎来到兰剑智能体验。可以告诉我你的需求，或直接浏览物品。</div>:messages.map((m,i)=>m.role==="event"?<div key={i} className={"chat-event status-"+m.status} aria-label="任务状态通知"><StatusIcon status={m.status}/><p><span>取物通知</span>{m.content}</p></div>:<div key={i} className={"chat-bubble "+m.role}>{m.content}</div>)}{thinking&&<div className="chat-thinking"><span/><span/><span/>正在回复你</div>}</div>
-          <div className="quick-prompts">{["我想要一瓶水","这里有什么？"].map(t=><button key={t} onClick={()=>void chat(t)} disabled={thinking||!state.ai.configured}>{t}<ArrowUpRight size={12}/></button>)}</div>{chatError&&<p role="alert" className="chat-error">{chatError}</p>}
-          <form className="chat-composer" onSubmit={e=>{e.preventDefault();void chat();}}><input aria-label="告诉助手你的需求" placeholder={state.ai.configured?"告诉我你的需求…":"助手尚未连接，可直接选品"} maxLength={2000} value={text} onChange={e=>setText(e.target.value)} disabled={thinking||!state.ai.configured}/><button aria-label="发送需求" disabled={thinking||!state.ai.configured||!text.trim()}>{thinking?<LoaderCircle size={17} className="spin"/>:<Send size={17}/>}</button></form><div className="assistant-footnote"><ShieldCheck size={12}/>建议由你确认，取物由机器人完成</div></section>
+          <div className="quick-prompts">{["我想要一瓶水","这里有什么？"].map(t=><button key={t} onClick={()=>void chat(t,true)} disabled={thinking||!state.ai.configured||text.length>0} title={text.length>0?"请先发送或清空输入框中的草稿":undefined}>{t}<ArrowUpRight size={12}/></button>)}</div>{chatError&&<p role="alert" className="chat-error">{chatError}</p>}
+          <form className="chat-composer" onSubmit={e=>{e.preventDefault();void chat();}}><input aria-label="告诉助手你的需求" placeholder={state.ai.configured?"告诉我你的需求…":"助手尚未连接，可直接选品"} maxLength={2000} value={text} onChange={e=>{draftVersion.current++;setText(e.target.value);}} disabled={!state.ai.configured}/><button aria-label="发送需求" disabled={thinking||!state.ai.configured||!text.trim()}>{thinking?<LoaderCircle size={17} className="spin"/>:<Send size={17}/>}</button></form><div className="assistant-footnote"><ShieldCheck size={12}/>建议由你确认，取物由机器人完成</div></section>
         </aside>
         <aside className="service-column" aria-label="选品与任务状态">
 
