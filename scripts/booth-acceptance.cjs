@@ -19,6 +19,10 @@ function launch(args,env={},cwd=root){
 async function stop(p){if(p.exitCode!==null){children.delete(p);return;}const done=once(p,'exit');p.kill();await done;children.delete(p);}
 async function ready(url,p){for(let i=0;i<100;i++){if(p.exitCode!==null)throw new Error(p.logs);try{if((await fetch(url)).ok)return;}catch{}await pause(100);}throw new Error('Service not ready '+url+' '+p.logs);}
 async function until(fn){for(let i=0;i<100;i++){if(await fn())return;await pause(100);}throw new Error('Assertion timed out');}
+async function openOperations(page){
+ await page.evaluate(()=>{location.hash='operations';});
+ await page.getByRole('dialog',{name:'现场异常核对',exact:true}).waitFor();
+}
 async function testStorageSubmission(browser,webUrl){
  const context=await browser.newContext(),page=await context.newPage(),errors=[],sent=[];
  let status=502,gate=Promise.resolve(),release;
@@ -116,7 +120,11 @@ async function testStorageSubmission(browser,webUrl){
   assert.equal(await page.getByRole('button',{name:'确认取物',exact:true}).isDisabled(),true,'缺少机器人地址时不能确认取物');
   await page.getByText('机器人连接尚未配置，暂不能提交任务',{exact:true}).waitFor();
   assert.equal(await page.locator('.site-header').count(),0,'访客顶部品牌、标语及技术状态栏应删除');
-  await page.getByRole('link',{name:'工作人员入口'}).click();
+  assert.equal(await page.getByRole('link',{name:'工作人员入口',exact:true}).count(),0,'访客页面不应公开工作人员入口');
+  await page.goto(webUrl+'/#operations');
+  await page.getByRole('dialog',{name:'现场异常核对',exact:true}).waitFor();
+  await page.reload();
+  await page.getByRole('dialog',{name:'现场异常核对',exact:true}).waitFor();
   await page.getByText('网关状态同步正常',{exact:false}).waitFor();
   await page.getByText('工作人员操作凭据尚未配置',{exact:false}).waitFor();
   assert.equal(await page.getByLabel('工作人员凭据').isDisabled(),true);
@@ -127,6 +135,30 @@ async function testStorageSubmission(browser,webUrl){
   await stop(api);api=launch(['--import','tsx','apps/api/src/booth/index.ts'],env);await ready(apiUrl+'/api/health',api);
   await page.reload();await page.getByRole('textbox',{name:'告诉助手你的需求'}).waitFor();
   assert.equal(await page.getByRole('textbox',{name:'告诉助手你的需求'}).isDisabled(),true);
+  const staffPage=await context.newPage();
+  try{
+    await staffPage.goto(webUrl+'/#operations');
+    const dialog=staffPage.getByRole('dialog',{name:'现场异常核对',exact:true});await dialog.waitFor();
+    const credential=staffPage.getByLabel('工作人员凭据'),confirmation=staffPage.getByRole('checkbox');
+    await until(()=>credential.isEnabled());await credential.fill('browser-test-operator');await confirmation.check();
+    await staffPage.reload();await dialog.waitFor();
+    assert.equal(await credential.inputValue(),'','刷新工作人员页面不保留凭据');
+    assert.equal(await confirmation.isChecked(),false,'刷新后需重新确认现场情况');
+    await staffPage.screenshot({path:join(output,'staff-direct-desktop.png'),fullPage:true});
+    await staffPage.setViewportSize({width:390,height:844});
+    await credential.fill('browser-test-operator');await confirmation.check();
+    assert.equal(await staffPage.getByRole('button',{name:'解除本地占用',exact:true}).isDisabled(),true,'无异常任务时不能解除占用');
+    for(const control of [dialog,credential,confirmation,staffPage.getByRole('button',{name:'关闭工作人员入口'})]){
+      const box=await control.boundingBox();assert(box&&box.x>=0&&box.x+box.width<=390&&box.y>=0&&box.y+box.height<=844,'窄屏工作人员页面与必要控件应完整可见');
+    }
+    assert.equal(await staffPage.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+    await staffPage.screenshot({path:join(output,'staff-direct-mobile.png'),fullPage:true});
+    await staffPage.getByRole('button',{name:'关闭工作人员入口'}).click();
+    await until(()=>staffPage.getByRole('dialog').count().then(n=>n===0));
+    assert.equal(new URL(staffPage.url()).hash,'');
+    assert.equal(await staffPage.getByRole('link',{name:'工作人员入口',exact:true}).count(),0);
+    await staffPage.screenshot({path:join(output,'visitor-no-staff-mobile.png'),fullPage:true});
+  }finally{await staffPage.close();}
   await assertStatusAppearance(page.locator('.task-panel'),null,'rgb(82, 96, 109)','等待选择');
   await page.screenshot({path:join(output,'desktop-initial.png'),fullPage:true});
   assert.equal(await page.getByText('物品较多时，可在列表内滚动浏览。',{exact:true}).count(),0);
@@ -168,7 +200,7 @@ async function testStorageSubmission(browser,webUrl){
   await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(133, 98, 40)','机器人未接单');
   assert.match(await page.locator('.task-panel').innerText(),/机器人未接下这次取物/);
   assert.doesNotMatch(await page.locator('.task-panel').innerText(),/测试拒绝|已取好/);
-  await page.getByRole('link',{name:'工作人员入口'}).click();
+  await openOperations(page);
   await page.getByRole('dialog').getByText('测试拒绝',{exact:true}).waitFor();
   await page.getByRole('button',{name:'关闭工作人员入口'}).click();
   mode='error';await page.getByRole('button',{name:'选择小面包',exact:true}).click();await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.fault').waitFor();
@@ -180,17 +212,17 @@ async function testStorageSubmission(browser,webUrl){
   assert.equal(await page.locator('.task-panel').getByText('测试故障：机械臂无法自动恢复',{exact:true}).count(),0);
   assert.match(await page.locator('.task-panel').innerText(),/是否结束尚未确认/);
   assert.match(await notices.last().innerText(),/尚未确认机器人是否停止/);
-  await page.getByRole('link',{name:'工作人员入口'}).click();
+  await openOperations(page);
   await page.getByRole('dialog').getByText('重复故障：仍需核对',{exact:true}).waitFor();
   await page.getByRole('button',{name:'关闭工作人员入口'}).click();
   assert.equal(await notices.filter({hasText:'这次取物需要工作人员协助'}).count(),1,'相同任务故障状态重复推送不重播');
   assert.equal(await notices.filter({hasText:'已取好'}).count(),1,'故障不能冒充完成');
   await page.screenshot({path:join(output,'desktop-fault.png'),fullPage:true});
-  await page.getByRole('link',{name:'工作人员入口'}).click();await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox').check();await page.getByRole('button',{name:'解除本地占用'}).click();await page.locator('.task-panel.resolved').waitFor();await page.getByRole('button',{name:'关闭工作人员入口'}).click();
+  await openOperations(page);await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox').check();await page.getByRole('button',{name:'解除本地占用'}).click();await page.locator('.task-panel.resolved').waitFor();await page.getByRole('button',{name:'关闭工作人员入口'}).click();
   await notices.filter({hasText:'这次取物已由工作人员处理，领取情况请向现场工作人员确认'}).waitFor();
   assert.match(await page.locator('.task-panel').innerText(),/领取情况请向现场工作人员确认/);
   assert.doesNotMatch(await page.locator('.task-panel').innerText(),/已取好|占用|本地/);
-  await page.getByRole('link',{name:'工作人员入口'}).click();
+  await openOperations(page);
   await page.getByRole('dialog').getByText('工作人员已现场核对并解除本地占用',{exact:true}).waitFor();
   await page.getByRole('button',{name:'关闭工作人员入口'}).click();
   await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(82, 96, 109)','工作人员处理');
@@ -201,7 +233,7 @@ async function testStorageSubmission(browser,webUrl){
   assert.doesNotMatch(await page.locator('.task-panel').innerText(),/占用|本地/);
   assert.equal(await notices.filter({hasText:'已取好'}).count(),1,'受理不明不能冒充完成');
   assert.equal(chatRequests.length,0,'故障、收尾与受理不明也不得调用模型');
-  await page.getByRole('link',{name:'工作人员入口'}).click();await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox').check();await page.getByRole('button',{name:'解除本地占用'}).click();await page.locator('.task-panel.resolved').waitFor();await page.getByRole('button',{name:'关闭工作人员入口'}).click();
+  await openOperations(page);await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox').check();await page.getByRole('button',{name:'解除本地占用'}).click();await page.locator('.task-panel.resolved').waitFor();await page.getByRole('button',{name:'关闭工作人员入口'}).click();
 
   await page.clock.setSystemTime(new Date(Date.now()-3600000));
   mode='silent';const before=requests.length;
@@ -220,6 +252,7 @@ async function testStorageSubmission(browser,webUrl){
   assert.equal(requests.length,before+1);
   await page.getByRole('button',{name:'联系工作人员核对',exact:true}).click();
   await page.getByRole('dialog').waitFor();
+  await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox').check();
   assert.equal(await page.getByRole('button',{name:'解除本地占用',exact:true}).isDisabled(),true);
   await page.getByText('执行中任务仍保持占用',{exact:false}).waitFor();
   await page.getByRole('button',{name:'关闭工作人员入口'}).click();
@@ -311,7 +344,7 @@ async function testStorageSubmission(browser,webUrl){
   await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(158, 69, 62)','需要协助');
   assert.equal(await page.getByRole('main').getByText('测试全局告警',{exact:true}).count(),0,'全局告警原文不出现在访客主界面');
   assert.match(await page.locator('.task-panel').innerText(),/尚未确认机器人是否停止/);
-  await page.getByRole('link',{name:'工作人员入口'}).click();
+  await openOperations(page);
   await page.getByRole('dialog').getByText('测试全局告警',{exact:true}).waitFor();
   await page.getByRole('button',{name:'关闭工作人员入口'}).click();
   assert.equal(await page.locator('.task-panel').getByRole('img',{name:'取物完成',exact:true}).count(),0,'全局告警不能保留上一单完成图标');
@@ -357,7 +390,7 @@ async function testStorageSubmission(browser,webUrl){
     releaseStream();
     await reconnectPage.getByLabel('任务状态通知').filter({hasText:'已接单，请稍候'}).waitFor();
     await until(()=>sseRequests>=2);
-    await reconnectPage.getByRole('link',{name:'工作人员入口'}).click();await reconnectPage.getByText('网关状态同步正常',{exact:false}).waitFor();
+    await openOperations(reconnectPage);await reconnectPage.getByText('网关状态同步正常',{exact:false}).waitFor();
     assert.equal(await reconnectPage.getByLabel('任务状态通知').filter({hasText:'已接单，请稍候'}).count(),1,'原生SSE重连的重复快照不能重播受理通知');
     assert.equal(reconnectChatRequests,0);
     await fetch(apiUrl+'/api/task/finished',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({result:'success'})});
@@ -512,6 +545,7 @@ async function testStorageSubmission(browser,webUrl){
   await page.screenshot({path:join(output,'large-catalog-fixture.png'),fullPage:true});
   assert.deepEqual(errors,[]);
   const report={passed:true,robotRequests:requests.length,viewports:6,touchEmulation:true,keyboardChat:true,
+    staffAccess:{visitorEntryHidden:true,directUrlAndReload:true,narrowScreen:true,confirmationResetOnReload:true,executingCannotCancel:true},
     storageSubmission:{failureBlocksSend:true,busyRecovered:true,pendingPreserved:true,reloadWithoutSend:true,sameRequestIdOnRetry:true,successCleanup:true},
     taskNotifications:{actualAcceptanceAndCompletion:true,duplicateCallbackAndSnapshotDeduplicated:true,nativeSseReconnectDeduplicated:true,staleHttpSnapshotIgnored:true,experienceIsolation:true,excludedFromModelHistory:true,automaticModelRequests:0},
     catalogLayout:{defaultExpanded:true,desktopConfirmationInViewport:true,largeCatalogIndependentScroll:true,mouseAndKeyboardScroll:true,manualCollapse:true},
