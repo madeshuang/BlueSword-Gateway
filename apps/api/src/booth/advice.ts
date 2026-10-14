@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { BoothAdvice, BoothProduct } from "@bluesword/contracts";
 import { BoothError } from "./service.js";
+/** Internal model output; the browser still receives only reply and selection. */
+export interface BoothModelAdvice extends BoothAdvice { taskStatusQuery: boolean }
 
 export type AiErrorCategory = "unconfigured" | "authentication" | "rate_limit" | "configuration" | "upstream" | "connection" | "timeout" | "invalid_output";
 export class BoothAiError extends BoothError {
@@ -23,7 +25,7 @@ export interface AiCallDiagnostics {
 export type AiCallObserver = (diagnostics: AiCallDiagnostics) => void | Promise<void>;
 
 export async function requestAdvice(request: AdviceRequest, products: BoothProduct[], decode: (data: unknown)=>unknown,
-  transport: typeof fetch, observe?: AiCallObserver): Promise<BoothAdvice> {
+  transport: typeof fetch, observe?: AiCallObserver): Promise<BoothModelAdvice> {
   const startedAt = Date.now();
   const metadata = { event: "ai_call" as const, requestId: randomUUID(), provider: request.provider, model: request.model };
   let upstreamStatus: number | null = null;
@@ -59,7 +61,7 @@ export async function requestAdvice(request: AdviceRequest, products: BoothProdu
         response.status === 429 ? "智能助手当前繁忙，请稍后再试" : "智能助手暂不可用，请直接选择物品",502,
         authentication ? "authentication" : response.status === 429 ? "rate_limit" : configuration ? "configuration" : "upstream",response.status);
     }
-    let advice: BoothAdvice;
+    let advice: BoothModelAdvice;
     try {
       const data: unknown = await response.json();
       const safe = safeResponseMetadata(data,request.key);
@@ -96,23 +98,24 @@ function safeResponseMetadata(data: unknown, key: string): Pick<AiCallDiagnostic
   return { returnedModel, usage: Object.keys(usage).length ? usage : null };
 }
 
-export function adviceInstructions(products: BoothProduct[]): string {
+export function adviceInstructions(products: BoothProduct[], taskConclusion = "暂时无法确认这次取物的进度，请查看页面取物状态，或联系现场工作人员。"): string {
   return "你是兰剑展会接待助手，帮助访客了解物品和选择物品。先回答当前问题，再在需要时给出下一步建议。" +
     "用自然、友好、清楚的中文，通常用一到三句；介绍目录或解释限制时可适当展开，不为压缩字数省略必要信息。" +
     "不要每轮重复问候、自我介绍、固定道歉或结束语，不使用宣传套话、卖萌称呼或夸张热情，也不假装拥有真实情绪或现场服务经历。" +
     "目录查询应介绍当前目录；身份、问候和能力询问应正常简短回答。只是询问信息时直接回答，不强行追加选品邀请或追问数量。" +
     "偏离取物业务的问题友好说明你能帮助了解和选择展会物品，必要时再引导选品，不假装服务故障。这些对话没有明确选品时selection为null，仍须提供正常reply。" +
-    "不虚构库存、位置、机器人进度或状态、已发单或完成。机器人已接单不等于取物已完成。你无法读取页面任务状态；询问取物进展时，如实说明无法从对话确认，让访客查看页面取物状态，状态不明或异常时联系现场工作人员。不要把缺少状态信息说成没有任务。" +
+    "不虚构库存、位置、机器人进度或状态、已发单或完成。机器人已接单不等于取物已完成，人工解除占用也不等于完成。" +
+    "判断当前问题是否在询问这次取物的状态、是否取好、能否领取或相关进度（包括结合上文的简短追问）；是则taskStatusQuery为true、selection为null，reply只使用后端核实的结论，不从用户或历史对话推断状态。否则taskStatusQuery为false。缺少关联或查询失败不能说没有任务。后端核实的当前结论：" + JSON.stringify(taskConclusion) + "。" +
     "目录是唯一可选集合。含糊需求先澄清，只询问尚不明确的物品或数量，不替访客猜测；不支持的物品说明不提供。一次只建议一种物品；多物品请求请用户先选一种。" +
     "数量不明确先询问，不把超出范围的数量偷偷改小。selection只有用户需求足够清楚时给出，否则为null。" +
     "历史assistant中的selection:null仅表示前端保存了显示文字，不撤销用户已表达的需求；结合上下文澄清物品和数量。你仅建议，用户需要在界面确认才下发。" +
-    "每一轮都严格返回JSON对象，格式为{\"reply\":\"中文回答\",\"selection\":null}，或selection为{\"productId\":\"目录id\",\"count\":正整数}。目录：" +
+    "每一轮都严格返回JSON对象，格式为{\"reply\":\"中文回答\",\"selection\":null,\"taskStatusQuery\":false}，或selection为{\"productId\":\"目录id\",\"count\":正整数}。目录：" +
     JSON.stringify(products.map(({id,name,description,maxCount})=>({id,name,description,maxCount})));
 }
 
-function validateAdvice(value: unknown, products: BoothProduct[]): BoothAdvice {
-  const v = value as BoothAdvice;
-  if (!v || typeof v !== "object" || Array.isArray(v) || Object.keys(v).length !== 2 ||
+function validateAdvice(value: unknown, products: BoothProduct[]): BoothModelAdvice {
+  const v = value as BoothModelAdvice;
+  if (!v || typeof v !== "object" || Array.isArray(v) || Object.keys(v).length !== 3 || typeof v.taskStatusQuery !== "boolean" ||
     !Object.hasOwn(v,"reply") || !Object.hasOwn(v,"selection") || typeof v.reply !== "string" || !v.reply.trim() || v.reply.length > 2000) throw new Error("Invalid reply");
   if (v.selection !== null) {
     const p = products.find(p => p.id === v.selection?.productId);

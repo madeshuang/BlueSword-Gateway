@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { BoothSnapshot, BoothTask, DispatchCommand } from "@bluesword/contracts";
 import { ApplicationStorage } from "../storage.js";
 import type { BoothConfig } from "./config.js";
@@ -7,6 +7,8 @@ export class BoothError extends Error {
   constructor(message: string, readonly status = 400) { super(message); }
 }
 const blocks = (t: BoothTask) => ["submitting", "executing", "uncertain", "fault"].includes(t.status);
+interface Experience { id: string; taskId: string | null }
+const unknownProgress = "暂时无法确认这次取物的进度，请查看页面取物状态，或联系现场工作人员。";
 export class BoothService {
   private listeners = new Set<() => void>();
   constructor(readonly storage: ApplicationStorage, readonly config: BoothConfig, private readonly transport: typeof fetch = fetch) {
@@ -46,7 +48,44 @@ export class BoothService {
     this.listeners.add(listener); return () => { this.listeners.delete(listener); };
   }
   private publish(): void { for (const listener of this.listeners) listener(); }
-  async dispatch(productId: unknown, count: unknown, requestId: unknown): Promise<BoothTask> {
+  createExperience(): { id: string; token: string } {
+    const token = randomBytes(32).toString("hex"), id = randomUUID();
+    this.storage.set("booth_experiences", this.experienceKey(token), { id, taskId: null });
+    return { id, token };
+  }
+  private experienceKey(token: string): string {
+    return createHash("sha256").update(token).digest("hex");
+  }
+  private experience(token: unknown): { key: string; record: Experience } {
+    if (typeof token !== "string" || !/^[0-9a-f]{64}$/.test(token)) throw new BoothError("体验关联无效，请开始新体验或联系工作人员",403);
+    const key = this.experienceKey(token), record = this.storage.get<Experience>("booth_experiences",key);
+    if (!record) throw new BoothError("体验关联无效，请开始新体验或联系工作人员",403);
+    return { key, record };
+  }
+  taskConclusion(token: unknown): string {
+    try {
+      const { key, record } = this.experience(token);
+      if (!record.taskId || this.storage.get<string>("booth_task_experiences",record.taskId) !== key) return unknownProgress;
+      const task = this.storage.get<BoothTask>("booth_tasks",record.taskId);
+      if (!task || task.id !== record.taskId) return unknownProgress;
+      const conclusions: Record<BoothTask["status"],string> = {
+        submitting: "正在等待机器人接单，尚未确认是否受理，请稍候，不要重复确认取物。",
+        executing: "机器人已接单，尚未收到完成通知，请稍候。",
+        succeeded: "已收到取物完成通知，请到交付处领取。",
+        rejected: "机器人未接下这次取物，请核对选择或联系现场工作人员。",
+        uncertain: "机器人是否接单、取物是否结束尚未确认，请勿重复确认取物。请联系现场工作人员核对，当前尚未确认机器人是否停止。",
+        fault: "这次取物出现异常，尚未确认是否结束，请勿重复确认取物。请联系现场工作人员，当前尚未确认机器人是否停止。",
+        resolved: "工作人员已核对并解除本地占用，这不代表取物完成。领取情况请向现场工作人员确认。",
+      };
+      return conclusions[task.status] ? `${task.command.item} × ${task.command.count}：${conclusions[task.status]}` : unknownProgress;
+    } catch (error) {
+      if (!(error instanceof BoothError)) console.warn(JSON.stringify({event:"experience_progress_failed",errorCategory:"storage"}));
+      return unknownProgress;
+    }
+  }
+  async dispatch(productId: unknown, count: unknown, requestId: unknown, token?: unknown): Promise<BoothTask> {
+    // Legacy callers may dispatch without an experience; such tasks cannot later be claimed.
+    const experience = token === undefined ? null : this.experience(token);
     if (typeof requestId !== "string" || !/^[a-zA-Z0-9_-]{8,100}$/.test(requestId)) throw new BoothError("请求标识不合法");
     const product = this.config.products.find(p => p.id === productId);
     if (!product || typeof count !== "number" || !Number.isSafeInteger(count) || count < 1 || count > product.maxCount) throw new BoothError("物品或数量不在可选范围内");
@@ -58,6 +97,7 @@ export class BoothService {
       const priorId = this.storage.get<string>("booth_requests", requestId);
       const prior = priorId ? this.storage.get<BoothTask>("booth_tasks", priorId) : undefined;
       if (prior) {
+        if ((this.storage.get<string>("booth_task_experiences",prior.id) ?? null) !== (experience?.key ?? null)) throw new BoothError("这次取物属于另一段体验，请勿重复确认，联系工作人员核对",409);
         if (prior.productId !== product.id || JSON.stringify(prior.command) !== JSON.stringify(command)) throw new BoothError("同一请求标识的参数不同",409);
         db.exec("COMMIT"); return prior;
       }
@@ -68,6 +108,10 @@ export class BoothService {
       task = { id: randomUUID(), requestId, productId: product.id, command, status: "submitting", createdAt: now, updatedAt: now, message: "正在等待机器人受理" };
       this.storage.set("booth_tasks", task.id, task);
       this.storage.set("booth_requests", requestId, task.id);
+      if (experience) {
+        this.storage.set("booth_task_experiences",task.id,experience.key);
+        this.storage.set("booth_experiences",experience.key,{ ...experience.record, taskId: task.id });
+      }
       this.storage.set("booth", "active", task.id);
       db.exec("COMMIT");
     } catch (error) { db.exec("ROLLBACK"); throw error; }

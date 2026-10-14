@@ -37,6 +37,7 @@
 | `GET /api/booth/events` | SSE 状态推送 | 单进程、本地 SSE |
 | `POST /api/booth/requests` | 用户确认提交 | 内部 `requestId` 不传入机器人报文 |
 | `POST /api/booth/chat` | AI 建议 | 后端配置选择 GPT/DeepSeek |
+| `POST /api/booth/experiences` | 建立独立体验关联 | 刷新保留标签页凭据，后端核实关联任务；详见[实现与验证记录](ai-task-progress-validation-2026-10-14.md) |
 | `POST /api/booth/operator/resolve` | 工作人员解除本地占用 | 不停止/取消机器人任务 |
 
 **技术约束：**

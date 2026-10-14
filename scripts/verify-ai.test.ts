@@ -25,7 +25,7 @@ it("验证命令选择positive时仅发送原正向样本一次，报告结构�
     requests.push({path:req.url??"",body:JSON.parse(text)});
     res.writeHead(200,{"Content-Type":"application/json"});
     res.end(JSON.stringify({status:"completed",model:"returned-fixture-model",usage:{input_tokens:37,output_tokens:11,total_tokens:48},
-      output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({reply:"fixture private reply",selection:{productId:"water",count:1}})}]}]}));
+      output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({reply:"fixture private reply",taskStatusQuery:false,selection:{productId:"water",count:1}})}]}]}));
   });
   await new Promise<void>(resolve=>upstream!.listen(0,"127.0.0.1",resolve));
   const base="http://127.0.0.1:"+(upstream.address() as {port:number}).port;

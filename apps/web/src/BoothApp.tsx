@@ -2,11 +2,12 @@ import {useEffect,useLayoutEffect,useRef,useState} from "react";
 import {ArrowRight,ArrowUpRight,Check,CheckCircle2,ChevronRight,Clock3,LoaderCircle,Minus,Plus,RefreshCw,Send,ShieldCheck,Sparkles,X,AlertCircle,AlertTriangle,CircleX,UserRoundCheck} from "lucide-react";
 import type {BoothSnapshot,BoothProduct,BoothTask,BoothChatMessage,BoothAdvice} from "@bluesword/contracts";
 import {ProductArt} from "./ProductArt";
+import {openExperience,savedExperience,forgetExperience,type BoothExperience} from "./experience";
 import "./booth.css";
 const labels:Record<BoothTask["status"],string>={submitting:"等待机器人接单",executing:"机器人已接单",succeeded:"已完成",rejected:"机器人未接单",uncertain:"等待核对",fault:"需要协助",resolved:"工作人员已处理"};
 class RequestError extends Error { constructor(message:string,readonly status:number){super(message);} }
 const pendingKey="bluesword.booth.pending";
-type Pending={productId:string;count:number;requestId:string};
+type Pending={productId:string;count:number;requestId:string;experienceId?:string};
 type DisplayStatus=BoothTask["status"]|"idle"|"alert";
 type ConversationMessage=BoothChatMessage|{role:"event";content:string;status:DisplayStatus};
 function StatusIcon({status}:{status:DisplayStatus}){
@@ -28,7 +29,8 @@ async function api<T>(url:string,body?:unknown,headers?:Record<string,string>):P
   const response=await fetch(url,{...(body===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json",...headers},body:JSON.stringify(body)}),signal:AbortSignal.timeout(30000)});
   const data=await response.json();if(!response.ok)throw new RequestError(typeof data.data==="string"?data.data:"暂时无法连接，请稍后重试",response.status);return data as T;
 }
-function loadPending():Pending|null{try{const p=JSON.parse(localStorage.getItem(pendingKey)??"null");return p&&typeof p.productId==="string"&&Number.isSafeInteger(p.count)&&typeof p.requestId==="string"?p:null;}catch{return null;}}
+function loadPending():Pending|null{try{const p=JSON.parse(localStorage.getItem(pendingKey)??"null");return p&&typeof p.productId==="string"&&Number.isSafeInteger(p.count)&&typeof p.requestId==="string"&&(!p.experienceId||p.experienceId===savedExperience()?.id)?p:null;}catch{return null;}}
+function clearSavedPending(request:Pending){try{if(JSON.parse(localStorage.getItem(pendingKey)??"null")?.requestId===request.requestId)localStorage.removeItem(pendingKey);}catch{/* A saved requestId remains safe to check again. */}}
 function resizeComposer(input:HTMLTextAreaElement){
   input.style.height="32px";
   input.style.height=input.scrollHeight+input.offsetHeight-input.clientHeight+"px";
@@ -44,6 +46,22 @@ export function BoothApp(){
   const [operator,setOperator]=useState(location.hash==="#operations"),[token,setToken]=useState(""),[checked,setChecked]=useState(false);
   const messageList=useRef<HTMLDivElement>(null),selectionVersion=useRef(0),experienceVersion=useRef(0),draftVersion=useRef(0),currentState=useRef(state);
   const composerInput=useRef<HTMLTextAreaElement>(null),composing=useRef(false);
+  const experienceReady=useRef<Promise<BoothExperience>|null>(null),releaseExperience=useRef<(()=>void)|null>(null);
+  const experienceAbort=useRef<AbortController|null>(null);
+  function prepareExperience(fresh=false){
+    experienceAbort.current?.abort();const controller=new AbortController();experienceAbort.current=controller;
+    releaseExperience.current?.();releaseExperience.current=null;
+    const version=experienceVersion.current;
+    const ready=openExperience(fresh,controller.signal).then(({credential,release})=>{
+      if(version!==experienceVersion.current){release();throw new Error("体验已切换，请重新操作。");}
+      releaseExperience.current=release;
+      setPending(current=>current?.experienceId&&current.experienceId!==credential.id?null:current);
+      return credential;
+    });
+    experienceReady.current=ready;
+    void ready.catch(e=>{if(version===experienceVersion.current)setError(e.message);});
+  }
+  useEffect(()=>{prepareExperience();return()=>{experienceVersion.current++;experienceAbort.current?.abort();releaseExperience.current?.();};},[]);
   currentState.current=state;
   const selected=state?.products.find(p=>p.id===(pending?.productId??selectedId)),quantity=pending?.count??count;
   const [experienceTaskId,setExperienceTaskId]=useState<string|null>(null);
@@ -105,23 +123,29 @@ export function BoothApp(){
     list.addEventListener("scroll",trackPosition);list.addEventListener("keydown",trackKeyboard);observer.observe(list);
     return()=>{observer.disconnect();list.removeEventListener("scroll",trackPosition);list.removeEventListener("keydown",trackKeyboard);};
   },[!!state]);
-  useEffect(()=>{if(pending&&state?.tasks.some(t=>t.requestId===pending.requestId)){setPending(null);localStorage.removeItem(pendingKey);}},[state,pending]);
+  useEffect(()=>{if(pending&&state?.tasks.some(t=>t.requestId===pending.requestId)){setPending(null);clearSavedPending(pending);}},[state,pending]);
   function choose(p:BoothProduct,n=1){if(pending||busy)return;selectionVersion.current++;setSelectedId(p.id);setCount(n);setError("");}
   function changeCount(n:number){selectionVersion.current++;setCount(n);}
   async function submit(){
     if(!selected||busy||!connected)return;selectionVersion.current++;setBusy(true);setError("");
-    const request=pending??{productId:selected.id,count:quantity,requestId:crypto.randomUUID()};
+    let credential:BoothExperience;
+    try{if(!experienceReady.current)throw new Error("体验关联尚未就绪，请稍候。");credential=await experienceReady.current;}
+    catch(e){setError(e instanceof Error?e.message:"无法建立体验关联，本次未发送。");setBusy(false);return;}
+    if(pending?.experienceId&&pending.experienceId!==credential.id){setError("这次取物属于另一段体验，请联系工作人员核对。");setBusy(false);return;}
+    const request=pending??{productId:selected.id,count:quantity,requestId:crypto.randomUUID(),experienceId:credential.id};
     // Do not send without a saved requestId that can be recovered after reload.
     try{localStorage.setItem(pendingKey,JSON.stringify(request));}
     catch{setError("无法保存取物信息，本次未发送。请检查浏览器存储设置后重试。");setBusy(false);return;}
     setPending(request);
-    try{await api("/api/booth/requests",request);setPending(null);localStorage.removeItem(pendingKey);await requestSnapshot("/api/booth");}
-    catch(e){if(e instanceof RequestError&&[400,409,503].includes(e.status)){setPending(null);localStorage.removeItem(pendingKey);}setError(e instanceof RequestError?e.message:"尚未收到取物确认的反馈，请核对这次取物");}finally{setBusy(false);}
+    try{await api("/api/booth/requests",request,request.experienceId?{"X-Booth-Experience":credential.token}:undefined);setPending(null);clearSavedPending(request);await requestSnapshot("/api/booth");}
+    catch(e){if(e instanceof RequestError&&[400,409,503].includes(e.status)){setPending(null);clearSavedPending(request);}setError(e instanceof RequestError?e.message:"尚未收到取物确认的反馈，请核对这次取物");}finally{setBusy(false);}
   }
   function startExperience(){
+    try{forgetExperience();}catch{setError("无法切换体验关联，请检查浏览器存储设置或联系工作人员。");return;}
     experienceVersion.current++;selectionVersion.current++;
     setMessages([]);setText("");setThinking(false);setChatError("");
     setSelectedId(null);setCount(1);setError("");setExperienceTaskId(null);
+    prepareExperience(true);
   }
   async function chat(input=text,fromQuickPrompt=false){
     if(!input.trim()||thinking||(fromQuickPrompt&&text.length>0))return;setThinking(true);setChatError("");setText("");
@@ -129,7 +153,7 @@ export function BoothApp(){
     const userMessage:BoothChatMessage={role:"user",content:input.trim()};
     const next:BoothChatMessage[]=[...messages.filter((message):message is BoothChatMessage=>message.role!=="event"),userMessage];
     setMessages(current=>[...current,userMessage]);
-    try{const advice=await api<BoothAdvice>("/api/booth/chat",{messages:next.slice(-11)});if(experience!==experienceVersion.current)return;setMessages(current=>[...current,{role:"assistant",content:advice.reply}]);
+    try{const credential=await experienceReady.current?.catch(()=>null);if(experience!==experienceVersion.current)return;const advice=await api<BoothAdvice>("/api/booth/chat",{messages:next.slice(-11)},credential?{"X-Booth-Experience":credential.token}:undefined);if(experience!==experienceVersion.current)return;setMessages(current=>[...current,{role:"assistant",content:advice.reply}]);
       const latestState=currentState.current,p=latestState?.products.find(p=>p.id===advice.selection?.productId);
       if(p&&advice.selection&&!blocked&&!latestState?.active&&!latestState?.alert&&taskId===latestState?.tasks[0]?.id&&version===selectionVersion.current)choose(p,advice.selection.count);}
     catch(e){if(experience===experienceVersion.current){setChatError(e instanceof Error?e.message:"智能助手暂不可用");if(draft===draftVersion.current)setText(input);}}finally{if(experience===experienceVersion.current)setThinking(false);}

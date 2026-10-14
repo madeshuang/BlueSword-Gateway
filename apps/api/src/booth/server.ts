@@ -43,6 +43,7 @@ export function createBoothApplication(config: BoothConfig, options: { transport
     }
     if (req.method !== "POST") return json(res,404,{code:1,data:"Not found",success:false});
     const body = await readBody(req);
+    if (url.pathname === "/api/booth/experiences") return json(res,200,service.createExperience());
     if (url.pathname === "/api/task/finished") {
       if (Object.keys(body).length !== 0 && (body.result !== "success" || Object.keys(body).some(k=>k!=="result"))) throw new BoothError("完成通知仅接受空JSON对象或 result:success");
       service.finished(); return json(res,200,{code:1,data:"OK",success:true});
@@ -52,7 +53,7 @@ export function createBoothApplication(config: BoothConfig, options: { transport
       service.error(body.message.trim()); return json(res,200,{code:1,data:"OK",success:true});
     }
     if (url.pathname === "/api/booth/requests") {
-      const task = await service.dispatch(body.productId,body.count,body.requestId);
+      const task = await service.dispatch(body.productId,body.count,body.requestId,req.headers["x-booth-experience"]);
       return json(res,200,{task});
     }
     if (url.pathname === "/api/booth/chat") {
@@ -61,7 +62,14 @@ export function createBoothApplication(config: BoothConfig, options: { transport
         body.messages.at(-1).role !== "user") throw new BoothError("对话内容不合法");
       if (aiBusy) throw new BoothError("智能助手正在处理请求，请稍后再试",429);
       aiBusy = true;
-      try { return json(res,200,await assistant.advise(body.messages as BoothChatMessage[])); }
+      try {
+        const token = req.headers["x-booth-experience"];
+        const advice = await assistant.advise(body.messages as BoothChatMessage[],service.taskConclusion(token));
+        // Re-read after the model call: a completion may have arrived while it was thinking.
+        return json(res,200,advice.taskStatusQuery
+          ? { reply: service.taskConclusion(token), selection: null }
+          : { reply: advice.reply, selection: advice.selection });
+      }
       finally { aiBusy = false; }
     }
     if (url.pathname === "/api/booth/operator/resolve") {

@@ -3,6 +3,7 @@ const assert=require('node:assert/strict');
 const {spawn}=require('node:child_process');
 const {once}=require('node:events');
 const {createServer}=require('node:http');
+const {randomBytes,randomUUID}=require('node:crypto');
 const {mkdtempSync,mkdirSync,readFileSync,writeFileSync}=require('node:fs');
 const {resolve,join,dirname}=require('node:path');
 const {createRequire}=require('node:module');
@@ -15,6 +16,9 @@ const snapshot={products,tasks:[],active:null,waiting:null,alert:null,mode:'simu
   dispatch:{ready:false,reason:null},operator:{configured:false},ai:{provider:'OpenAI',model:'browser-fixture',configured:true}};
 const streams=new Set(),requests=[],errors=[],passed=[];
 const api=createServer((req,res)=>{
+  if(req.method==='POST'&&req.url==='/api/booth/experiences'){
+    req.resume();res.writeHead(200,{'Content-Type':'application/json'});return res.end(JSON.stringify({id:randomUUID(),token:randomBytes(32).toString('hex')}));
+  }
   if(req.method==='GET'&&req.url==='/api/booth/events'){
     res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-cache'});streams.add(res);
     res.write('data: '+JSON.stringify(snapshot)+'\n\n');res.on('close',()=>streams.delete(res));return;
