@@ -8,6 +8,7 @@ dist/
 *.log
 *.tsbuildinfo
 coverage/
+.~*
 .claude/
 .codex/
 .tmp/
@@ -18,8 +19,6 @@ coverage/
 /AGENTS.md
 /docs/*
 !/docs/接口文档.md
-!/docs/机器人团队联调指南.md
-!/docs/manual-interface-test.md
-!/docs/delivery-readme.md
+!/docs/真实机器人联调指南.md
 !/docs/booth-inventory.md
 !/docs/task-id-proposal.md
