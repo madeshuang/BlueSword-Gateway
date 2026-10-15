@@ -27,7 +27,7 @@ export class BoothService {
       db.exec("COMMIT");
     } catch (error) { if (db.isTransaction) db.exec("ROLLBACK"); throw error; }
     // A pre-response restart is never interpreted as rejection or retried automatically.
-    if (current?.status === "submitting") this.update(current, "uncertain", "服务重启，受理结果尚未确认；请工作人员核对");
+    if (current?.status === "submitting") this.update(current, "uncertain", "服务重启，尚未确认机器人是否接单；请工作人员核对");
   }
   products(): BoothStockProduct[] {
     return this.config.products.map(product => ({ ...product, availableCount: this.availableCount(product.id) }));
@@ -90,9 +90,9 @@ export class BoothService {
     return createHash("sha256").update(token).digest("hex");
   }
   private experience(token: unknown): { key: string; record: Experience } {
-    if (typeof token !== "string" || !/^[0-9a-f]{64}$/.test(token)) throw new BoothError("体验关联无效，请开始新体验或联系工作人员",403);
+    if (typeof token !== "string" || !/^[0-9a-f]{64}$/.test(token)) throw new BoothError("本页体验信息无效，请开始新体验或联系工作人员",403);
     const key = this.experienceKey(token), record = this.storage.get<Experience>("booth_experiences",key);
-    if (!record) throw new BoothError("体验关联无效，请开始新体验或联系工作人员",403);
+    if (!record) throw new BoothError("本页体验信息无效，请开始新体验或联系工作人员",403);
     return { key, record };
   }
   taskProgress(token: unknown): BoothTaskProgress {
@@ -103,13 +103,13 @@ export class BoothService {
       const task = this.storage.get<BoothTask>("booth_tasks",record.taskId);
       if (!task || task.id !== record.taskId) return unknown;
       const conclusions: Record<BoothTask["status"],string> = {
-        submitting: "正在等待机器人接单，尚未确认是否受理，请稍候，不要重复确认取物。",
+        submitting: "正在等待机器人回复是否接单，请稍候，不要重复确认取物。",
         executing: "机器人已接单，尚未收到完成通知，请稍候。",
         succeeded: "已收到取物完成通知，请到交付处领取。",
         rejected: "机器人未接下这次取物，请核对选择或联系现场工作人员。",
         uncertain: "机器人是否接单、取物是否结束尚未确认，请勿重复确认取物。请联系现场工作人员核对，当前尚未确认机器人是否停止。",
         fault: "这次取物出现异常，尚未确认是否结束，请勿重复确认取物。请联系现场工作人员，当前尚未确认机器人是否停止。",
-        resolved: "工作人员已核对并解除本地占用，这不代表取物完成。领取情况请向现场工作人员确认。",
+        resolved: "工作人员已核对并解除新任务限制，这不代表取物完成。领取情况请向现场工作人员确认。",
       };
       if (!conclusions[task.status]) return unknown;
       const conclusion = `${task.command.item} × ${task.command.count}：${conclusions[task.status]}`;
@@ -129,7 +129,7 @@ export class BoothService {
         rejected: ["机器人没有接下这次取物，请核对选择，或联系现场工作人员。"],
         uncertain: ["现在还无法确认是否接单或取好，先不要重复确认取物。请联系现场工作人员核对，机器人是否停止也尚未确认。"],
         fault: ["这次取物出了异常，是否结束、机器人是否停止都还未确认。先不要重复确认取物，请联系现场工作人员协助。"],
-        resolved: ["工作人员已核对并解除占用，但这不代表物品已经取好。领取情况请向现场工作人员确认。"],
+        resolved: ["工作人员已核对并解除新任务限制，但这不代表物品已经取好。领取情况请向现场工作人员确认。"],
       };
       return { conclusion, replyOptions: replyOptions[task.status] };
     } catch (error) {
@@ -161,7 +161,7 @@ export class BoothService {
       const available = this.availableCount(product.id);
       if (count > available) throw new BoothError(this.stockShortage(product.name,count,available),409);
       const now = new Date().toISOString();
-      task = { id: randomUUID(), requestId, productId: product.id, command, status: "submitting", createdAt: now, updatedAt: now, message: "正在等待机器人受理" };
+      task = { id: randomUUID(), requestId, productId: product.id, command, status: "submitting", createdAt: now, updatedAt: now, message: "正在等待机器人接单" };
       this.storage.set("booth_tasks", task.id, task);
       this.storage.set("booth_stock", product.id, available - count);
       this.storage.set("booth_requests", requestId, task.id);
@@ -184,21 +184,21 @@ export class BoothService {
       upstreamStatus = response.status;
       if (!response.ok) throw new Error("机器人接口未返回成功的HTTP响应");
       const receipt = await response.json() as { success?: unknown; data?: unknown };
-      if (!receipt || typeof receipt.success !== "boolean") throw new Error("机器人受理响应格式不明");
+      if (!receipt || typeof receipt.success !== "boolean") throw new Error("机器人接单回复格式无法识别");
       console.info(JSON.stringify({ event: "robot_receipt", taskId: task.id, requestId: task.requestId, upstreamStatus,
         accepted: receipt.success, durationMs: Math.round(performance.now() - started) }));
       const current = this.storage.get<BoothTask>("booth_tasks", task.id)!;
       // An early callback is stronger evidence than the delayed acceptance response.
       if (current.status === "submitting") {
         this.update(current, receipt.success ? "executing" : "rejected",
-          receipt.success ? "机器人已受理，正在执行取物任务" :
-          typeof receipt.data === "string" ? receipt.data.slice(0,1000) : "机器人未受理本次任务");
+          receipt.success ? "机器人已接单，正在等待取物结果" :
+          typeof receipt.data === "string" ? receipt.data.slice(0,1000) : "机器人未接受本次任务");
       }
     } catch {
       console.warn(JSON.stringify({ event: "robot_receipt_failed", taskId: task.id, requestId: task.requestId, upstreamStatus,
         errorCategory: "dispatch_result_unconfirmed", durationMs: Math.round(performance.now() - started) }));
       const current = this.storage.get<BoothTask>("booth_tasks", task.id)!;
-      if (current.status === "submitting") this.update(current, "uncertain", "暂未确认机器人是否受理，请工作人员核对；系统不会自动重发");
+      if (current.status === "submitting") this.update(current, "uncertain", "暂未确认机器人是否接单，请工作人员核对；系统不会自动重发");
     }
     return this.storage.get<BoothTask>("booth_tasks", task.id)!;
   }
@@ -263,7 +263,7 @@ export class BoothService {
     const task = this.active();
     if (task && !["fault","uncertain"].includes(task.status)) throw new BoothError("执行中的任务不能在我方界面取消",409);
     this.audit("operator_resolve", { activeId: task?.id ?? null });
-    if (task) this.update(task, "resolved", "工作人员已现场核对并解除本地占用");
+    if (task) this.update(task, "resolved", "工作人员已现场核对并解除新任务限制");
     this.storage.set("booth", "alert", null); this.publish();
   }
   private update(task: BoothTask, status: BoothTask["status"], message: string): void {

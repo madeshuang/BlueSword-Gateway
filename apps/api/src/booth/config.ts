@@ -20,7 +20,7 @@ export function readBoothConfig(): BoothConfig {
   const dispatchUrl = process.env.ROBOT_DISPATCH_URL;
   if (dispatchUrl) {
     const url = new URL(dispatchUrl);
-    if (mode === "simulator" && !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) throw new Error("测试对端必须使用回环地址");
+    if (mode === "simulator" && !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) throw new Error("机器人模拟器必须使用本机回环地址（如 127.0.0.1）");
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("机器人地址必须为无凭据的 HTTP(S) URL");
   }
   const products = JSON.parse(readFileSync(resolve(process.env.BOOTH_CATALOG_PATH ?? "config/booth-catalog.example.json"), "utf8")) as unknown;

@@ -125,7 +125,7 @@ async function testStorageSubmission(browser,webUrl){
   await page.getByText('网关状态同步正常',{exact:false}).waitFor();
   await page.getByText('工作人员操作凭据尚未配置',{exact:false}).waitFor();
   assert.equal(await page.getByLabel('工作人员凭据').isDisabled(),true);
-  assert.equal(await page.getByRole('button',{name:'解除本地占用',exact:true}).isDisabled(),true);
+  assert.equal(await page.getByRole('button',{name:'解除新任务限制',exact:true}).isDisabled(),true);
   await page.getByRole('button',{name:'关闭工作人员入口'}).click();
   assert.equal(requests.length,0);assert.equal((await (await fetch(apiUrl+'/api/booth')).json()).tasks.length,0);
   await page.screenshot({path:join(output,'desktop-not-configured.png'),fullPage:true});
@@ -144,7 +144,7 @@ async function testStorageSubmission(browser,webUrl){
     await staffPage.screenshot({path:join(output,'staff-direct-desktop.png'),fullPage:true});
     await staffPage.setViewportSize({width:390,height:844});
     await credential.fill('browser-test-operator');await confirmation.check();
-    assert.equal(await staffPage.getByRole('button',{name:'解除本地占用',exact:true}).isDisabled(),true,'无异常任务时不能解除占用');
+    assert.equal(await staffPage.getByRole('button',{name:'解除新任务限制',exact:true}).isDisabled(),true,'无异常任务时不能解除占用');
     for(const control of [dialog,credential,confirmation,staffPage.getByRole('button',{name:'关闭工作人员入口'})]){
       const box=await control.boundingBox();assert(box&&box.x>=0&&box.x+box.width<=390&&box.y>=0&&box.y+box.height<=844,'窄屏工作人员页面与必要控件应完整可见');
     }
@@ -215,12 +215,12 @@ async function testStorageSubmission(browser,webUrl){
   assert.equal(await notices.filter({hasText:'这次取物需要工作人员协助'}).count(),1,'相同任务故障状态重复推送不重播');
   assert.equal(await notices.filter({hasText:'已取好'}).count(),1,'故障不能冒充完成');
   await page.screenshot({path:join(output,'desktop-fault.png'),fullPage:true});
-  await openOperations(page);await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox',{name:'已现场核对机器人停止及物品情况',exact:true}).check();await page.getByRole('button',{name:'解除本地占用'}).click();await page.locator('.task-panel.resolved').waitFor();await page.getByRole('button',{name:'关闭工作人员入口'}).click();
+  await openOperations(page);await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox',{name:'已现场核对机器人停止及物品情况',exact:true}).check();await page.getByRole('button',{name:'解除新任务限制'}).click();await page.locator('.task-panel.resolved').waitFor();await page.getByRole('button',{name:'关闭工作人员入口'}).click();
   await notices.filter({hasText:'这次取物已由工作人员处理，领取情况请向现场工作人员确认'}).waitFor();
   assert.match(await page.locator('.task-panel').innerText(),/领取情况请向现场工作人员确认/);
   assert.doesNotMatch(await page.locator('.task-panel').innerText(),/已取好|占用|本地/);
   await openOperations(page);
-  await page.getByRole('dialog').getByText('工作人员已现场核对并解除本地占用',{exact:true}).waitFor();
+  await page.getByRole('dialog').getByText('工作人员已现场核对并解除新任务限制',{exact:true}).waitFor();
   await page.getByRole('button',{name:'关闭工作人员入口'}).click();
   await assertStatusAppearance(page.locator('.task-panel'),'rgb(82, 96, 109)','工作人员处理');
   mode='uncertain';await page.getByRole('button',{name:'选择矿泉水',exact:true}).click();await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.uncertain').waitFor();
@@ -230,7 +230,7 @@ async function testStorageSubmission(browser,webUrl){
   assert.doesNotMatch(await page.locator('.task-panel').innerText(),/占用|本地/);
   assert.equal(await notices.filter({hasText:'已取好'}).count(),1,'受理不明不能冒充完成');
   assert.equal(chatRequests.length,0,'故障、收尾与受理不明也不得调用模型');
-  await openOperations(page);await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox',{name:'已现场核对机器人停止及物品情况',exact:true}).check();await page.getByRole('button',{name:'解除本地占用'}).click();await page.locator('.task-panel.resolved').waitFor();await page.getByRole('button',{name:'关闭工作人员入口'}).click();
+  await openOperations(page);await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox',{name:'已现场核对机器人停止及物品情况',exact:true}).check();await page.getByRole('button',{name:'解除新任务限制'}).click();await page.locator('.task-panel.resolved').waitFor();await page.getByRole('button',{name:'关闭工作人员入口'}).click();
 
   await page.clock.setSystemTime(new Date(Date.now()-3600000));
   mode='silent';const before=requests.length;
@@ -250,8 +250,8 @@ async function testStorageSubmission(browser,webUrl){
   await page.getByRole('button',{name:'联系工作人员核对',exact:true}).click();
   await page.getByRole('dialog').waitFor();
   await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox',{name:'已现场核对机器人停止及物品情况',exact:true}).check();
-  assert.equal(await page.getByRole('button',{name:'解除本地占用',exact:true}).isDisabled(),true);
-  await page.getByText('执行中任务仍保持占用',{exact:false}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'解除新任务限制',exact:true}).isDisabled(),true);
+  await page.getByText('机器人已接单，尚未收到完成通知，网关暂不接受新任务',{exact:false}).waitFor();
   await page.getByRole('button',{name:'关闭工作人员入口'}).click();
   await stop(api);api=launch(['--import','tsx','apps/api/src/booth/index.ts'],env);await ready(apiUrl+'/api/health',api);
   assert.equal(chatRequests.length,0);

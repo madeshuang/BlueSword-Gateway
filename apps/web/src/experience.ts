@@ -11,7 +11,7 @@ export function forgetExperience(): void { sessionStorage.removeItem(key); }
 export async function openExperience(fresh = false, signal?: AbortSignal): Promise<{ credential: BoothExperience; release: () => void }> {
   // Browsers copy sessionStorage when duplicating/opening a tab with an opener.
   // An exclusive lifetime lock prevents those tabs from sharing a credential.
-  if (!navigator.locks) throw new Error("浏览器暂不支持独立体验关联，请使用新版浏览器或联系工作人员。");
+  if (!navigator.locks) throw new Error("浏览器暂不支持为本页单独保存体验信息，请使用新版浏览器或联系工作人员。");
   // Only a reload may restore a credential. A new navigation may contain a
   // copied sessionStorage even after the opener has closed and released its lock.
   const navigation = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
@@ -22,7 +22,7 @@ export async function openExperience(fresh = false, signal?: AbortSignal): Promi
     signal?.throwIfAborted();
     if (!credential) {
       const response = await fetch("/api/booth/experiences", { method: "POST", signal: signal ? AbortSignal.any([signal,AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000) });
-      if (!response.ok) throw new Error("暂时无法建立体验关联，请刷新页面或联系工作人员。");
+      if (!response.ok) throw new Error("暂时无法建立本页体验信息，请刷新页面或联系工作人员。");
       credential = await response.json() as BoothExperience;
     }
     const current = credential;
@@ -36,7 +36,7 @@ export async function openExperience(fresh = false, signal?: AbortSignal): Promi
     });
     if (!acquired) { credential = null; continue; }
     try { signal?.throwIfAborted();sessionStorage.setItem(key,JSON.stringify(current)); }
-    catch { release(); throw new Error("无法保存体验关联，本次未发送。请检查浏览器存储设置后重试。"); }
+    catch { release(); throw new Error("无法保存本页体验信息，本次未发送。请检查浏览器存储设置后重试。"); }
     return { credential: current, release };
   }
 }

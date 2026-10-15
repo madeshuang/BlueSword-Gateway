@@ -160,8 +160,8 @@ export function BoothApp(){
     if(!selected||busy||!connected)return;selectionVersion.current++;setBusy(true);setError("");
     if(!pending&&quantity>Math.min(selected.maxCount,selected.availableCount)){setError("所选数量超过当前可取数量，请重新确认。");setBusy(false);return;}
     let credential:BoothExperience;
-    try{if(!experienceReady.current)throw new Error("体验关联尚未就绪，请稍候。");credential=await experienceReady.current;}
-    catch(e){setError(e instanceof Error?e.message:"无法建立体验关联，本次未发送。");setBusy(false);return;}
+    try{if(!experienceReady.current)throw new Error("本页体验信息尚未准备好，请稍候。");credential=await experienceReady.current;}
+    catch(e){setError(e instanceof Error?e.message:"无法建立本页体验信息，本次未发送。");setBusy(false);return;}
     if(pending?.experienceId&&pending.experienceId!==credential.id){setError("这次取物属于另一段体验，请联系工作人员核对。");setBusy(false);return;}
     const request=pending??{productId:selected.id,count:quantity,requestId:crypto.randomUUID(),experienceId:credential.id};
     // Do not send without a saved requestId that can be recovered after reload.
@@ -184,7 +184,7 @@ export function BoothApp(){
     }finally{setBusy(false);}
   }
   function startExperience(){
-    try{forgetExperience();}catch{setError("无法切换体验关联，请检查浏览器存储设置或联系工作人员。");return;}
+    try{forgetExperience();}catch{setError("无法开始新体验，请检查浏览器存储设置或联系工作人员。");return;}
     experienceVersion.current++;selectionVersion.current++;
     taskThought.current=null;
     setMessages([]);setText("");setThinking(false);setChatError("");
@@ -245,6 +245,6 @@ export function BoothApp(){
       <dt>当前状态</dt><dd>{state.alert?"全局告警":latest?labels[latest.status]:"无当前任务"}</dd>
       {latest&&<><dt>任务标识</dt><dd>{latest.id}</dd><dt>任务记录原文</dt><dd>{latest.message}</dd></>}
       {state.alert&&<><dt>告警原文</dt><dd>{state.alert}</dd></>}
-    </dl></section><p>此操作仅解除我方占用，不向机器人发送停止或取消指令。请先现场确认机器人已停止、物品情况已核对。入口可见不代表拥有操作权限。</p>{!state.operator.configured&&<p role="status" className="operator-waiting">工作人员操作凭据尚未配置，暂不能解除占用或重置库存。请由启动服务的负责人设置 BOOTH_OPERATOR_TOKEN 并重启 API；不要在展示页面分享凭据。</p>}{state.active?.status==="executing"&&<p className="operator-waiting">执行中任务仍保持占用；请核对机器人实际情况并联系机器人负责人。此入口不能取消执行中任务，也不能凭等待时长解除占用。</p>}<label>工作人员凭据<input type="password" value={token} onChange={e=>setToken(e.target.value)} autoComplete="off" disabled={!state.operator.configured}/></label><label className="check-label"><input type="checkbox" checked={checked} onChange={e=>setChecked(e.target.checked)} disabled={!state.operator.configured}/>已现场核对机器人停止及物品情况</label><button className="primary-button" onClick={()=>void resolve()} disabled={busy||!connected||!state.operator.configured||!checked||!token||(!state.alert&&!["fault","uncertain"].includes(state.active?.status??""))}><RefreshCw size={16}/>解除本地占用</button><StockResetPanel products={state.products} disabled={busy||!connected||!state.operator.configured||!token} blocked={blocked} onReset={resetStock}/>{error&&<p role="alert">{error}</p>}</section></div>}
+    </dl></section><p>此操作仅解除网关接收新任务的限制，不向机器人发送停止或取消指令，也不会恢复库存。请先现场确认机器人已停止、物品情况已核对。入口可见不代表拥有操作权限。</p>{!state.operator.configured&&<p role="status" className="operator-waiting">工作人员操作凭据尚未配置，暂不能解除新任务限制或重置库存。请由启动服务的负责人设置 BOOTH_OPERATOR_TOKEN 并重启 API；不要在展示页面分享凭据。</p>}{state.active?.status==="executing"&&<p className="operator-waiting">机器人已接单，尚未收到完成通知，网关暂不接受新任务；请核对机器人实际情况并联系机器人负责人。此入口不能取消执行中任务，也不能凭等待时长解除新任务限制。</p>}<label>工作人员凭据<input type="password" value={token} onChange={e=>setToken(e.target.value)} autoComplete="off" disabled={!state.operator.configured}/></label><label className="check-label"><input type="checkbox" checked={checked} onChange={e=>setChecked(e.target.checked)} disabled={!state.operator.configured}/>已现场核对机器人停止及物品情况</label><button className="primary-button" onClick={()=>void resolve()} disabled={busy||!connected||!state.operator.configured||!checked||!token||(!state.alert&&!["fault","uncertain"].includes(state.active?.status??""))}><RefreshCw size={16}/>解除新任务限制</button><StockResetPanel products={state.products} disabled={busy||!connected||!state.operator.configured||!token} blocked={blocked} onReset={resetStock}/>{error&&<p role="alert">{error}</p>}</section></div>}
   </div>;
 }

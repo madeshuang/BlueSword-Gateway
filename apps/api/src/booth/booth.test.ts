@@ -63,7 +63,7 @@ describe("体验关联取物进度 HTTP 边界",()=>{
     expect(await query()).toEqual({reply,selection:null});
     reply="机械臂已经抓到了水，预计十秒后送到。";expect((await query()).reply).toContain("出现异常");
     await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止"},{"X-Operator-Token":"test-operator"});
-    reply="工作人员已核对并解除占用，但这不代表物品已经取好。领取情况请向现场工作人员确认。";
+    reply="工作人员已核对并解除新任务限制，但这不代表物品已经取好。领取情况请向现场工作人员确认。";
     expect(await query()).toEqual({reply,selection:null});
     reply="已经取好了，请到交付处领取。";expect((await query()).reply).toContain("这不代表取物完成");
     receipt=false;await post("/api/booth/requests",command("rejected-natural"),headers);
@@ -111,7 +111,7 @@ describe("体验关联取物进度 HTTP 边界",()=>{
     const a=await (await post("/api/booth/experiences")).json(),b=await (await post("/api/booth/experiences")).json();
     const pending=post("/api/booth/requests",command(),{"X-Booth-Experience":a.token});
     try{
-      await started;expect(await ask(a.token)).toContain("等待机器人接单");
+      await started;expect(await ask(a.token)).toContain("等待机器人回复是否接单");
       expect(await ask(b.token)).toContain("暂时无法确认");
     }finally{release();}
     const first=(await (await pending).json()).task;
@@ -126,7 +126,7 @@ describe("体验关联取物进度 HTTP 边界",()=>{
     await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止"},{"X-Operator-Token":"test-operator"});
     expect(await ask(b.token)).toContain("这不代表取物完成");
     await app!.close();app=undefined;await start(c,{assistantTransport:transport});
-    expect(await ask(a.token)).toContain("取物完成通知");expect(await ask(b.token)).toContain("解除本地占用");
+    expect(await ask(a.token)).toContain("取物完成通知");expect(await ask(b.token)).toContain("解除新任务限制");
     const fresh=await (await post("/api/booth/experiences")).json();expect(await ask(fresh.token)).toContain("暂时无法确认");
     expect((await (await fetch(base+"/api/booth")).json()).tasks).toHaveLength(2);
     // An old retry must not replace the experience's newer associated task.

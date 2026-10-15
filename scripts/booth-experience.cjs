@@ -40,7 +40,7 @@ async function ready(url,process){await until(async()=>{if(process.exitCode!==nu
     async function callback(path,body){const res=await fetch(apiUrl+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});assert.equal(res.status,200);}
     const a=await context.newPage();await visit(a);const original=await experience(a);
     await a.getByRole('button',{name:'选择矿泉水',exact:true}).click();await a.getByRole('button',{name:'确认取物',exact:true}).click();await a.locator('.task-panel.submitting').waitFor();
-    await ask(a,'等待机器人接单');await a.reload();await until(async()=>!!await experience(a));assert.deepEqual(await experience(a),original);await ask(a,'等待机器人接单');
+    await ask(a,'等待机器人回复是否接单');await a.reload();await until(async()=>!!await experience(a));assert.deepEqual(await experience(a),original);await ask(a,'等待机器人回复是否接单');
     releaseReceipt();await a.locator('.task-panel.executing').waitFor();await ask(a,'机器人已接单，尚未收到完成通知');assert.equal(robotCalls,1);passed.push('等待受理期间刷新恢复关联且不重复发送');
     await callback('/api/task/finished',{});await a.locator('.task-panel.succeeded').waitFor();await ask(a,'取物完成通知');passed.push('任务完成后仍可查询');
     const b=await context.newPage();await visit(b);assert.notEqual((await experience(b)).token,original.token);await ask(b,'暂时无法确认');
@@ -63,7 +63,7 @@ async function ready(url,process){await until(async()=>{if(process.exitCode!==nu
     // Saving a credential must succeed before any task can be dispatched.
     const fail=await browser.newContext(),blocked=await fail.newPage();blocked.on('pageerror',e=>errors.push(e.message));
     await blocked.addInitScript(()=>{const set=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k==='bluesword.booth.experience')throw new DOMException('Injected','QuotaExceededError');return set.call(this,k,v);};});
-    await blocked.goto(webUrl);await blocked.getByRole('button',{name:'选择矿泉水',exact:true}).click();await blocked.getByRole('button',{name:'确认取物',exact:true}).click();await blocked.getByRole('alert').filter({hasText:'无法保存体验关联'}).first().waitFor();assert.equal(robotCalls,2);await ask(blocked,'暂时无法确认');passed.push('体验存储失败不发单且查询明确无法确认');
+    await blocked.goto(webUrl);await blocked.getByRole('button',{name:'选择矿泉水',exact:true}).click();await blocked.getByRole('button',{name:'确认取物',exact:true}).click();await blocked.getByRole('alert').filter({hasText:'无法保存本页体验信息'}).first().waitFor();assert.equal(robotCalls,2);await ask(blocked,'暂时无法确认');passed.push('体验存储失败不发单且查询明确无法确认');
     assert.deepEqual(errors,[]);assert.equal(robotCalls,2);
     writeFileSync(join(output,'report.json'),JSON.stringify({passed,robotCalls,controlledModelCalls:modelCalls,realAiCalls:0,realRobotCalls:0},null,2));console.log(JSON.stringify({output,passed,realAiCalls:0,realRobotCalls:0}));
   }finally{

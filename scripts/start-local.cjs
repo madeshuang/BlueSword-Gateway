@@ -67,7 +67,7 @@ async function main() {
   input.on('line',line=>{if(line.trim().toLowerCase()==='q')process.emit('SIGINT');});
   console.log('\n启动成功。主页面：http://127.0.0.1:4101/');
   console.log('人工机器人工具：http://127.0.0.1:4201/');
-  console.log('AI 使用真实模型；取物由你在4201点击受理和完成，不会自动完成。');
+  console.log('AI 使用真实模型；取物由你在4201点击“接受任务”和“发送完成通知”，不会自动完成。');
   console.log('工作人员：http://127.0.0.1:4101/#operations；本机练习凭据：manual-local-only');
   console.log('保持本窗口开启。输入 q 后回车，或按 Ctrl+C，关闭本次两个服务。不要再启动5173。\n');
   if(process.platform==='win32' && !process.argv.includes('--no-browser')) {
