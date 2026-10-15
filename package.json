@@ -24,9 +24,7 @@
     "verify:relay": "node scripts/verify-relay.cjs",
     "serve": "node --env-file-if-exists=.env --import tsx apps/api/src/booth/index.ts --serve-web",
     "manual:gateway": "node --env-file-if-exists=.env --import tsx apps/api/src/booth/index.ts --manual --serve-web",
-    "manual:robot": "node --import tsx scripts/robot-manual.ts",
-    "delivery": "pnpm build && node scripts/package-delivery.cjs",
-    "test:delivery": "node scripts/verify-delivery.cjs"
+    "manual:robot": "node --import tsx scripts/robot-manual.ts"
   },
   "devDependencies": {
     "@types/node": "24.13.6",
