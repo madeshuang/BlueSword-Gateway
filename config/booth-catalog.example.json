@@ -7,6 +7,7 @@
     "description": "休息片刻，让机器人为你送来一瓶矿泉水。",
     "location": "货架1-2层",
     "maxCount": 3,
+    "initialStock": 3,
     "art": "water",
     "color": "#dcecf1"
   },
@@ -18,6 +19,7 @@
     "description": "展会中的轻松时刻，来一份简单的能量补给。",
     "location": "示例货架2-1层",
     "maxCount": 3,
+    "initialStock": 3,
     "art": "snack",
     "color": "#f4e5d2"
   },
@@ -29,6 +31,7 @@
     "description": "留下一份属于这次展会的纪念。",
     "location": "示例货架3-1层",
     "maxCount": 2,
+    "initialStock": 2,
     "art": "gift",
     "color": "#e5e6f1"
   },
@@ -40,6 +43,7 @@
     "description": "感受智能科技与绿色生活之间的连接。",
     "location": "示例货架4-1层",
     "maxCount": 1,
+    "initialStock": 1,
     "art": "greens",
     "color": "#e3eddf"
   }

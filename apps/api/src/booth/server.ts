@@ -8,8 +8,10 @@ import { DeepSeekBoothAssistant } from "./deepseek.js";
 import { OpenAIBoothAssistant } from "./openai.js";
 
 import type { AiCallObserver } from "./advice.js";
+import { builtWeb } from "./static.js";
 
-export function createBoothApplication(config: BoothConfig, options: { transport?: typeof fetch; assistantTransport?: typeof fetch; onAiCall?: AiCallObserver; assistant?: Pick<OpenAIBoothAssistant, "advise"> } = {}) {
+export function createBoothApplication(config: BoothConfig, options: { webDirectory?: string; transport?: typeof fetch; assistantTransport?: typeof fetch; onAiCall?: AiCallObserver; assistant?: Pick<OpenAIBoothAssistant, "advise"> } = {}) {
+  const serveWeb = options.webDirectory ? builtWeb(options.webDirectory) : undefined;
   const storage = new ApplicationStorage(config.databasePath);
   const service = new BoothService(storage, config, options.transport);
   const assistant = options.assistant ?? (config.aiProvider === "deepseek"
@@ -30,6 +32,7 @@ export function createBoothApplication(config: BoothConfig, options: { transport
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (closing) throw new BoothError("服务正在关闭",503);
     const url = new URL(req.url ?? "/", "http://localhost");
+    if (serveWeb?.(req,res,url.pathname)) return;
     if (req.method === "GET" && url.pathname === "/api/health") return json(res,200,{ok:true,version:"booth-v1",mode:config.mode});
     if (req.method === "GET" && url.pathname === "/api/booth") return json(res,200,service.snapshot());
     if (req.method === "GET" && url.pathname === "/api/booth/events") {
@@ -64,20 +67,27 @@ export function createBoothApplication(config: BoothConfig, options: { transport
       aiBusy = true;
       try {
         const token = req.headers["x-booth-experience"];
-        const advice = await assistant.advise(body.messages as BoothChatMessage[],service.taskConclusion(token));
+        const advice = await assistant.advise(body.messages as BoothChatMessage[],service.taskProgress(token),service.products());
         // Re-read after the model call: a completion may have arrived while it was thinking.
-        return json(res,200,advice.taskStatusQuery
-          ? { reply: service.taskConclusion(token), selection: null }
-          : { reply: advice.reply, selection: advice.selection });
+        if (advice.taskStatusQuery) {
+          const current = service.taskProgress(token);
+          return json(res,200,{reply:current.replyOptions.includes(advice.reply) ? advice.reply : current.conclusion,selection:null});
+        }
+        return json(res,200,service.stockAdvice({reply:advice.reply,selection:advice.selection}));
       }
       finally { aiBusy = false; }
     }
     if (url.pathname === "/api/booth/operator/resolve") {
-      if (!config.operatorToken) throw new BoothError("工作人员操作凭据尚未配置",503);
-      const provided = Buffer.from(typeof req.headers["x-operator-token"] === "string" ? req.headers["x-operator-token"] : "");
-      const expected = Buffer.from(config.operatorToken);
-      if (provided.length !== expected.length || !timingSafeEqual(provided,expected)) throw new BoothError("工作人员凭据不正确",403);
+      requireOperator(req,config.operatorToken);
       service.resolve(body.confirmation); return json(res,200,service.snapshot());
+    }
+    if (url.pathname === "/api/booth/operator/stock/reset") {
+      requireOperator(req,config.operatorToken);
+      service.resetStock(body.productId,body.confirmation); return json(res,200,service.snapshot());
+    }
+    if (url.pathname === "/api/booth/operator/stock/reset-all") {
+      requireOperator(req,config.operatorToken);
+      service.resetAllStock(body.confirmation); return json(res,200,service.snapshot());
     }
     json(res,404,{code:1,data:"Not found",success:false});
   }
@@ -96,6 +106,12 @@ export function createBoothApplication(config: BoothConfig, options: { transport
       await Promise.allSettled([...work]); storage.close();
     },
   };
+}
+function requireOperator(req: IncomingMessage, token: string | undefined): void {
+  if (!token) throw new BoothError("工作人员操作凭据尚未配置",503);
+  const provided = Buffer.from(typeof req.headers["x-operator-token"] === "string" ? req.headers["x-operator-token"] : "");
+  const expected = Buffer.from(token);
+  if (provided.length !== expected.length || !timingSafeEqual(provided,expected)) throw new BoothError("工作人员凭据不正确",403);
 }
 function json(res: ServerResponse, status: number, data: unknown): void {
   res.writeHead(status,{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store"});

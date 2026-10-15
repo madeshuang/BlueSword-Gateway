@@ -52,6 +52,7 @@ export function validateCatalog(value: unknown): asserts value is BoothProduct[]
     if (!p || typeof p !== "object" ||
       ["id","name","category","subtitle","description","location","color"].some(k => typeof p[k] !== "string" || !p[k].trim()) ||
       !Number.isSafeInteger(p.maxCount) || p.maxCount < 1 || p.maxCount > 100 ||
+      !Number.isSafeInteger(p.initialStock) || p.initialStock < 0 || p.initialStock > 100000 ||
       !["water","snack","gift","greens"].includes(p.art) || ids.has(p.id)) throw new Error("目录字段缺失、重复或取值不合法");
     if (!/^#[0-9a-f]{6}$/i.test(p.color)) throw new Error("目录 color 必须为六位十六进制色值");
     if (p.imageUrl !== undefined && (typeof p.imageUrl !== "string" || !p.imageUrl.startsWith("/products/") || p.imageUrl.includes(".."))) throw new Error("商品照片须使用 /products/ 下本地素材");

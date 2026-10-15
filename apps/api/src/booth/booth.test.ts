@@ -24,6 +24,78 @@ const modelOutput=(value:unknown)=>JSON.stringify(value&&typeof value==="object"
 const command=(requestId="request-one",count=1,productId="water")=>({requestId,count,productId});
 
 describe("体验关联取物进度 HTTP 边界",()=>{
+  it.each(["openai","deepseek"] as const)("%s润色期间收到完成通知时拒绝旧状态说法，采用重新核实的结论",async provider=>{
+    let finishDuringReply=false;
+    const reply="已经接单了，还没收到取好通知，请再等一会儿。";
+    const transport=vi.fn<typeof fetch>().mockImplementation(async()=>{
+      if(finishDuringReply)await post("/api/task/finished",{});
+      return Response.json(provider==="openai"
+        ? {status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({reply,selection:null,taskStatusQuery:true})}]}]}
+        : {choices:[{finish_reason:"stop",message:{content:JSON.stringify({reply,selection:null,taskStatusQuery:true})}}]});
+    });
+    await start(config({dispatchUrl:await fakeRobot(),aiProvider:provider,openaiKey:"fixture",deepseekKey:"fixture"}),{assistantTransport:transport});
+    const experience=await (await post("/api/booth/experiences")).json(),headers={"X-Booth-Experience":experience.token};
+    await post("/api/booth/requests",command(),headers);
+    const body={messages:[{role:"user",content:"那现在呢？"}]};
+    expect(await (await post("/api/booth/chat",body,headers)).json()).toEqual({reply,selection:null});
+    finishDuringReply=true;
+    const current=await (await post("/api/booth/chat",body,headers)).json();expect(current.reply).toContain("取物完成通知");expect(current.reply).not.toContain("还没收到");expect(current.selection).toBeNull();
+    expect(received).toHaveLength(1);
+  });
+  it.each(["openai","deepseek"] as const)("%s等待、执行和异常等自然说法按真实状态使用，错误完成话术被拦截",async provider=>{
+    let reply="还在等机器人接单，请稍候，先不要重复确认取物。",receipt:boolean|null=true;
+    let release!:()=>void,arrived!:()=>void;
+    let gate=new Promise<void>(r=>release=r);const started=new Promise<void>(r=>arrived=r);
+    const robotTransport=vi.fn<typeof fetch>().mockImplementation(async()=>{arrived();await gate;if(receipt===null)throw new Error("受理反馈丢失");return Response.json({success:receipt,data:"received"});});
+    const transport=vi.fn<typeof fetch>().mockImplementation(async()=>Response.json(provider==="openai"
+      ? {status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({reply,selection:null,taskStatusQuery:true})}]}]}
+      : {choices:[{finish_reason:"stop",message:{content:JSON.stringify({reply,selection:null,taskStatusQuery:true})}}]}));
+    await start(config({dispatchUrl:"http://127.0.0.1:1/unused",aiProvider:provider,openaiKey:"fixture",deepseekKey:"fixture"}),{transport:robotTransport,assistantTransport:transport});
+    const experience=await (await post("/api/booth/experiences")).json(),headers={"X-Booth-Experience":experience.token};
+    const query=async()=>await (await post("/api/booth/chat",{messages:[{role:"user",content:"那现在呢？"}]},headers)).json();
+    const pending=post("/api/booth/requests",command(),headers);
+    try{await started;expect(await query()).toEqual({reply,selection:null});}finally{release();}
+    await pending;gate=Promise.resolve();
+    reply="已经接单了，还没收到取好通知，请再等一会儿。";expect(await query()).toEqual({reply,selection:null});
+    reply="已经取好了，请到交付处领取。";expect((await query()).reply).toContain("尚未收到完成通知");
+    await post("/api/task/error",{message:"测试故障"});
+    reply="这次取物出了异常，是否结束、机器人是否停止都还未确认。先不要重复确认取物，请联系现场工作人员协助。";
+    expect(await query()).toEqual({reply,selection:null});
+    reply="机械臂已经抓到了水，预计十秒后送到。";expect((await query()).reply).toContain("出现异常");
+    await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止"},{"X-Operator-Token":"test-operator"});
+    reply="工作人员已核对并解除占用，但这不代表物品已经取好。领取情况请向现场工作人员确认。";
+    expect(await query()).toEqual({reply,selection:null});
+    reply="已经取好了，请到交付处领取。";expect((await query()).reply).toContain("这不代表取物完成");
+    receipt=false;await post("/api/booth/requests",command("rejected-natural"),headers);
+    reply="机器人没有接下这次取物，请核对选择，或联系现场工作人员。";expect(await query()).toEqual({reply,selection:null});
+    receipt=null;await post("/api/booth/requests",command("uncertain-natural"),headers);
+    reply="现在还无法确认是否接单或取好，先不要重复确认取物。请联系现场工作人员核对，机器人是否停止也尚未确认。";
+    expect(await query()).toEqual({reply,selection:null});
+    reply="已经取好了，请到交付处领取。";expect((await query()).reply).toContain("机器人是否接单、取物是否结束尚未确认");
+    expect(robotTransport).toHaveBeenCalledTimes(3);
+  });
+  it.each(["openai","deepseek"] as const)("%s完成查询按原话和前文保留自然回答，不再强制播放通知",async provider=>{
+    const direct="已经取好了，请到交付处领取。",followUp="现在已经取好了，到交付处领取就可以。";
+    let reply=direct;
+    const transport=vi.fn<typeof fetch>().mockImplementation(async()=>Response.json(provider==="openai"
+      ? {status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({reply,selection:null,taskStatusQuery:true})}]}]}
+      : {choices:[{finish_reason:"stop",message:{content:JSON.stringify({reply,selection:null,taskStatusQuery:true})}}]}));
+    await start(config({dispatchUrl:await fakeRobot(),aiProvider:provider,openaiKey:"fixture",deepseekKey:"fixture"}),{assistantTransport:transport});
+    const experience=await (await post("/api/booth/experiences")).json(),headers={"X-Booth-Experience":experience.token};
+    await post("/api/booth/requests",command(),headers);await post("/api/task/finished",{});
+    const messages=[{role:"user",content:"我的东西取好了吗？"}];
+    expect(await (await post("/api/booth/chat",{messages},headers)).json()).toEqual({reply:direct,selection:null});
+    reply=followUp;
+    const context=[...messages,{role:"assistant",content:direct},{role:"user",content:"那现在呢？"}];
+    expect(await (await post("/api/booth/chat",{messages:context},headers)).json()).toEqual({reply:followUp,selection:null});
+    const body=JSON.parse(transport.mock.calls.at(-1)![1]!.body as string);
+    const instructions=provider==="openai"?body.instructions:body.messages[0].content;
+    expect(instructions).toContain(direct);expect(instructions).toContain(followUp);
+    const sent=provider==="openai"?body.input:body.messages.slice(1);
+    expect(sent.at(-1)).toEqual(context.at(-1));
+    expect(provider==="openai"?sent[1].content:JSON.parse(sent[1].content).reply).toBe(direct);
+    expect(received).toHaveLength(1);
+  });
   const progressOutput=(provider:"openai"|"deepseek",query=true)=>Response.json(provider==="openai"
     ? {status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({reply:"模型自行猜测的结论",selection:null,taskStatusQuery:query})}]}]}
     : {choices:[{finish_reason:"stop",message:{content:JSON.stringify({reply:"模型自行猜测的结论",selection:null,taskStatusQuery:query})}}]});

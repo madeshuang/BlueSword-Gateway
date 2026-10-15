@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { BoothAdvice, BoothProduct } from "@bluesword/contracts";
-import { BoothError } from "./service.js";
+import type { BoothAdvice, BoothProduct, BoothStockProduct } from "@bluesword/contracts";
+import { BoothError, type BoothTaskProgress } from "./service.js";
 /** Internal model output; the browser still receives only reply and selection. */
 export interface BoothModelAdvice extends BoothAdvice { taskStatusQuery: boolean }
 
@@ -98,19 +98,22 @@ function safeResponseMetadata(data: unknown, key: string): Pick<AiCallDiagnostic
   return { returnedModel, usage: Object.keys(usage).length ? usage : null };
 }
 
-export function adviceInstructions(products: BoothProduct[], taskConclusion = "暂时无法确认这次取物的进度，请查看页面取物状态，或联系现场工作人员。"): string {
+export function adviceInstructions(products: BoothStockProduct[], taskProgress?: BoothTaskProgress): string {
   return "你是兰剑展会接待助手，帮助访客了解物品和选择物品。先回答当前问题，再在需要时给出下一步建议。" +
     "用自然、友好、清楚的中文，通常用一到三句；介绍目录或解释限制时可适当展开，不为压缩字数省略必要信息。" +
-    "不要每轮重复问候、自我介绍、固定道歉或结束语，不使用宣传套话、卖萌称呼或夸张热情，也不假装拥有真实情绪或现场服务经历。" +
+    "不要每轮重复问候、自我介绍、固定道歉或结束语，不使用宣传套话、卖萌称呼或夸张。" +
     "目录查询应介绍当前目录；身份、问候和能力询问应正常简短回答。只是询问信息时直接回答，不强行追加选品邀请或追问数量。" +
     "偏离取物业务的问题友好说明你能帮助了解和选择展会物品，必要时再引导选品，不假装服务故障。这些对话没有明确选品时selection为null，仍须提供正常reply。" +
     "不虚构库存、位置、机器人进度或状态、已发单或完成。机器人已接单不等于取物已完成，人工解除占用也不等于完成。" +
-    "判断当前问题是否在询问这次取物的状态、是否取好、能否领取或相关进度（包括结合上文的简短追问）；是则taskStatusQuery为true、selection为null，reply只使用后端核实的结论，不从用户或历史对话推断状态。否则taskStatusQuery为false。缺少关联或查询失败不能说没有任务。后端核实的当前结论：" + JSON.stringify(taskConclusion) + "。" +
+    "判断当前问题是否在询问这次取物的状态、是否取好、能否领取或相关进度（包括结合上文的简短追问）；是则taskStatusQuery为true、selection为null；只有不是进度问题时才设taskStatusQuery为false。" +
+    "进度回答请结合用户原话和前文，从后端提供的replyOptions中逐字选择最合适的一条；直接询问就直接回答，‘那现在呢？’等追问使用适合当前上下文的简短回应。不要每次照搬‘物品×数量：通知’的格式，不重复问候或堆客套话。" +
+    "候选回答已经核对事实，不改写状态、不增加执行步骤或时间、不从用户或历史对话推断状态，也不自行补充其他文字。进度问题无法选择合适候选时，仍设taskStatusQuery为true，并使用conclusion。缺少关联或查询失败不能说没有任务。后端核实的当前结论与可用说法：" + JSON.stringify(taskProgress ?? {conclusion:"暂时无法确认这次取物的进度，请查看页面取物状态，或联系现场工作人员。",replyOptions:["暂时无法确认这次取物的进度，请查看页面取物状态，或联系现场工作人员。"]}) + "。" +
     "目录是唯一可选集合。含糊需求先澄清，只询问尚不明确的物品或数量，不替访客猜测；不支持的物品说明不提供。一次只建议一种物品；多物品请求请用户先选一种。" +
     "数量不明确先询问，不把超出范围的数量偷偷改小。selection只有用户需求足够清楚时给出，否则为null。" +
+    "availableCount是当前可取的剩余数量，已排除任务预留；maxCount只表示每单上限。请求数量超过其中任一限制时，说明具体限制，selection为null，不改成较小数量；availableCount为0时说明已取完，可建议其他有货物品。" +
     "历史assistant中的selection:null仅表示前端保存了显示文字，不撤销用户已表达的需求；结合上下文澄清物品和数量。你仅建议，用户需要在界面确认才下发。" +
     "每一轮都严格返回JSON对象，格式为{\"reply\":\"中文回答\",\"selection\":null,\"taskStatusQuery\":false}，或selection为{\"productId\":\"目录id\",\"count\":正整数}。目录：" +
-    JSON.stringify(products.map(({id,name,description,maxCount})=>({id,name,description,maxCount})));
+    JSON.stringify(products.map(({id,name,description,maxCount,availableCount})=>({id,name,description,maxCount,availableCount})));
 }
 
 function validateAdvice(value: unknown, products: BoothProduct[]): BoothModelAdvice {

@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import type { BoothSnapshot, BoothTask, DispatchCommand } from "@bluesword/contracts";
+import type { BoothAdvice, BoothSnapshot, BoothStockProduct, BoothTask, DispatchCommand } from "@bluesword/contracts";
 import { ApplicationStorage } from "../storage.js";
 import type { BoothConfig } from "./config.js";
 
@@ -8,13 +8,46 @@ export class BoothError extends Error {
 }
 const blocks = (t: BoothTask) => ["submitting", "executing", "uncertain", "fault"].includes(t.status);
 interface Experience { id: string; taskId: string | null }
+export interface BoothTaskProgress { conclusion: string; replyOptions: string[] }
 const unknownProgress = "暂时无法确认这次取物的进度，请查看页面取物状态，或联系现场工作人员。";
 export class BoothService {
   private listeners = new Set<() => void>();
   constructor(readonly storage: ApplicationStorage, readonly config: BoothConfig, private readonly transport: typeof fetch = fetch) {
-    // A pre-response restart is never interpreted as rejection or retried automatically.
     const current = this.active();
+    const db = storage.db;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const product of config.products) {
+        if (storage.get<number>("booth_stock", product.id) === undefined) {
+          // On first upgrade, keep the legacy active task's items unavailable too.
+          const reserved = current?.productId === product.id ? current.command.count : 0;
+          storage.set("booth_stock", product.id, Math.max(0, product.initialStock - reserved));
+        }
+      }
+      db.exec("COMMIT");
+    } catch (error) { if (db.isTransaction) db.exec("ROLLBACK"); throw error; }
+    // A pre-response restart is never interpreted as rejection or retried automatically.
     if (current?.status === "submitting") this.update(current, "uncertain", "服务重启，受理结果尚未确认；请工作人员核对");
+  }
+  products(): BoothStockProduct[] {
+    return this.config.products.map(product => ({ ...product, availableCount: this.availableCount(product.id) }));
+  }
+  private availableCount(productId: string): number {
+    const count = this.storage.get<number>("booth_stock", productId);
+    if (count === undefined || !Number.isSafeInteger(count) || count < 0) throw new Error("库存记录不合法，请工作人员核对");
+    return count;
+  }
+  private stockShortage(name: string, count: number, available: number): string {
+    return available === 0 ? `${name}已取完，暂时无法取物。请换一种物品或联系工作人员补货。`
+      : `${name}目前只剩 ${available} 份，无法提供 ${count} 份。请重新确认数量。`;
+  }
+  stockAdvice(advice: BoothAdvice): BoothAdvice {
+    if (!advice.selection) return advice;
+    const product = this.config.products.find(p => p.id === advice.selection!.productId);
+    if (!product) throw new BoothError("物品不在目录中");
+    const available = this.availableCount(product.id);
+    return advice.selection.count > available
+      ? { reply: this.stockShortage(product.name,advice.selection.count,available), selection:null } : advice;
   }
   active(): BoothTask | null {
     const id = this.storage.get<string>("booth", "active");
@@ -34,7 +67,7 @@ export class BoothService {
     const reason = this.dispatchBlockReason();
     return {
       dispatch: { ready: reason === null, reason },
-      products: this.config.products, active, waiting,
+      products: this.products(), active, waiting,
       tasks: this.storage.list<BoothTask>("booth_tasks").sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0,12),
       alert: this.storage.get<string | null>("booth", "alert") ?? null,
       mode: this.config.mode, catalogConfirmed: this.config.catalogConfirmed,
@@ -62,12 +95,13 @@ export class BoothService {
     if (!record) throw new BoothError("体验关联无效，请开始新体验或联系工作人员",403);
     return { key, record };
   }
-  taskConclusion(token: unknown): string {
+  taskProgress(token: unknown): BoothTaskProgress {
+    const unknown = { conclusion: unknownProgress, replyOptions: [unknownProgress] };
     try {
       const { key, record } = this.experience(token);
-      if (!record.taskId || this.storage.get<string>("booth_task_experiences",record.taskId) !== key) return unknownProgress;
+      if (!record.taskId || this.storage.get<string>("booth_task_experiences",record.taskId) !== key) return unknown;
       const task = this.storage.get<BoothTask>("booth_tasks",record.taskId);
-      if (!task || task.id !== record.taskId) return unknownProgress;
+      if (!task || task.id !== record.taskId) return unknown;
       const conclusions: Record<BoothTask["status"],string> = {
         submitting: "正在等待机器人接单，尚未确认是否受理，请稍候，不要重复确认取物。",
         executing: "机器人已接单，尚未收到完成通知，请稍候。",
@@ -77,10 +111,30 @@ export class BoothService {
         fault: "这次取物出现异常，尚未确认是否结束，请勿重复确认取物。请联系现场工作人员，当前尚未确认机器人是否停止。",
         resolved: "工作人员已核对并解除本地占用，这不代表取物完成。领取情况请向现场工作人员确认。",
       };
-      return conclusions[task.status] ? `${task.command.item} × ${task.command.count}：${conclusions[task.status]}` : unknownProgress;
+      if (!conclusions[task.status]) return unknown;
+      const conclusion = `${task.command.item} × ${task.command.count}：${conclusions[task.status]}`;
+      const replyOptions: Record<BoothTask["status"],string[]> = {
+        submitting: [
+          "还在等机器人接单，请稍候，先不要重复确认取物。",
+          "目前还没确认是否接单，请稍候，先不要重复确认取物。",
+        ],
+        executing: [
+          "已经接单了，还没收到取好通知，请再等一会儿。",
+          "目前还在等取好通知，请稍候。",
+        ],
+        succeeded: [
+          "已经取好了，请到交付处领取。",
+          "现在已经取好了，到交付处领取就可以。",
+        ],
+        rejected: ["机器人没有接下这次取物，请核对选择，或联系现场工作人员。"],
+        uncertain: ["现在还无法确认是否接单或取好，先不要重复确认取物。请联系现场工作人员核对，机器人是否停止也尚未确认。"],
+        fault: ["这次取物出了异常，是否结束、机器人是否停止都还未确认。先不要重复确认取物，请联系现场工作人员协助。"],
+        resolved: ["工作人员已核对并解除占用，但这不代表物品已经取好。领取情况请向现场工作人员确认。"],
+      };
+      return { conclusion, replyOptions: replyOptions[task.status] };
     } catch (error) {
       if (!(error instanceof BoothError)) console.warn(JSON.stringify({event:"experience_progress_failed",errorCategory:"storage"}));
-      return unknownProgress;
+      return unknown;
     }
   }
   async dispatch(productId: unknown, count: unknown, requestId: unknown, token?: unknown): Promise<BoothTask> {
@@ -104,9 +158,12 @@ export class BoothService {
       if (this.active() || this.storage.get("booth", "alert")) throw new BoothError("当前任务尚未结束，请等待或联系工作人员",409);
       const reason = this.dispatchBlockReason();
       if (reason) throw new BoothError(reason,503);
+      const available = this.availableCount(product.id);
+      if (count > available) throw new BoothError(this.stockShortage(product.name,count,available),409);
       const now = new Date().toISOString();
       task = { id: randomUUID(), requestId, productId: product.id, command, status: "submitting", createdAt: now, updatedAt: now, message: "正在等待机器人受理" };
       this.storage.set("booth_tasks", task.id, task);
+      this.storage.set("booth_stock", product.id, available - count);
       this.storage.set("booth_requests", requestId, task.id);
       if (experience) {
         this.storage.set("booth_task_experiences",task.id,experience.key);
@@ -177,6 +234,30 @@ export class BoothService {
       durationMs: Math.round(performance.now() - started) }));
     if (task || kind === "error") this.publish();
   }
+  resetStock(productId: unknown, confirmation: unknown): void {
+    if (confirmation !== "已核对并补满库存") throw new BoothError("请先核对并补满所选物品");
+    const product = this.config.products.find(p => p.id === productId);
+    if (!product) throw new BoothError("物品不在目录中");
+    this.resetProducts([product]);
+  }
+  resetAllStock(confirmation: unknown): void {
+    if (confirmation !== "已核对并补满全部库存") throw new BoothError("请先核对并补满全部物品");
+    this.resetProducts(this.config.products);
+  }
+  private resetProducts(products: BoothConfig["products"]): void {
+    const db = this.storage.db;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      if (this.active() || this.storage.get("booth", "alert")) throw new BoothError("请先核对并处理当前任务或告警，再补货重置",409);
+      for (const product of products) {
+        const before = this.availableCount(product.id);
+        this.storage.set("booth_stock",product.id,product.initialStock);
+        this.audit("operator_stock_reset",{ productId:product.id, before, after:product.initialStock });
+      }
+      db.exec("COMMIT");
+    } catch (error) { if (db.isTransaction) db.exec("ROLLBACK"); throw error; }
+    this.publish();
+  }
   resolve(confirmed: unknown): void {
     if (confirmed !== "已核对机器人停止") throw new BoothError("请先完成现场核对");
     const task = this.active();
@@ -186,7 +267,15 @@ export class BoothService {
     this.storage.set("booth", "alert", null); this.publish();
   }
   private update(task: BoothTask, status: BoothTask["status"], message: string): void {
-    this.storage.set("booth_tasks", task.id, { ...task, status, message, updatedAt: new Date().toISOString() });
+    const db = this.storage.db;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      if (status === "rejected" && task.status === "submitting") {
+        this.storage.set("booth_stock", task.productId, this.availableCount(task.productId) + task.command.count);
+      }
+      this.storage.set("booth_tasks", task.id, { ...task, status, message, updatedAt: new Date().toISOString() });
+      db.exec("COMMIT");
+    } catch (error) { if (db.isTransaction) db.exec("ROLLBACK"); throw error; }
     console.info(JSON.stringify({ event: "task_transition", taskId: task.id, requestId: task.requestId, from: task.status, to: status }));
     this.publish();
   }

@@ -2,7 +2,7 @@ const assert=require('node:assert/strict');
 const {spawn}=require('node:child_process');
 const {once}=require('node:events');
 const {createServer}=require('node:http');
-const {mkdirSync,mkdtempSync,writeFileSync}=require('node:fs');
+const {mkdirSync,mkdtempSync,readFileSync,writeFileSync}=require('node:fs');
 const {join,resolve,dirname}=require('node:path');
 const {createRequire}=require('node:module');
 const {chromium}=require('playwright');
@@ -92,26 +92,23 @@ async function testStorageSubmission(browser,webUrl){
       callbacks.delete(t);await fetch(apiUrl+(selected==='error'?'/api/task/error':'/api/task/finished'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(selected==='error'?{message:'测试故障：机械臂无法自动恢复'}:{result:'success'})}).catch(()=>{});
     },1600);callbacks.add(t);}
   });await new Promise(r=>robot.listen(robotPort,'127.0.0.1',r));
-  const env={PORT:String(apiPort),BOOTH_DB_PATH:join(output,'state.sqlite'),BOOTH_ROBOT_MODE:'http',ROBOT_DISPATCH_URL:'http://127.0.0.1:'+robotPort+'/api/task/dispatch',BOOTH_CATALOG_CONFIRMED:'true',BOOTH_TASK_REMINDER_MS:'500',BOOTH_AI_PROVIDER:'openai',DEEPSEEK_API_KEY:'',OPENAI_API_KEY:'',BOOTH_OPERATOR_TOKEN:'browser-test-operator'};
+  const fixtureCatalog=JSON.parse(readFileSync(join(root,'config/booth-catalog.example.json'),'utf8')).map(p=>({...p,initialStock:100}));
+  const fixtureCatalogPath=join(output,'acceptance-catalog.json');writeFileSync(fixtureCatalogPath,JSON.stringify(fixtureCatalog));
+  const env={BOOTH_CATALOG_PATH:fixtureCatalogPath,PORT:String(apiPort),BOOTH_DB_PATH:join(output,'state.sqlite'),BOOTH_ROBOT_MODE:'http',ROBOT_DISPATCH_URL:'http://127.0.0.1:'+robotPort+'/api/task/dispatch',BOOTH_CATALOG_CONFIRMED:'true',BOOTH_TASK_REMINDER_MS:'500',BOOTH_AI_PROVIDER:'openai',DEEPSEEK_API_KEY:'',OPENAI_API_KEY:'',BOOTH_OPERATOR_TOKEN:'browser-test-operator'};
   let api=launch(['--import','tsx','apps/api/src/booth/index.ts'],env);await ready(apiUrl+'/api/health',api);
   const web=launch([join(dirname(webRequire.resolve('vite/package.json')),'bin/vite.js'),'--host','127.0.0.1','--port',String(webPort),'--strictPort'],{VITE_API_TARGET:apiUrl},join(root,'apps/web'));await ready(webUrl,web);
   browser=await chromium.launch({headless:true,...(process.platform==='win32'?{channel:process.env.PLAYWRIGHT_CHANNEL||'msedge'}:{})});
   const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   const chatRequests=[];page.on('request',request=>{if(request.url().endsWith('/api/booth/chat'))chatRequests.push(request.postDataJSON());});
-  const notices=page.getByLabel('任务状态通知');
+  const notices=page.locator('.chat-bubble.assistant');
   // Inspect rendered styles and accessible icons, rather than class names alone.
-  async function assertStatusAppearance(panel,notice,color,icon){
+  async function assertStatusAppearance(panel,color,icon){
     const backgrounds={'等待选择':'rgb(240, 242, 244)','等待机器人接单':'rgb(240, 242, 244)','机器人已接单':'rgb(238, 244, 250)','取物完成':'rgb(238, 245, 236)','机器人未接单':'rgb(255, 246, 231)','需要核对':'rgb(255, 246, 231)','需要协助':'rgb(252, 240, 238)','工作人员处理':'rgb(240, 242, 244)'};
     const status=panel.locator('.task-status');
     assert.equal(await status.evaluate(el=>getComputedStyle(el).color),color,'任务卡应使用对应状态颜色');
     assert.equal(await panel.evaluate(el=>getComputedStyle(el).backgroundColor),backgrounds[icon],'任务卡背景也应符合状态语义');
     await panel.getByRole('img',{name:icon,exact:true}).waitFor();
-    if(notice){
-      assert.equal(await notice.evaluate(el=>getComputedStyle(el).color),color,'对话通知与任务卡应使用相同状态颜色');
-      assert.equal(await notice.evaluate(el=>getComputedStyle(el).backgroundColor),backgrounds[icon],'对话通知背景应与任务卡一致');
-      await notice.getByRole('img',{name:icon,exact:true}).waitFor();
-    }
   }
   // P9: missing dispatch URL must be visible before the visitor submits.
   await stop(api);api=launch(['--import','tsx','apps/api/src/booth/index.ts'],{...env,ROBOT_DISPATCH_URL:'',BOOTH_OPERATOR_TOKEN:''});await ready(apiUrl+'/api/health',api);
@@ -139,7 +136,7 @@ async function testStorageSubmission(browser,webUrl){
   try{
     await staffPage.goto(webUrl+'/#operations');
     const dialog=staffPage.getByRole('dialog',{name:'现场异常核对',exact:true});await dialog.waitFor();
-    const credential=staffPage.getByLabel('工作人员凭据'),confirmation=staffPage.getByRole('checkbox');
+    const credential=staffPage.getByLabel('工作人员凭据'),confirmation=staffPage.getByRole('checkbox',{name:'已现场核对机器人停止及物品情况',exact:true});
     await until(()=>credential.isEnabled());await credential.fill('browser-test-operator');await confirmation.check();
     await staffPage.reload();await dialog.waitFor();
     assert.equal(await credential.inputValue(),'','刷新工作人员页面不保留凭据');
@@ -159,7 +156,7 @@ async function testStorageSubmission(browser,webUrl){
     assert.equal(await staffPage.getByRole('link',{name:'工作人员入口',exact:true}).count(),0);
     await staffPage.screenshot({path:join(output,'visitor-no-staff-mobile.png'),fullPage:true});
   }finally{await staffPage.close();}
-  await assertStatusAppearance(page.locator('.task-panel'),null,'rgb(82, 96, 109)','等待选择');
+  await assertStatusAppearance(page.locator('.task-panel'),'rgb(82, 96, 109)','等待选择');
   await page.screenshot({path:join(output,'desktop-initial.png'),fullPage:true});
   assert.equal(await page.getByText('物品较多时，可在列表内滚动浏览。',{exact:true}).count(),0);
   assert.equal(await page.locator('.site-footer').getByText('当前为模拟演示，未连接现场机器人。',{exact:true}).count(),0);
@@ -169,17 +166,17 @@ async function testStorageSubmission(browser,webUrl){
   assert.equal(await page.getByLabel('已选数量').innerText(),'2');
   mode='receipt-pending';await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.submitting').waitFor();
   assert.equal(await notices.count(),0,'点击确认而未取得受理回执时不能播报受理或完成');
-  await assertStatusAppearance(page.locator('.task-panel'),null,'rgb(82, 96, 109)','等待机器人接单');
+  await assertStatusAppearance(page.locator('.task-panel'),'rgb(82, 96, 109)','等待机器人接单');
   await until(()=>typeof releaseReceipt==='function');mode='success';releaseReceipt();await page.locator('.task-panel.executing').waitFor();
   assert.equal(requests[0].count,2);
-  await notices.filter({hasText:'已接单，请稍候'}).waitFor();
-  await notices.last().getByText('取物进度',{exact:true}).waitFor();
-  await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(49, 95, 134)','机器人已接单');
+  await page.getByRole('group',{name:'思考过程'}).last().getByText('思考中',{exact:true}).waitFor();
+  assert.equal(await page.locator('.chat-event').count(),0,'取物过程改为折叠说明');
+  await assertStatusAppearance(page.locator('.task-panel'),'rgb(49, 95, 134)','机器人已接单');
   assert.equal(await notices.filter({hasText:'已取好'}).count(),0,'受理不能显示完成通知');
   await page.locator('.task-panel.succeeded').waitFor();await page.screenshot({path:join(output,'desktop-success.png'),fullPage:true});
   await notices.filter({hasText:'已取好，请到交付处领取'}).waitFor();
-  await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(63, 107, 67)','取物完成');
-  assert.equal(await notices.filter({hasText:'已接单，请稍候'}).count(),1);
+  await assertStatusAppearance(page.locator('.task-panel'),'rgb(63, 107, 67)','取物完成');
+  assert.equal(await notices.filter({hasText:'已接单，请稍候'}).count(),0);
   assert.equal(await notices.filter({hasText:'已取好'}).count(),1);
   assert.equal(chatRequests.length,0,'任务通知不得触发模型请求');
   await fetch(apiUrl+'/api/task/finished',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({result:'success'})});
@@ -197,7 +194,7 @@ async function testStorageSubmission(browser,webUrl){
   }finally{await freshVisitor.close();}
 
   mode='rejected';await page.getByRole('button',{name:'选择纪念品',exact:true}).click();await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.rejected').waitFor();
-  await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(133, 98, 40)','机器人未接单');
+  await assertStatusAppearance(page.locator('.task-panel'),'rgb(133, 98, 40)','机器人未接单');
   assert.match(await page.locator('.task-panel').innerText(),/机器人未接下这次取物/);
   assert.doesNotMatch(await page.locator('.task-panel').innerText(),/测试拒绝|已取好/);
   await openOperations(page);
@@ -205,7 +202,7 @@ async function testStorageSubmission(browser,webUrl){
   await page.getByRole('button',{name:'关闭工作人员入口'}).click();
   mode='error';await page.getByRole('button',{name:'选择小面包',exact:true}).click();await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.fault').waitFor();
   await notices.filter({hasText:'这次取物需要工作人员协助'}).waitFor();
-  await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(158, 69, 62)','需要协助');
+  await assertStatusAppearance(page.locator('.task-panel'),'rgb(158, 69, 62)','需要协助');
   await fetch(apiUrl+'/api/task/error',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'重复故障：仍需核对'})});
   await until(async()=>(await (await fetch(apiUrl+'/api/booth')).json()).active.message==='重复故障：仍需核对');
   assert.equal(await page.getByRole('main').getByText('重复故障：仍需核对',{exact:true}).count(),0,'异常原文只在工作人员入口展示');
@@ -218,22 +215,22 @@ async function testStorageSubmission(browser,webUrl){
   assert.equal(await notices.filter({hasText:'这次取物需要工作人员协助'}).count(),1,'相同任务故障状态重复推送不重播');
   assert.equal(await notices.filter({hasText:'已取好'}).count(),1,'故障不能冒充完成');
   await page.screenshot({path:join(output,'desktop-fault.png'),fullPage:true});
-  await openOperations(page);await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox').check();await page.getByRole('button',{name:'解除本地占用'}).click();await page.locator('.task-panel.resolved').waitFor();await page.getByRole('button',{name:'关闭工作人员入口'}).click();
+  await openOperations(page);await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox',{name:'已现场核对机器人停止及物品情况',exact:true}).check();await page.getByRole('button',{name:'解除本地占用'}).click();await page.locator('.task-panel.resolved').waitFor();await page.getByRole('button',{name:'关闭工作人员入口'}).click();
   await notices.filter({hasText:'这次取物已由工作人员处理，领取情况请向现场工作人员确认'}).waitFor();
   assert.match(await page.locator('.task-panel').innerText(),/领取情况请向现场工作人员确认/);
   assert.doesNotMatch(await page.locator('.task-panel').innerText(),/已取好|占用|本地/);
   await openOperations(page);
   await page.getByRole('dialog').getByText('工作人员已现场核对并解除本地占用',{exact:true}).waitFor();
   await page.getByRole('button',{name:'关闭工作人员入口'}).click();
-  await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(82, 96, 109)','工作人员处理');
+  await assertStatusAppearance(page.locator('.task-panel'),'rgb(82, 96, 109)','工作人员处理');
   mode='uncertain';await page.getByRole('button',{name:'选择矿泉水',exact:true}).click();await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.uncertain').waitFor();
   await notices.filter({hasText:'机器人是否接单、这次取物是否结束尚未确认'}).waitFor();
-  await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(133, 98, 40)','需要核对');
+  await assertStatusAppearance(page.locator('.task-panel'),'rgb(133, 98, 40)','需要核对');
   assert.match(await page.locator('.task-panel').innerText(),/是否结束尚未确认/);
   assert.doesNotMatch(await page.locator('.task-panel').innerText(),/占用|本地/);
   assert.equal(await notices.filter({hasText:'已取好'}).count(),1,'受理不明不能冒充完成');
   assert.equal(chatRequests.length,0,'故障、收尾与受理不明也不得调用模型');
-  await openOperations(page);await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox').check();await page.getByRole('button',{name:'解除本地占用'}).click();await page.locator('.task-panel.resolved').waitFor();await page.getByRole('button',{name:'关闭工作人员入口'}).click();
+  await openOperations(page);await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox',{name:'已现场核对机器人停止及物品情况',exact:true}).check();await page.getByRole('button',{name:'解除本地占用'}).click();await page.locator('.task-panel.resolved').waitFor();await page.getByRole('button',{name:'关闭工作人员入口'}).click();
 
   await page.clock.setSystemTime(new Date(Date.now()-3600000));
   mode='silent';const before=requests.length;
@@ -247,12 +244,12 @@ async function testStorageSubmission(browser,webUrl){
   await page.getByRole('alert').filter({hasText:'等待时间较长'}).waitFor({timeout:5000});
   assert.match(await page.locator('.waiting-reminder').innerText(),/是否结束尚未确认/);
   assert.doesNotMatch(await page.locator('.waiting-reminder').innerText(),/占用|本地/);
-  assert.equal(await notices.filter({hasText:'已接单，请稍候'}).count(),3,'等待提醒不能新增任务通知');
+  assert.equal(await notices.filter({hasText:'已接单，请稍候'}).count(),0,'接单与等待提醒不再新增进度卡');
   assert.equal((await (await fetch(apiUrl+'/api/booth')).json()).active.status,'executing');
   assert.equal(requests.length,before+1);
   await page.getByRole('button',{name:'联系工作人员核对',exact:true}).click();
   await page.getByRole('dialog').waitFor();
-  await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox').check();
+  await page.getByLabel('工作人员凭据').fill('browser-test-operator');await page.getByRole('checkbox',{name:'已现场核对机器人停止及物品情况',exact:true}).check();
   assert.equal(await page.getByRole('button',{name:'解除本地占用',exact:true}).isDisabled(),true);
   await page.getByText('执行中任务仍保持占用',{exact:false}).waitFor();
   await page.getByRole('button',{name:'关闭工作人员入口'}).click();
@@ -319,7 +316,7 @@ async function testStorageSubmission(browser,webUrl){
     assert(elapsed<60,'浏览器快1小时不能显示等待1小时');
   });
   assert.equal(await page.getByRole('button',{name:'选择纪念品',exact:true}).getAttribute('aria-pressed'),'true');
-  assert.equal(await notices.filter({hasText:'已接单，请稍候'}).count(),1,'迟到AI回复不得移除任务通知');
+  assert.equal(await page.locator('.task-panel.executing').count(),1,'迟到AI回复不得改变任务状态');
   const activeBeforeReset=(await (await fetch(apiUrl+'/api/booth')).json()).active;
   await page.getByRole('button',{name:'开始新体验',exact:true}).click();
   assert.equal((await (await fetch(apiUrl+'/api/booth')).json()).active.id,activeBeforeReset.id);
@@ -330,18 +327,18 @@ async function testStorageSubmission(browser,webUrl){
     await fetch(apiUrl+'/api/task/finished',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({result:'success'})});await page.locator('.task-panel.succeeded').waitFor();
   });
   assert.equal(await page.getByRole('button',{name:'选择纪念品',exact:true}).getAttribute('aria-pressed'),'true');
-  assert.equal(await notices.filter({hasText:'已取好'}).count(),1,'新体验中的实际完成通知不能被迟到AI回复覆盖');
+  assert.equal(await notices.filter({hasText:'已取好'}).count(),0,'另一段体验的完成通知不插入当前对话');
   await page.unroute('**/api/booth/chat');await page.route('**/api/booth/chat',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({data:'测试：助手暂不可用'})}));
   await input.fill('再帮我看看');await page.getByRole('button',{name:'发送需求'}).click();await page.getByRole('alert').filter({hasText:'助手暂不可用'}).waitFor();assert.equal(await input.inputValue(),'再帮我看看');
   assert.equal(chatRequests.length,10,'只有十次显式聊天操作产生请求，状态变化没有额外请求');
   for(const {messages} of chatRequests){
     assert(messages.every(message=>['user','assistant'].includes(message.role)),'系统事件不得进入AI请求');
-    assert(messages.every(message=>!/(已接单，请稍候|已取好，请到交付处领取|这次取物需要工作人员协助|机器人是否接单、这次取物是否结束尚未确认|这次取物已由工作人员处理)/.test(message.content)),'固定通知文本不得消耗模型token');
+    assert(messages.every(message=>!/(正在规划前往物品位置的路线|机器人正在出发|正在识别目标物品并执行抓取)/.test(message.content)),'固定流程脚本不得进入模型历史');
   }
 
   await fetch(apiUrl+'/api/task/error',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'测试全局告警'})});
-  await notices.filter({hasText:'取物服务暂需工作人员核对'}).waitFor();
-  await assertStatusAppearance(page.locator('.task-panel'),notices.last(),'rgb(158, 69, 62)','需要协助');
+  await page.locator('.task-panel.alert').waitFor();
+  await assertStatusAppearance(page.locator('.task-panel'),'rgb(158, 69, 62)','需要协助');
   assert.equal(await page.getByRole('main').getByText('测试全局告警',{exact:true}).count(),0,'全局告警原文不出现在访客主界面');
   assert.match(await page.locator('.task-panel').innerText(),/尚未确认机器人是否停止/);
   await openOperations(page);
@@ -351,7 +348,7 @@ async function testStorageSubmission(browser,webUrl){
   await fetch(apiUrl+'/api/task/error',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'测试全局告警'})});
   await fetch(apiUrl+'/api/booth/operator/resolve',{method:'POST',headers:{'Content-Type':'application/json','X-Operator-Token':'browser-test-operator'},body:JSON.stringify({confirmation:'已核对机器人停止'})});
   await page.locator('.task-panel').getByText('已取好，请到交付处领取。',{exact:true}).waitFor();
-  assert.equal(await notices.filter({hasText:'取物服务暂需工作人员核对'}).count(),1,'重复全局告警不刷屏');
+  assert.equal(await notices.filter({hasText:'取物服务暂需工作人员核对'}).count(),0,'全局告警在顶部展示，不插入个人对话');
   assert.equal(chatRequests.length,10);
 
   // A delayed GET must not roll a committed completion back to executing.
@@ -388,10 +385,10 @@ async function testStorageSubmission(browser,webUrl){
     mode='silent';
     const dispatched=await fetch(apiUrl+'/api/booth/requests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requestId:'sse-reconnect-notification',productId:'water',count:1})});assert.equal(dispatched.status,200);
     releaseStream();
-    await reconnectPage.getByLabel('任务状态通知').filter({hasText:'已接单，请稍候'}).waitFor();
+    await reconnectPage.locator('.task-panel.executing').waitFor();
     await until(()=>sseRequests>=2);
     await openOperations(reconnectPage);await reconnectPage.getByText('网关状态同步正常',{exact:false}).waitFor();
-    assert.equal(await reconnectPage.getByLabel('任务状态通知').filter({hasText:'已接单，请稍候'}).count(),1,'原生SSE重连的重复快照不能重播受理通知');
+    assert.equal(await reconnectPage.locator('.chat-bubble.assistant').count(),0,'SSE重连不把其他页面的任务插入个人对话');
     assert.equal(reconnectChatRequests,0);
     await fetch(apiUrl+'/api/task/finished',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({result:'success'})});
     await page.locator('.task-panel.succeeded').waitFor();
@@ -547,11 +544,11 @@ async function testStorageSubmission(browser,webUrl){
   const report={passed:true,robotRequests:requests.length,viewports:6,touchEmulation:true,keyboardChat:true,
     staffAccess:{visitorEntryHidden:true,directUrlAndReload:true,narrowScreen:true,confirmationResetOnReload:true,executingCannotCancel:true},
     storageSubmission:{failureBlocksSend:true,busyRecovered:true,pendingPreserved:true,reloadWithoutSend:true,sameRequestIdOnRetry:true,successCleanup:true},
-    taskNotifications:{actualAcceptanceAndCompletion:true,duplicateCallbackAndSnapshotDeduplicated:true,nativeSseReconnectDeduplicated:true,staleHttpSnapshotIgnored:true,experienceIsolation:true,excludedFromModelHistory:true,automaticModelRequests:0},
+    taskPresentation:{completionReplyUsesActualCallback:true,duplicateCallbackDeduplicated:true,nativeSseReconnectKeepsPersonalChat:true,staleHttpSnapshotIgnored:true,experienceIsolation:true,fixedProcessExcludedFromModelHistory:true,automaticModelRequests:0},
     catalogLayout:{defaultExpanded:true,desktopConfirmationInViewport:true,largeCatalogIndependentScroll:true,mouseAndKeyboardScroll:true,manualCollapse:true},
     visitorPresentation:{idleWithoutHistoricalTask:true,historyPreserved:true,fixedDialogueHeight:true,latestMessageVisible:true,mouseKeyboardAndTouchScroll:true,conversationFixtures:17,realAiCalls:0},
     statusPresentation:{stateColorsAndIcons:true,globalAlertOverridesCompletion:true,visitorCopyPreservesUncertainty:true,rawDetailsInOperatorDialog:true},
-    flows:['任务通知等待实际受理及完成','故障/受理不明/人工处理/全局告警通知','任务通知去重与SSE重连','任务通知不进入AI历史且零额外请求','紧凑任务卡、目录与确认自适应排列及插画保留','顶部精简与工作人员凭据缺失提示','配置缺口提前提示与零发单','受理后等待回调','完成','拒绝','故障与现场释放','反馈丢失零重发','跨浏览器锁','独立进程重启','GPT建议界面（可控响应）','GPT错误保留输入','迟到AI不覆盖改选/数量/已确认发单','新体验隔离旧回复/错误并保留任务','跨浏览器任务变化保护','设备时钟快慢1小时仍正确提醒','等待提醒与重连保持占用','执行中人工入口不取消','目录默认展开与手动折叠','分类'],realOpenAICall:false,artifacts:output};
+    flows:['取物思考等待真实完成通知','故障/受理不明/人工处理回复与顶部全局告警','自动回复去重与SSE重连时个人对话隔离','固定流程不进入AI历史且零额外请求','紧凑任务卡、目录与确认自适应排列及插画保留','顶部精简与工作人员凭据缺失提示','配置缺口提前提示与零发单','受理后等待回调','完成','拒绝','故障与现场释放','反馈丢失零重发','跨浏览器锁','独立进程重启','GPT建议界面（可控响应）','GPT错误保留输入','迟到AI不覆盖改选/数量/已确认发单','新体验隔离旧回复/错误并保留任务','跨浏览器任务变化保护','设备时钟快慢1小时仍正确提醒','等待提醒与重连保持占用','执行中人工入口不取消','目录默认展开与手动折叠','分类'],realOpenAICall:false,artifacts:output};
   writeFileSync(join(output,'api.log'),api.logs);
   writeFileSync(join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
  }finally{

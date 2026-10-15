@@ -94,7 +94,7 @@ async function presentation(page){return page.evaluate(()=>{
       await heldChat(async started=>{
         await input.fill('等待反馈检查');await send.click();await started;
         assert.equal(await send.isDisabled(),true);assert.equal(await input.isEnabled(),true);
-        await page.getByText('正在回复你',{exact:true}).waitFor();
+        await page.getByRole('group',{name:'思考过程'}).last().getByText('思考中',{exact:true}).waitFor();
         if(reducedMotion==='reduce'){
           assert.equal(await page.locator('.chat-send-waiting').isVisible(),true,'减少动态效果时应显示文字等待提示');
           assert.equal(await page.locator('.chat-send-spinner').isVisible(),false,'减少动态效果时不能留下静止转圈图标');
@@ -138,7 +138,7 @@ async function presentation(page){return page.evaluate(()=>{
       await input.fill('你是谁');readyStyle=await presentation(page);await send.click();await started;
       assert.equal(await input.inputValue(),'','发送后应立即清空输入，而非等待回复');
       assert.equal(await send.isDisabled(),true,'等待期间阻止重复发送');
-      assert.equal(await page.getByText('正在回复你',{exact:true}).isVisible(),true,'保留清楚的等待反馈');
+      assert.equal(await page.getByRole('group',{name:'思考过程'}).last().getByText('思考中',{exact:true}).isVisible(),true,'保留清楚的等待反馈');
       assert.equal(await page.locator('.chat-bubble.user').last().innerText(),'你是谁');
       waitingStyle=await presentation(page);assert.deepEqual(waitingStyle.sections,readyStyle.sections,'等待期间不改变页面和对话组件颜色、透明度或滤镜');
       assert.equal(readyStyle.send.opacity,'1');assert.equal(waitingStyle.send.opacity,'0.48','按钮沿用正常禁用透明度');

@@ -2,16 +2,18 @@
 export interface DispatchCommand { location: string; item: string; count: number }
 export interface BoothProduct {
   id: string; name: string; category: string; subtitle: string; description: string;
-  location: string; maxCount: number; art: "water" | "snack" | "gift" | "greens";
+  location: string; maxCount: number; initialStock: number; art: "water" | "snack" | "gift" | "greens";
   color: string; imageUrl?: string;
 }
+/** 可用数量已扣除当前任务预留，不代表机器人实时盘点。 */
+export interface BoothStockProduct extends BoothProduct { availableCount: number }
 export type BoothTaskStatus = "submitting" | "executing" | "succeeded" | "rejected" | "uncertain" | "fault" | "resolved";
 export interface BoothTask {
   id: string; requestId: string; productId: string; command: DispatchCommand;
   status: BoothTaskStatus; createdAt: string; updatedAt: string; message: string;
 }
 export interface BoothSnapshot {
-  products: BoothProduct[]; tasks: BoothTask[]; active: BoothTask | null; alert: string | null;
+  products: BoothStockProduct[]; tasks: BoothTask[]; active: BoothTask | null; alert: string | null;
   mode: "http" | "simulator"; catalogConfirmed: boolean;
   /** Configuration readiness only; does not assert robot reachability or task availability. */
   dispatch: { ready: boolean; reason: string | null };

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>机器人接口人工测试</title>
+<style>
+body{font:16px/1.6 system-ui,sans-serif;background:#f3f5f8;color:#172b45;margin:0;padding:24px;max-width:1100px;margin:auto}h1{font-size:26px}section{background:white;border:1px solid #dbe2ec;border-radius:12px;padding:20px;margin:16px 0}button,a{font:inherit}button{padding:10px 18px;border:1px solid #adbfd6;background:#edf4ff;border-radius:8px;margin:4px;cursor:pointer}button:disabled{opacity:.45;cursor:default}textarea{font:inherit;width:95%;height:60px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f5f7fa;padding:12px;font:13px/1.6 Consolas,monospace}.error{color:#b52626}#phase{font-weight:bold}
+</style>
+<h1>机器人接口人工测试</h1>
+<p>这是本机人工对端。请求到达后，由你点击受理或拒绝；受理后只有点击完成或故障才发送通知。每次接口通信显示在下方。</p>
+<section><div id="phase">正在读取状态</div><pre id="item"></pre>
+<button id="accept" disabled>受理任务</button><button id="reject" disabled>拒绝任务</button><button id="finished" disabled>发送完成通知</button>
+<p><label for="message">不可恢复故障说明</label></p><textarea id="message">人工测试：机械臂无法自动恢复</textarea><br><button id="error" disabled>发送故障通知</button><p id="errorText" class="error" role="status"></p></section>
+<section><h2>原始接口记录</h2><p>包含 URL、方法、请求头、请求体、HTTP 状态与响应体。headersScope 说明请求头是实际收到还是工具显式设置；后者不包含 HTTP 自动补充字段。时间使用 UTC。最多保留本次运行最近200条；下载后自行保存，重启工具会清空。</p><a href="/manual/report" download>下载本次接口记录 JSON</a><div id="records"></div></section>
+<script>
+const labels={idle:'等待网关发来任务',pending:'已收到请求，等待你受理或拒绝（120秒内操作）',accepted:'已受理，等待你发送完成或故障',sending:'正在发送回调'};
+let busy=false,lastRecords='';
+async function refresh(){try{const state=await(await fetch('/manual/state')).json();document.getElementById('phase').textContent=labels[state.phase];document.getElementById('item').textContent=state.item?JSON.stringify(state.item,null,2):'尚无取物请求';for(const id of ['accept','reject','finished','error'])document.getElementById(id).disabled=busy||state.phase!==(['accept','reject'].includes(id)?'pending':'accepted');const raw=JSON.stringify(state.records);if(raw!==lastRecords){lastRecords=raw;const area=document.getElementById('records');area.replaceChildren();for(const record of state.records){const heading=document.createElement('h3');heading.textContent=record.time+' · '+record.direction;const pre=document.createElement('pre');pre.textContent=JSON.stringify(record,null,2);area.append(heading,pre);}}}catch{document.getElementById('errorText').textContent='工具连接断开，请检查终端后刷新';}}
+for(const id of ['accept','reject','finished','error'])document.getElementById(id).onclick=async()=>{busy=true;await refresh();try{const response=await fetch('/manual/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(id==='error'?{message:document.getElementById('message').value}:{})});const body=await response.json();document.getElementById('errorText').textContent=response.ok?'':body.error;}catch{document.getElementById('errorText').textContent='请求失败，请核对接口记录';}finally{busy=false;await refresh();}};
+refresh();setInterval(refresh,1000);
+</script></html>

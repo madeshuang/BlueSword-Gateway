@@ -41,7 +41,10 @@
 
 /* 对话与选品保持两栏；紧凑任务卡使用欢迎区右上方。 */
 .operator-modal{max-height:calc(100dvh - 40px);overflow-y:auto}
-/* 任务卡和事件通知共用状态色；只有完成使用成功绿色。 */
+.product-stock{position:absolute;z-index:2;left:7px;bottom:10px;padding:3px 4px;background:#ffffffdb;border-radius:2px;font-size:10px;color:#47635a}.service-column .order-panel p.stock-shortage{color:#92602c}
+.operator-stock{border-top:1px solid #d8dfe1;margin-top:24px;padding-top:22px}.operator-stock h3{font-size:16px;font-weight:550}.operator-stock select{width:100%;padding:10px;border:1px solid #cdd9c2;background:#fff}
+.operator-stock-targets{padding-left:20px;font-size:12px;line-height:1.8;overflow-wrap:anywhere}
+/* 任务卡按真实状态着色；只有完成使用成功绿色。 */
 .status-idle,.status-submitting,.status-resolved{--status-color:#52606d;--status-bg:#f0f2f4;--status-border:#cbd2d9}
 .status-executing{--status-color:#315f86;--status-bg:#eef4fa;--status-border:#c5d7e8}
 .status-succeeded{--status-color:#3f6b43;--status-bg:#eef5ec;--status-border:#bfd4b9}
@@ -50,7 +53,6 @@
 .task-panel{background:var(--status-bg);border-color:var(--status-border)}
 .task-panel .task-status,.task-panel .task-main-icon,.task-panel h3,.task-panel>p,.task-heading .task-updated{color:var(--status-color)}
 .task-panel .task-main-icon{border-color:var(--status-border)}
-.chat-event{display:flex;gap:8px;border-left:2px solid var(--status-border);background:var(--status-bg);padding:10px 12px;color:var(--status-color);font-size:12px;line-height:1.8;margin:10px 0}.chat-event svg{flex-shrink:0;margin-top:4px;width:16px;height:16px}.chat-event p{min-width:0;overflow-wrap:anywhere}.chat-event span{font-size:11px;color:inherit;margin-right:8px;white-space:nowrap}
 .welcome,.experience-grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:28px}
 .welcome{min-height:0;padding:22px 0;align-items:center}
 .welcome h1{font-size:30px;line-height:1.35}.welcome-copy>.eyebrow{margin:0 0 12px}.welcome-note{display:none}
@@ -85,6 +87,20 @@
 
 .booth-shell{padding-bottom:20px}
 .welcome-copy>.eyebrow{flex-wrap:wrap;row-gap:6px}
-.booth-partners{font-size:8px;font-weight:600;letter-spacing:1.5px;color:#718567;white-space:nowrap;margin-left:6px}
-.booth-partners i{font-style:normal;font-weight:400;margin:0 6px;color:#a0aa95}
+.bluesword-logo{display:block;height:auto;flex-shrink:0}
+.boot-screen .bluesword-logo{width:180px;max-width:calc(100vw - 38px)}
+.welcome-copy>.eyebrow .bluesword-logo{width:110px;margin-right:4px}
+@media(max-width:580px){.welcome-copy>.eyebrow .bluesword-logo{width:96px}}
 .site-footer{border-top:0;margin-top:20px;padding:0;justify-content:flex-start}
+.thinking-panel{margin:10px 0 14px;color:#6b756f;font-size:12px;line-height:1.8}
+.thinking-panel summary{display:flex;align-items:center;justify-content:flex-start;gap:12px;cursor:pointer;min-height:36px;list-style:none}
+.thinking-panel summary::-webkit-details-marker{display:none}
+.thinking-panel summary>span{display:flex;align-items:center;gap:7px}
+.thinking-panel summary:focus-visible{outline:2px solid #355447;outline-offset:2px}
+.thinking-toggle-icon{color:#68736a;flex-shrink:0}
+.thinking-panel[open] .thinking-toggle-icon{transform:rotate(90deg)}
+.thinking-copy{border-left:2px solid #dde4da;padding:6px 0 6px 13px;margin:3px 0 8px;overflow-wrap:anywhere;white-space:pre-wrap;min-height:24px}
+.thinking-copy p{margin:0}
+.thinking-copy p+p{margin-top:10px}
+.thinking-panel.phase-error summary{color:#9e453e}
+@media(prefers-reduced-motion:reduce){.thinking-panel .spin{display:none}}
