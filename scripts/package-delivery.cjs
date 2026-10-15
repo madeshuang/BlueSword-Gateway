@@ -29,7 +29,7 @@ for(const file of ['start-local.cmd','start-deepseek.cmd','start-gpt-relay.cmd',
 if(fs.existsSync(path.join(root,'apps/web/public')))copy('apps/web/public');
 for(const name of ['package.json','start-local.cjs','start-local.test.ts','robot-simulator.ts','robot-manual.ts','robot-manual.html','robot-manual.test.ts','package-delivery.cjs','verify-delivery.cjs',
   'verify-ai.ts','verify-ai.test.ts','verify-relay.cjs','booth-acceptance.cjs','booth-chat-interaction.cjs','booth-experience.cjs','booth-thinking.cjs','booth-status-reset.cjs','booth-inventory.cjs'])copy('scripts/'+name);
-for(const name of ['接口文档.md','机器人团队联调指南.md','booth-inventory.md','booth-thinking-display.md','task-id-proposal.md','manual-interface-test.md'])copy('docs/'+name);
+for(const name of ['接口文档.md','机器人团队联调指南.md','booth-inventory.md','task-id-proposal.md','manual-interface-test.md'])copy('docs/'+name);
 copy('docs/delivery-readme.md','README.md');
 // 保留打包入口所需模板，便于现场修改后仍能按相同规则生成下一份包。
 copy('docs/delivery-readme.md');

@@ -13,3 +13,13 @@ coverage/
 .tmp/
 .data/
 .scratch/
+
+# 本机开发规则、需求原始资料和内部记录不进入机器人交付工作区。
+/AGENTS.md
+/docs/*
+!/docs/接口文档.md
+!/docs/机器人团队联调指南.md
+!/docs/manual-interface-test.md
+!/docs/delivery-readme.md
+!/docs/booth-inventory.md
+!/docs/task-id-proposal.md
