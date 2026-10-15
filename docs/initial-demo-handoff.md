@@ -1,5 +1,114 @@
 # 初版演示交接与启动检查
 
+## 当前工作区启动与测试速查（2026-10-15）
+
+本节按当前 `package.json` 和启动入口核对，包含后续加入的库存、补货、思考展示、人工接口工具和交付命令。下面保留的 10 月 12 日结果属于历史记录，不代表当前版本重新验证通过。日常启动不需要先跑全部测试；按用途选择一种运行模式即可。
+
+### 先准备终端
+
+每个新 PowerShell 终端先执行：
+
+```powershell
+Set-Location 'E:\Sevenova\BlueSword-Gateway'
+$pnpmUserPath = Join-Path $env:LOCALAPPDATA 'pnpm-global'
+$env:Path = $pnpmUserPath + ';' + $env:Path
+node --version
+pnpm.cmd --version
+```
+
+要求 Node.js >=24.13.0、pnpm 11.25.0。首次使用或依赖发生变化时执行 `pnpm.cmd install --frozen-lockfile`；已有 `.env` 不要覆盖。启动前检查所选模式使用的端口，有占用时先确认原服务用途。具体端口检查、pnpm 安装和供应商切换步骤见后面的“Windows PowerShell：日常启动入口”。
+
+### 按用途选择入口
+
+| 用途 | 命令及前提 | 打开地址 |
+| --- | --- | --- |
+| 日常开发、快速演示 | `pnpm.cmd dev:demo`，同时启动 API、自动机器人模拟器和 Vite；无需先构建 | `http://127.0.0.1:5173`；API 4100、模拟器 4200 |
+| 在原来的 5173 页面人工测试 | 按下一节分三个终端启动人工对端、人工网关和 Vite；无需先构建 | 前端 `http://127.0.0.1:5173`，API 4101，人工工具 4201 |
+| 人工测试构建网页 | 先运行 `pnpm.cmd build`，再在两个终端分别运行 `pnpm.cmd manual:robot` 和 `pnpm.cmd manual:gateway` | 网关 `http://127.0.0.1:4101`，人工工具 `http://127.0.0.1:4201` |
+| 连接真实机器人并开发前端 | 核对 `.env` 中的真实地址、目录和准入配置后运行 `pnpm.cmd dev` | 前端默认 5173，API 默认 4100 |
+| 使用构建网页运行、准备现场交付 | 工作区先运行 `pnpm.cmd build`，配置 `.env` 后运行 `pnpm.cmd serve` | 默认 `http://127.0.0.1:4100`，网页和 API 共用端口 |
+
+**现在若要亲自检查新增功能，建议使用人工模式。** 自动模拟器约 2.5 秒就完成任务，可能来不及查看较长的思考文案；人工工具让你决定何时受理和回调。先手选物品并确认，再切到 4201 工具，在 120 秒内点击“受理任务”，观察等待展示，最后点击“发送完成通知”或“发送故障通知”。详细步骤和记录模板见[人工测试指南](manual-interface-test.md)。
+
+人工网关强制使用本机人工对端、示例目录及独立的 `.data/booth-manual.sqlite`，工作人员练习凭据为 `manual-local-only`。它仍会读取 `.env` 中所选 AI 的配置，发送聊天可能产生真实模型请求；手选物品不需要模型。自动演示使用 `.data/booth-demo.sqlite`，正式入口默认使用 `.data/booth.sqlite`，均可受各自支持的配置覆盖。不要把不同模式的端口、数据库或工作人员凭据混用。
+
+`pnpm.cmd start` 和 `pnpm.cmd dev:api` 只启动后端，不启动 Vite，也不提供构建网页。`serve` 和 `manual:gateway` 使用 `apps/web/dist`，直接访问它们提供的网页时，修改前端源码后必须重新构建；`dev:demo`、`dev` 和下面的 5173 人工测试方式使用 Vite 热更新。后端代码与 `.env` 修改后均需重启相应后端。
+
+### 人工工具配合原来的 5173 页面
+
+可以继续使用原来的前端端口。5173 是 Vite 前端，4101 是人工网关 API，4201 是你操作的人工机器人页面；前端通过 Vite 的 `/api` 代理访问人工网关。无需改源代码或 `.env`，也无需先构建网页。
+
+先在原启动终端停止 `dev:demo`，确认 5173 已释放，不要同时再开一组演示。检查 4101、4201、5173 的占用；有输出时先核对服务用途，不直接结束不明进程：
+
+```powershell
+Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+    Where-Object { $_.LocalPort -in 4101,4201,5173 } |
+    Select-Object LocalAddress,LocalPort,OwningProcess
+```
+
+打开三个 PowerShell 终端，每个先执行本节“先准备终端”的目录和 PATH 命令，然后分别执行以下命令。每个服务会持续占用自己的终端，不要把三组依次粘到同一个终端。
+
+终端一：人工机器人对端。
+
+```powershell
+pnpm.cmd manual:robot
+```
+
+终端二：人工网关，只提供 API，不加载构建网页。以下示例沿用原来的 DeepSeek 选择，密钥仍从本地 `.env` 读取；只手选物品时不需要密钥。
+
+```powershell
+$env:BOOTH_AI_PROVIDER = 'deepseek'
+node --env-file-if-exists=.env --import tsx apps/api/src/booth/index.ts --manual
+```
+
+终端三：前端，将请求明确转到人工网关，固定使用 5173；端口占用时直接报错，避免悄悄换成其他端口。
+
+```powershell
+$env:VITE_API_TARGET = 'http://127.0.0.1:4101'
+pnpm.cmd --filter @bluesword/web dev --port 5173 --strictPort
+```
+
+启动成功后，打开 `http://127.0.0.1:5173/` 选品并确认，打开 `http://127.0.0.1:4201/` 在 120 秒内点击受理，再手动发送完成或故障通知。工作人员地址为 `http://127.0.0.1:5173/#operations`，练习凭据为 `manual-local-only`。API 健康检查为 `http://127.0.0.1:4101/api/health`；此方式的 4101 根路径不提供网页。在 5173 确认取物后，4201 应出现待处理请求；若没有，先核对 Vite 代理和启动输出，不要反复提交。
+
+结束时在三个终端分别按 Ctrl+C，再检查端口。回到原来的自动演示时，在前端终端先移除人工代理设置，再按后面的原有步骤启动：
+
+```powershell
+Remove-Item Env:VITE_API_TARGET -ErrorAction SilentlyContinue
+pnpm.cmd dev:demo
+```
+
+`VITE_API_TARGET` 在 Vite 启动时读取，改变量后必须重启 Vite。人工测试始终使用人工库，自动演示仍使用演示库；切换回来不会将两边的库存和任务合并。以上方式由当前代理配置和启动代码核对，尚未在本轮实际启动验证。
+
+### 新增功能不需要另起服务
+
+- **库存及补货**随网关启动。库存保存在 SQLite，重启、“开始新体验”和修改目录中的 `initialStock` 都不会自动补满已有物品。售罄时先核对库存，补货后在工作人员页面重置，不要删库。完整规则见[库存说明](booth-inventory.md)。
+- **工作人员页面**直接打开当前网页地址加 `/#operations`。自动演示和 Vite 人工测试均为 `http://127.0.0.1:5173/#operations`，人工测试构建网页时为 `http://127.0.0.1:4101/#operations`。除人工模式外，凭据由负责人通过 `BOOTH_OPERATOR_TOKEN` 设置；缺失时不能补货重置或解除异常占用。有未结束任务或告警时不能补货重置，执行中也不能人工解除占用。
+- **可折叠思考区域和完成后约十秒的任务卡复位**属于前端行为，没有独立启动命令。思考文案是固定模拟展示，不是机器人实际步骤反馈，也不是模型真实推理。完成须由回调确认；任务卡复位不补库存、不删除任务。见[思考展示说明](booth-thinking-display.md)。
+- **聊天**需要有效的所选供应商配置；未配置密钥仍可手选。需要 DeepSeek 时，在启动 API 的终端设置 `$env:BOOTH_AI_PROVIDER = 'deepseek'`，并确保 `.env` 中有相应配置。旧进程环境变量会优先于 `.env`，供应商切换与清理方法见下文。
+
+### 自动测试按需要执行
+
+以下命令均在根目录执行。可控测试自行启动测试对端，浏览器回归使用隔离端口和临时数据；不用事先运行 `dev:demo`，也不需要向现有演示页发单。Windows 浏览器回归默认使用已安装的 Microsoft Edge。
+
+| 命令 | 范围 |
+| --- | --- |
+| `pnpm.cmd test` | 当前脚本显式列出的后端、库存、AI 验证工具、交付和人工对端测试；不包含下列全部浏览器脚本 |
+| `pnpm.cmd build` | 严格类型检查及前端生产构建；包含 `typecheck` |
+| `pnpm.cmd test:interfaces` | 正式三接口与任务事实的定向检查 |
+| `pnpm.cmd test:ai` | AI 适配器及双供应商的可控测试，不是真实模型调用 |
+| `pnpm.cmd test:browser` | 主页面与取物流程浏览器回归；`test:booth:browser` 是同一脚本入口 |
+| `pnpm.cmd test:inventory` | 库存 HTTP 测试及库存浏览器回归 |
+| `node scripts/booth-thinking.cjs` | 可折叠思考、等待及完成/异常回复检查 |
+| `node scripts/booth-status-reset.cjs` | 完成后任务卡复位检查 |
+| `node scripts/booth-chat-interaction.cjs` | 输入、草稿和聊天交互回归 |
+| `node scripts/booth-experience.cjs` | 体验隔离与刷新恢复回归 |
+
+通常先执行 `pnpm.cmd test` 和 `pnpm.cmd build`；需要检查这次新增页面行为时，再执行主浏览器回归、库存、思考和复位检查。以上可控检查不验证真实模型效果或机器人动作。`pnpm.cmd verify:ai`、`pnpm.cmd verify:relay` 会调用真实模型，可能产生费用，不属于每次启动的必要步骤。
+
+需要生成交付包时运行 `pnpm.cmd delivery`，它会先构建，再在 `.tmp/delivery/` 生成 ZIP。`pnpm.cmd test:delivery` 会打包、解压、安装依赖并运行隔离检查，必要时需要联网安装；运行前先构建，避免验证旧网页。包内运行与真实网络配置见[现场交付说明](delivery-readme.md)。本节只核对命令和代码，没有重新执行自动测试或真实接口验证。
+
+---
+
 适用范围：2026-10-12 向机器人团队演示我方初版、收集反馈。本地模拟器演示可以独立进行，不等待机器人团队全部开发完成。本文不是正式部署或机器人协议变更，接口仍以 [接口文档](接口文档.md) 为依据；未完成工作继续维护在 [开发计划](development-plan.md)。
 
 ## Windows PowerShell：日常启动入口
@@ -48,6 +157,7 @@ pnpm.cmd --version
 Get-ChildItem Env: | Where-Object { $_.Name -match '^(OPENAI_|DEEPSEEK_|NODE_OPTIONS$)' } |
     ForEach-Object { Remove-Item -LiteralPath ('Env:' + $_.Name) }
 $env:BOOTH_AI_PROVIDER = 'deepseek'
+Remove-Item Env:VITE_API_TARGET -ErrorAction SilentlyContinue
 @'
 import {readFileSync} from "node:fs";
 import {parseEnv} from "node:util";

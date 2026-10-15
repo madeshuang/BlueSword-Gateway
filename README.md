@@ -1,5 +1,7 @@
 # BlueSword-Gateway
 
+机器人团队通过 Git 获取代码后，请先阅读[机器人团队联调指南](docs/机器人团队联调指南.md)，按其中的安装、构建、AI 配置和真实机器人对接步骤运行。双方报文以[接口文档](docs/接口文档.md)为准；[人工测试指南](docs/manual-interface-test.md)用于本机模拟自测。
+
 展会机器人系统的用户侧网关。用户选择物品并确认数量，后端向机器人发送抓取指令；机器人主动通知完成或不可恢复故障。当前支持本地演示和 HTTP 开发模式；DeepSeek 已完成 3 条真实单轮样本及 7 项真实对话回归；OpenAI 中转首轮 2/3 通过，随后正向样本单次补验成功；官方 OpenAI 直连、现场配置和机器人联调仍未验证。
 
 ## 环境与安装
@@ -53,12 +55,12 @@ pnpm dev
 | `OPENAI_API_KEY`、`OPENAI_MODEL` | OpenAI 服务端 API Key 与模型，默认 `gpt-4.1-mini`，使用 Responses 结构化输出。 |
 | `DEEPSEEK_API_KEY`、`DEEPSEEK_MODEL` | DeepSeek 服务端 API Key 与模型，默认 `deepseek-flash`，使用 Chat Completions JSON 输出，并关闭思考模式。 |
 | `OPENAI_TIMEOUT_MS`、`DEEPSEEK_TIMEOUT_MS` | 各自单次调用预算，默认 20000 毫秒，包含响应正文读取。 |
-| `BOOTH_OPERATOR_TOKEN` | 工作人员解除本地异常占用所需凭据；示例留空。 |
+| `BOOTH_OPERATOR_TOKEN` | 工作人员解除本地异常占用及补货后重置库存所需凭据；示例留空。 |
 | `VITE_API_TARGET` | Vite 开发服务器代理地址，默认 `http://127.0.0.1:4100`；自定义 API 端口时需在 Vite 进程环境中设置。 |
 
-现场目录沿用示例文件的字段结构，要求物品 ID 唯一，`maxCount` 为 1–100 的整数，色值为六位十六进制。`art` 使用现有四种插画类别；可选 `imageUrl` 只引用 `/products/` 下的本地文件，将实际照片放入 `apps/web/public/products/` 后使用。当前没有现场照片或已核对的真实目录。
+现场目录沿用示例文件的字段结构，要求物品 ID 唯一，`maxCount` 为 1–100 的整数，新增 `initialStock` 为 0–100000 的整数，色值为六位十六进制。`maxCount` 是每单上限，`initialStock` 是首次建立库存及补货重置后的数量。剩余库存保存在 SQLite，重启服务和修改配置都不会自动补满已有物品；聊天、手选与后台提交均受当前可用数量限制。`art` 使用现有四种插画类别；可选 `imageUrl` 只引用 `/products/` 下的本地文件，将实际照片放入 `apps/web/public/products/` 后使用。当前没有现场照片或已核对的真实目录。
 
-工作人员入口位于页面底部，或访问 `/#operations`。故障和受理不明时，必须现场核对机器人停止及物品情况，再输入凭据并勾选确认，才能解除我方占用。这不会向机器人发送停止或取消指令。执行中任务不会按时间自动结束。超过提醒阈值时可从任务提示进入工作人员核对；执行中仍不能从该入口取消或解除，需联系机器人负责人。缺少跨任务关联标识时，迟到回调仍可能误关联下一单；当前尚未解决该风险，见 [开发计划 P1](docs/development-plan.md)。
+工作人员可直接访问 `/#operations`，日常访客页面不显示固定工作人员入口。故障和受理不明时，必须现场核对机器人停止及物品情况，再输入凭据并勾选确认，才能解除我方占用。这不会向机器人发送停止或取消指令，也不会恢复库存。实际补货后，在同一入口的“补货重置”区域选择物品、核对补满目标并勾选补货确认，再重置所选物品数量；有未结束任务或告警时不能重置。完整数量规则和操作见[库存说明](docs/booth-inventory.md)。执行中任务不会按时间自动结束。超过提醒阈值时可从任务提示进入工作人员核对；执行中仍不能从该入口取消或解除，需联系机器人负责人。缺少跨任务关联标识时，迟到回调仍可能误关联下一单；当前尚未解决该风险，见 [开发计划 P1](docs/development-plan.md)。
 
 ## 验证命令
 
@@ -69,11 +71,20 @@ pnpm test
 pnpm test:interfaces
 pnpm test:ai
 pnpm test:browser
+pnpm test:inventory
 ```
 
-`build` 包含严格类型检查及前端生产构建，输出位于 `apps/web/dist`；它不生成后端编译包。`pnpm --filter @bluesword/web preview` 仅供查看前端构建，生产部署与 API 路由安排留待后续处理。
+`build` 包含严格类型检查及前端生产构建，输出位于 `apps/web/dist`；它不生成后端编译包。`pnpm serve` 使用 tsx 运行后端，并在同一端口提供构建网页与 API。`pnpm --filter @bluesword/web preview` 仅供查看前端构建。
 
-当前 `pnpm test` 共 45 项：44 项后端测试和 1 项验证命令集成测试。后端包括 18 项机器人 HTTP 接口与任务事实（含 P9 配置提示和工作人员凭据缺失），17 项双供应商聊天 HTTP 行为，2 项 OpenAI 独立端点与候选模型行为，1 项等待提醒 HTTP 行为，5 项既有可控 OpenAI 行为，1 项目录校验。HTTP 测试中有 1 项明确复现 P1 跨单迟到通知限制，另有 5 项验证回调原子写入；P1 复现通过不代表该风险已修复。这些测试不代表真实模型或现场机器人验证。浏览器脚本使用本地机器人对端和 AI 替身，不调用真实模型；Windows 默认使用已安装的 Microsoft Edge，可通过 `PLAYWRIGHT_CHANNEL` 改为其他 Playwright 支持的已安装浏览器。其他系统需准备 Playwright Chromium。
+## 交付与人工接口测试
+
+`pnpm delivery` 先构建网页，再在被忽略的 `.tmp/delivery/` 下生成源码和构建网页的 ZIP。包内只保留必要运行资料、锁文件和人工工具，不携带本机密钥、数据库、依赖安装目录或临时材料。包内 README 使用[现场交付说明](docs/delivery-readme.md)，首次仍需 `pnpm install --frozen-lockfile`，然后填写 `.env`、运行 `pnpm serve`。打包命令在 Windows 作者机运行。
+
+人工测试使用两个独立终端运行 `pnpm manual:robot` 和 `pnpm manual:gateway`，分别打开4201人工工具和4101网页。人工模式覆盖正式机器人地址及数据库，受理、拒绝、完成和故障均由人点击；工具显示原始 HTTP 请求/响应并可下载记录。具体步骤和待填写的人工记录见[人工测试指南](docs/manual-interface-test.md)。`pnpm test:delivery` 自动解压、安装及检查这些行为，不能代替人的逐项操作和真实机器人联调。
+
+本次包的实际安装、接口结果、笔记本备选运行检查及未验证范围见[第四项验证记录](docs/delivery-validation-2026-10-15.md)。
+
+当前后端与验证命令共 76 项检查通过，包括 12 项库存 HTTP 检查和 2 项交付/人工对端 HTTP 检查；`pnpm test:inventory` 还运行库存浏览器检查，结果与范围见[库存验证记录](docs/booth-inventory.md)。既有 HTTP 测试保留 P1 跨单迟到通知限制的复现；该检查通过不代表风险已修复。这些测试不代表真实模型或现场机器人验证。浏览器脚本使用本地机器人对端和 AI 替身，不调用真实模型；Windows 默认使用已安装的 Microsoft Edge，可通过 `PLAYWRIGHT_CHANNEL` 改为其他 Playwright 支持的已安装浏览器。其他系统需准备 Playwright Chromium。
 
 ## 真实模型小样本验证
 
