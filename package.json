@@ -14,7 +14,7 @@
     "dev:robot": "node --import tsx scripts/robot-simulator.ts",
     "build": "pnpm typecheck && pnpm --filter @bluesword/web build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run apps/api/src/booth/booth.test.ts apps/api/src/booth/inventory.test.ts scripts/verify-ai.test.ts apps/api/src/booth/delivery.test.ts scripts/robot-manual.test.ts",
+    "test": "vitest run apps/api/src/booth/booth.test.ts apps/api/src/booth/inventory.test.ts scripts/verify-ai.test.ts apps/api/src/booth/delivery.test.ts scripts/robot-manual.test.ts scripts/start-local.test.ts",
     "test:inventory": "vitest run apps/api/src/booth/inventory.test.ts && node scripts/booth-inventory.cjs",
     "test:interfaces": "vitest run apps/api/src/booth/booth.test.ts -t 正式三接口与任务事实",
     "test:ai": "vitest run apps/api/src/booth/booth.test.ts -t \"OpenAI|双供应商\"",

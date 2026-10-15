@@ -23,11 +23,11 @@ function copy(source,destination=source){
   if(sha(fs.readFileSync(target))!==sha(content))throw Error('复制校验失败：'+source);
   entries.push({path:normalized,sha256:sha(content)});
 }
-for(const file of ['package.json','pnpm-lock.yaml','pnpm-workspace.yaml','tsconfig.json','vitest.config.ts','.env.example',
+for(const file of ['start-local.cmd','start-deepseek.cmd','start-gpt-relay.cmd','package.json','pnpm-lock.yaml','pnpm-workspace.yaml','tsconfig.json','vitest.config.ts','.env.example',
   'apps/api/package.json','apps/api/src','apps/web/package.json','apps/web/index.html','apps/web/vite.config.ts','apps/web/src','apps/web/dist',
   'packages/contracts/package.json','packages/contracts/src','config/booth-catalog.example.json'])copy(file);
 if(fs.existsSync(path.join(root,'apps/web/public')))copy('apps/web/public');
-for(const name of ['package.json','robot-simulator.ts','robot-manual.ts','robot-manual.html','robot-manual.test.ts','package-delivery.cjs','verify-delivery.cjs',
+for(const name of ['package.json','start-local.cjs','start-local.test.ts','robot-simulator.ts','robot-manual.ts','robot-manual.html','robot-manual.test.ts','package-delivery.cjs','verify-delivery.cjs',
   'verify-ai.ts','verify-ai.test.ts','verify-relay.cjs','booth-acceptance.cjs','booth-chat-interaction.cjs','booth-experience.cjs','booth-thinking.cjs','booth-status-reset.cjs','booth-inventory.cjs'])copy('scripts/'+name);
 for(const name of ['接口文档.md','机器人团队联调指南.md','booth-inventory.md','booth-thinking-display.md','task-id-proposal.md','manual-interface-test.md'])copy('docs/'+name);
 copy('docs/delivery-readme.md','README.md');
