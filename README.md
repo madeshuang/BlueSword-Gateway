@@ -4,7 +4,7 @@
 
 ## 1. 获取代码与安装依赖
 
-安装 Git、Node.js **24.13.0 或以上版本**。仓库为私有，先让负责人为你的 GitHub 账号开通访问权限，再在 PowerShell 中执行：
+安装 Git、Node.js **24.13.0 或以上版本**。仓库为公有，先让负责人为你的 GitHub 账号开通访问权限，再在 PowerShell 中执行：
 
 ```powershell
 # 尚未安装指定版本的 pnpm 时执行
