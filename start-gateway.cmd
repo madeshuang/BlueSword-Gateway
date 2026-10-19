@@ -7,5 +7,5 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-node scripts\start-local.cjs --deepseek
+node scripts\start-local.cjs --gateway
 if errorlevel 1 pause
