@@ -9,11 +9,16 @@ import { OpenAIBoothAssistant } from "./openai.js";
 
 import type { AiCallObserver } from "./advice.js";
 import { builtWeb } from "./static.js";
+import {Diagnostics} from "./diagnostics.js";
+import {speechModels,speechConfigured,type SpeechConnect} from "./speech-provider.js";
+import {attachSpeech} from "./speech-gateway.js";
+import {captureRobotNotification,captureRobotReply,recordingRobotTransport} from "./wire.js";
 
-export function createBoothApplication(config: BoothConfig, options: { webDirectory?: string; transport?: typeof fetch; assistantTransport?: typeof fetch; onAiCall?: AiCallObserver; assistant?: Pick<OpenAIBoothAssistant, "advise"> } = {}) {
+export function createBoothApplication(config: BoothConfig, options: { webDirectory?: string; transport?: typeof fetch; assistantTransport?: typeof fetch; onAiCall?: AiCallObserver; assistant?: Pick<OpenAIBoothAssistant, "advise">; speechConnect?:SpeechConnect } = {}) {
   const serveWeb = options.webDirectory ? builtWeb(options.webDirectory) : undefined;
   const storage = new ApplicationStorage(config.databasePath);
-  const service = new BoothService(storage, config, options.transport);
+  const diagnostics=new Diagnostics(storage,config.mode);
+  const service = new BoothService(storage, config, recordingRobotTransport(options.transport??fetch,diagnostics));
   const assistant = options.assistant ?? (config.aiProvider === "deepseek"
     ? new DeepSeekBoothAssistant(config,options.assistantTransport,options.onAiCall)
     : new OpenAIBoothAssistant(config,options.assistantTransport,options.onAiCall));
@@ -29,12 +34,23 @@ export function createBoothApplication(config: BoothConfig, options: { webDirect
     }).finally(() => work.delete(operation));
     work.add(operation);
   });
+  const speech=attachSpeech(server,config.speech,diagnostics,options.speechConnect);
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    let url:URL;
+    try {url=new URL(req.url??"/","http://localhost");}
+    catch {throw new BoothError("请求地址不合法",400);}
+    if(["/api/task/finished","/api/task/error"].includes(url.pathname))captureRobotNotification(req,res,diagnostics);
     if (closing) throw new BoothError("服务正在关闭",503);
-    const url = new URL(req.url ?? "/", "http://localhost");
     if (serveWeb?.(req,res,url.pathname)) return;
     if (req.method === "GET" && url.pathname === "/api/health") return json(res,200,{ok:true,version:"booth-v1",mode:config.mode});
     if (req.method === "GET" && url.pathname === "/api/booth") return json(res,200,service.snapshot());
+    if(req.method==="GET"&&url.pathname==="/api/booth/speech")return json(res,200,{configured:!!config.speech&&speechConfigured(config.speech)});
+    if(req.method==="GET"&&["/api/booth/developer/speech","/api/booth/developer/robot"].includes(url.pathname)){
+      requireOperator(req,config.operatorToken);
+      const kind=url.pathname.endsWith("speech")?"speech":"robot";
+      if(url.searchParams.get("download")==="1")res.setHeader("Content-Disposition",`attachment; filename="bluesword-${kind}-records.json"`);
+      return json(res,200,{scope:"网关运行记录；仅证明本机采集到的请求和结果",limit:200,audioSaved:false,records:kind==="speech"?diagnostics.listSpeech():diagnostics.listWire()});
+    }
     if (req.method === "GET" && url.pathname === "/api/booth/events") {
       res.writeHead(200,{"Content-Type":"text/event-stream; charset=utf-8","Cache-Control":"no-cache, no-transform",Connection:"keep-alive"});
       const send = () => res.write("data: " + JSON.stringify(service.snapshot()) + "\n\n");
@@ -46,6 +62,27 @@ export function createBoothApplication(config: BoothConfig, options: { webDirect
     }
     if (req.method !== "POST") return json(res,404,{code:1,data:"Not found",success:false});
     const body = await readBody(req);
+    if(url.pathname.startsWith("/api/booth/speech/")){
+      if(req.headers.origin&&req.headers.origin!=="http://"+req.headers.host&&req.headers.origin!=="https://"+req.headers.host)throw new BoothError("请从网关页面操作",403);
+      if(url.pathname==="/api/booth/speech/attempts"){
+        if(!config.speech||!speechConfigured(config.speech))throw new BoothError("语音服务尚未配置，可继续打字",503);
+        return json(res,200,diagnostics.startSpeech(config.speech.provider,speechModels[config.speech.provider]));
+      }
+      const match=/^\/api\/booth\/speech\/attempts\/([a-f0-9-]{36})$/.exec(url.pathname);
+      if(match){
+        if(typeof body.token!=="string"||body.token.length>128)throw new BoothError("识别记录凭据不合法",403);
+        try{
+          const record=diagnostics.authorizeSpeech(match[1]!,body.token);
+          if(body.status==="cancelled"||body.status==="error"){
+            if(body.status==="cancelled"||record.status==="starting")diagnostics.finishSpeech(record.id,{status:body.status,stopReason:["cancelled","microphone-denied","no-speech","capture-failed","connection-failed","experience-changed","sent-draft"].includes(body.reason)?body.reason:"cancelled"});
+          }else{
+            if(typeof body.applied!=="boolean")throw new Error("草稿状态不合法");
+            diagnostics.updateSpeech(record.id,body.token,{applied:body.applied,...(body.endToDraftMs===undefined?{}:{endToDraftMs:body.endToDraftMs})});
+          }
+        }catch{throw new BoothError("记录更新失败，请核对记录凭据和字段",400);}
+        return json(res,200,{saved:true});
+      }
+    }
     if (url.pathname === "/api/booth/experiences") return json(res,200,service.createExperience());
     if (url.pathname === "/api/task/finished") {
       if (Object.keys(body).length !== 0 && (body.result !== "success" || Object.keys(body).some(k=>k!=="result"))) throw new BoothError("完成通知仅接受空JSON对象或 result:success");
@@ -64,6 +101,11 @@ export function createBoothApplication(config: BoothConfig, options: { webDirect
         body.messages.some(m => !m || typeof m !== "object" || !["user","assistant"].includes(m.role) || typeof m.content !== "string" || !m.content.trim() || m.content.length > 2000) ||
         body.messages.at(-1).role !== "user") throw new BoothError("对话内容不合法");
       if (aiBusy) throw new BoothError("智能助手正在处理请求，请稍后再试",429);
+      if(Array.isArray(body.speechRecords)&&body.speechRecords.length<=20){
+        const receipts=body.speechRecords.filter((r:unknown):r is {id:string;token:string}=>!!r&&typeof r==="object"&&typeof (r as {id?:unknown}).id==="string"&&typeof (r as {token?:unknown}).token==="string"&&(r as {token:string}).token.length<=128);
+        try{diagnostics.linkSent(receipts,body.messages.at(-1).content);}
+        catch{console.warn(JSON.stringify({event:"developer_record_failed",kind:"speech-send"}));}
+      }
       aiBusy = true;
       try {
         const token = req.headers["x-booth-experience"];
@@ -101,6 +143,7 @@ export function createBoothApplication(config: BoothConfig, options: { webDirect
     },
     async close(): Promise<void> {
       closing=true;
+      await speech.close();
       for (const res of streams) res.end();
       await new Promise<void>((resolve,reject)=>server.close(e=>e?reject(e):resolve()));
       await Promise.allSettled([...work]); storage.close();
@@ -114,8 +157,10 @@ function requireOperator(req: IncomingMessage, token: string | undefined): void 
   if (provided.length !== expected.length || !timingSafeEqual(provided,expected)) throw new BoothError("工作人员凭据不正确",403);
 }
 function json(res: ServerResponse, status: number, data: unknown): void {
-  res.writeHead(status,{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store"});
-  res.end(JSON.stringify(data));
+  const headers={"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store"},body=JSON.stringify(data);
+  captureRobotReply(res,status,headers,body);
+  res.writeHead(status,headers);
+  res.end(body);
 }
 async function readBody(req: IncomingMessage): Promise<Record<string,any>> {
   if (req.headers["content-type"] && !req.headers["content-type"].startsWith("application/json")) throw new BoothError("请发送JSON请求",415);

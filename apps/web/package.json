@@ -9,7 +9,9 @@
   },
   "dependencies": {
     "@bluesword/contracts": "workspace:*",
+    "@ricky0123/vad-web": "0.0.31",
     "lucide-react": "0.544.0",
+    "onnxruntime-web": "1.22.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

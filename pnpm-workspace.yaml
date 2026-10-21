@@ -4,5 +4,6 @@ packages:
 
 allowBuilds:
   esbuild: true
+  protobufjs: false
 
 minimumReleaseAge: 4320
