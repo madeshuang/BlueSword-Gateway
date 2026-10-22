@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { BoothProduct } from "@bluesword/contracts";
+import type {SpeechConfig} from "./speech-provider.js";
 
 export interface BoothConfig {
   mode: "http" | "simulator"; dispatchUrl: string | undefined; databasePath: string;
@@ -11,6 +12,7 @@ export interface BoothConfig {
   openaiKey: string | undefined; openaiModel: string; openaiTimeoutMs: number;
   taskReminderMs: number;
   operatorToken: string | undefined;
+  speech?: SpeechConfig;
 }
 export function readBoothConfig(): BoothConfig {
   const aiProvider = process.env.BOOTH_AI_PROVIDER?.trim() || "openai";
@@ -38,7 +40,17 @@ export function readBoothConfig(): BoothConfig {
     openaiModel: process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mini",
     taskReminderMs: reminderThreshold(),
     operatorToken: process.env.BOOTH_OPERATOR_TOKEN?.trim() || undefined,
+    speech:readSpeechConfig(),
   };
+}
+function readSpeechConfig():SpeechConfig {
+  const provider=process.env.BOOTH_SPEECH_PROVIDER?.trim()||"ali";
+  if(provider!=="ali"&&provider!=="tencent")throw new Error("BOOTH_SPEECH_PROVIDER 必须为 ali 或 tencent");
+  const aliWorkspace=process.env.DASHSCOPE_WORKSPACE_ID?.trim()||undefined;
+  if(aliWorkspace&&!/^[a-zA-Z0-9-]+$/.test(aliWorkspace))throw new Error("DASHSCOPE_WORKSPACE_ID 格式不合法");
+  const tencentAppId=process.env.TENCENT_APP_ID?.trim()||undefined;
+  if(tencentAppId&&!/^\d+$/.test(tencentAppId))throw new Error("TENCENT_APP_ID 必须为数字 APPID");
+  return {enabled:process.env.BOOTH_SPEECH_ENABLED!=="false",provider,aliWorkspace,tencentAppId,aliKey:process.env.DASHSCOPE_API_KEY?.trim()||undefined,tencentSecretId:process.env.TENCENT_SECRET_ID?.trim()||undefined,tencentSecretKey:process.env.TENCENT_SECRET_KEY?.trim()||undefined};
 }
 function positive(name: string, fallback: number): number {
   const value = Number(process.env[name] ?? fallback);

@@ -7,6 +7,8 @@ import {openExperience,savedExperience,forgetExperience,type BoothExperience} fr
 import {ThinkingPanel,type ThinkingMessage} from "./ThinkingPanel";
 import {StockResetPanel} from "./StockResetPanel";
 import "./booth.css";
+import {SpeechDraft} from "./speech/draft";
+import {VoiceInput,type VoiceControl} from "./speech/VoiceInput";
 const labels:Record<BoothTask["status"],string>={submitting:"等待机器人接单",executing:"机器人已接单",succeeded:"已完成",rejected:"机器人未接单",uncertain:"等待核对",fault:"需要协助",resolved:"工作人员已处理"};
 class RequestError extends Error { constructor(message:string,readonly status:number){super(message);} }
 const pendingKey="bluesword.booth.pending";
@@ -59,6 +61,8 @@ export function BoothApp(){
   const [operator,setOperator]=useState(location.hash==="#operations"),[token,setToken]=useState(""),[checked,setChecked]=useState(false);
   const messageList=useRef<HTMLDivElement>(null),selectionVersion=useRef(0),experienceVersion=useRef(0),draftVersion=useRef(0),currentState=useRef(state);
   const composerInput=useRef<HTMLTextAreaElement>(null),composing=useRef(false);
+  const speechDraft=useRef(new SpeechDraft()),voice=useRef<VoiceControl>(null);
+  function updateText(value:string){speechDraft.current.edit(value);draftVersion.current++;setText(value);}
   const transcript=useRef<HTMLDivElement>(null);
   const experienceReady=useRef<Promise<BoothExperience>|null>(null),releaseExperience=useRef<(()=>void)|null>(null);
   const experienceAbort=useRef<AbortController|null>(null);
@@ -186,22 +190,25 @@ export function BoothApp(){
   function startExperience(){
     try{forgetExperience();}catch{setError("无法开始新体验，请检查浏览器存储设置或联系工作人员。");return;}
     experienceVersion.current++;selectionVersion.current++;
+    voice.current?.cancel("experience-changed");voice.current?.clearReceipts();
     taskThought.current=null;
-    setMessages([]);setText("");setThinking(false);setChatError("");
+    setMessages([]);updateText("");setThinking(false);setChatError("");
     setSelectedId(null);setCount(1);setError("");setExperienceTaskId(null);
     prepareExperience(true);
   }
   async function chat(input=text,fromQuickPrompt=false){
-    if(!input.trim()||thinking||(fromQuickPrompt&&text.length>0))return;setThinking(true);setChatError("");setText("");
+    if(!input.trim()||thinking||(fromQuickPrompt&&text.length>0))return;
+    voice.current?.cancel("sent-draft");const speechRecords=voice.current?.takeReceipts()??[];
+    setThinking(true);setChatError("");updateText("");
     const version=selectionVersion.current,experience=experienceVersion.current,draft=draftVersion.current,taskId=state?.tasks[0]?.id;
     const userMessage:BoothChatMessage={role:"user",content:input.trim()};
     const next:BoothChatMessage[]=[...messages.filter((message):message is BoothChatMessage=>message.role==="user"||message.role==="assistant"),userMessage];
     const thoughtId=crypto.randomUUID();
     setMessages(current=>[...current,userMessage,{role:"thinking",id:thoughtId,kind:"chat",phase:"running",content:"我会先结合你的需求和可选物品整理回复。如果需要取物，请先确认物品和数量，再交由机器人完成取送。"}]);
-    try{const credential=await experienceReady.current?.catch(()=>null);if(experience!==experienceVersion.current)return;const advice=await api<BoothAdvice>("/api/booth/chat",{messages:next.slice(-11)},credential?{"X-Booth-Experience":credential.token}:undefined);if(experience!==experienceVersion.current)return;setMessages(current=>[...current.map(message=>message.role==="thinking"&&message.id===thoughtId?{...message,phase:"done" as const}:message),{role:"assistant",content:advice.reply}]);
+    try{const credential=await experienceReady.current?.catch(()=>null);if(experience!==experienceVersion.current)return;const advice=await api<BoothAdvice>("/api/booth/chat",{messages:next.slice(-11),speechRecords},credential?{"X-Booth-Experience":credential.token}:undefined);if(experience!==experienceVersion.current)return;setMessages(current=>[...current.map(message=>message.role==="thinking"&&message.id===thoughtId?{...message,phase:"done" as const}:message),{role:"assistant",content:advice.reply}]);
       const latestState=currentState.current,p=latestState?.products.find(p=>p.id===advice.selection?.productId);
       if(p&&advice.selection&&advice.selection.count<=Math.min(p.maxCount,p.availableCount)&&!blocked&&!latestState?.active&&!latestState?.alert&&taskId===latestState?.tasks[0]?.id&&version===selectionVersion.current)choose(p,advice.selection.count);}
-    catch(e){if(experience===experienceVersion.current){setMessages(current=>current.map(message=>message.role==="thinking"&&message.id===thoughtId?{...message,phase:"error"}:message));setChatError(e instanceof Error?e.message:"智能助手暂不可用");if(draft===draftVersion.current)setText(input);}}finally{if(experience===experienceVersion.current)setThinking(false);}
+    catch(e){if(experience===experienceVersion.current){setMessages(current=>current.map(message=>message.role==="thinking"&&message.id===thoughtId?{...message,phase:"error"}:message));setChatError(e instanceof Error?e.message:"智能助手暂不可用");if(draft===draftVersion.current)updateText(input);}}finally{if(experience===experienceVersion.current)setThinking(false);}
   }
   async function resolve(){
     setBusy(true);setError("");try{await requestSnapshot("/api/booth/operator/resolve",{confirmation:"已核对机器人停止"},{"X-Operator-Token":token});setChecked(false);setToken("");}
@@ -223,7 +230,7 @@ export function BoothApp(){
         <aside className="concierge-column"><section className="assistant-panel"><div className="assistant-heading"><span className="assistant-avatar"><Sparkles size={21}/></span><div><h2>展台助手</h2></div><button className="new-experience" onClick={startExperience} disabled={busy||!!pending}>开始新体验</button><span className="ai-label">AI</span></div>
           <div className="chat-messages" ref={messageList} role="log" aria-label="访客对话" tabIndex={0} aria-live="polite"><div className="chat-transcript" ref={transcript}>{messages.length===0?<div className="chat-welcome">欢迎来到兰剑展台。想了解物品或需要选品建议，都可以在这里提问。</div>:messages.map((m,i)=>m.role==="thinking"?<ThinkingPanel key={i} message={m}/>:<div key={i} className={"chat-bubble "+m.role}>{m.content}</div>)}</div></div>
           <div className="quick-prompts">{["我想要一瓶水","这里有什么？"].map(t=><button key={t} onClick={()=>void chat(t,true)} disabled={thinking||!state.ai.configured||text.length>0} title={text.length>0?"请先发送或清空输入框中的草稿":undefined}>{t}<ArrowUpRight size={12}/></button>)}</div>{chatError&&<p role="alert" className="chat-error">{chatError}</p>}
-          <form className="chat-composer" onSubmit={e=>{e.preventDefault();void chat();}}><textarea ref={composerInput} rows={1} aria-label="告诉助手你的需求" placeholder={state.ai.configured?"想了解什么？":"助手暂未配置，可直接选物品"} maxLength={2000} value={text} onCompositionStart={()=>{composing.current=true;}} onCompositionEnd={()=>{composing.current=false;}} onKeyDown={e=>{if(e.key!=="Enter"||e.shiftKey||e.nativeEvent.isComposing||composing.current||e.keyCode===229)return;e.preventDefault();void chat();}} onChange={e=>{draftVersion.current++;setText(e.target.value);}} disabled={!state.ai.configured}/><button aria-label="发送需求" aria-busy={thinking} disabled={thinking||!state.ai.configured||!text.trim()}>{thinking?<><LoaderCircle size={17} className="spin chat-send-spinner"/><span className="chat-send-waiting">稍候</span></>:<Send size={17}/>}</button></form><div className="assistant-footnote"><ShieldCheck size={12}/>助手提供建议，取物前请确认物品和数量</div></section>
+          <form className="chat-composer" onSubmit={e=>{e.preventDefault();void chat();}}><VoiceInput ref={voice} draft={speechDraft.current} onText={updateText} disabled={!state.ai.configured}/><textarea ref={composerInput} rows={1} aria-label="告诉助手你的需求" placeholder={state.ai.configured?"想了解什么？":"助手暂未配置，可直接选物品"} maxLength={2000} value={text} onCompositionStart={()=>{composing.current=true;speechDraft.current.cancel();}} onCompositionEnd={()=>{composing.current=false;}} onKeyDown={e=>{if(e.key!=="Enter"||e.shiftKey||e.nativeEvent.isComposing||composing.current||e.keyCode===229)return;e.preventDefault();void chat();}} onChange={e=>{updateText(e.target.value);if(!e.target.value)voice.current?.clearReceipts();}} disabled={!state.ai.configured}/><button aria-label="发送需求" aria-busy={thinking} disabled={thinking||!state.ai.configured||!text.trim()}>{thinking?<><LoaderCircle size={17} className="spin chat-send-spinner"/><span className="chat-send-waiting">稍候</span></>:<Send size={17}/>}</button></form><div className="assistant-footnote"><ShieldCheck size={12}/>助手提供建议，取物前请确认物品和数量</div></section>
         </aside>
         <aside className="service-column" aria-label="选品与任务状态">
 

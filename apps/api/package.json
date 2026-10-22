@@ -7,6 +7,10 @@
     "start": "cd ../.. && pnpm start"
   },
   "dependencies": {
-    "@bluesword/contracts": "workspace:*"
+    "@bluesword/contracts": "workspace:*",
+    "ws": "8.18.3"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.1"
   }
 }
