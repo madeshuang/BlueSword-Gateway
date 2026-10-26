@@ -41,6 +41,13 @@ const taskNotices:Partial<Record<BoothTask["status"],string>>={
   fault:"这次取物需要工作人员协助，是否结束尚未确认，请勿重复确认取物。当前尚未确认机器人是否停止。",
   resolved:"这次取物已由工作人员处理，领取情况请向现场工作人员确认。",
 };
+const taskReplies:Record<Exclude<BoothTask["status"],"submitting"|"executing">,string>={
+  resolved:"这次取物已由工作人员处理。是否可以领取，请向现场工作人员确认。",
+  fault:"这次取物遇到了问题，请联系现场工作人员协助处理，先不要重复确认取物。",
+  uncertain:"暂时无法确认机器人是否接下这次取物，请联系现场工作人员核对，先不要重复确认取物。",
+  rejected:"机器人这次没有接下取物请求，可以核对选择后再试，或联系现场工作人员。",
+  succeeded:"物品已经取好，可以到交付处领取了。",
+};
 const globalAlertNotice="取物服务暂需工作人员核对，请稍候。当前尚未确认机器人是否停止。";
 async function api<T>(url:string,body?:unknown,headers?:Record<string,string>):Promise<T>{
   const response=await fetch(url,{...(body===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json",...headers},body:JSON.stringify(body)}),signal:AbortSignal.timeout(30000)});
@@ -66,7 +73,7 @@ export function BoothApp(){
   const error=feedback?.message??"";
   function setError(message:string,source:Feedback["source"]="other",requestId?:string){setFeedback(message?{message,source,...(requestId?{requestId}:{})}:null);}
   const submission=useRef<{request:Pending;recorded:boolean;snapshotSeen:boolean}|null>(null);
-  const [messages,setMessages]=useState<ConversationMessage[]>([]),[text,setText]=useState(""),[thinking,setThinking]=useState(false),[chatError,setChatError]=useState("");
+  const [messages,setMessages]=useState<ConversationMessage[]>([]),[text,setText]=useState(""),[thinking,setThinking]=useState(false);
   const snapshotInitialized=useRef(false),snapshotRevision=useRef(0),observedTasks=useRef(new Map<string,BoothTask["status"]>()),notifiedStates=useRef(new Set<string>());
   const [operatorBusy,setOperatorBusy]=useState(false);
   const [operator,setOperator]=useState(location.hash==="#operations"),[token,setToken]=useState(""),[checked,setChecked]=useState(false);
@@ -75,6 +82,7 @@ export function BoothApp(){
   const speechDraft=useRef(new SpeechDraft()),voice=useRef<VoiceControl>(null);
   function updateText(value:string){speechDraft.current.edit(value);draftVersion.current++;setText(value);}
   const transcript=useRef<HTMLDivElement>(null);
+  const followLatest=useRef(true);
   const experienceReady=useRef<Promise<BoothExperience>|null>(null),releaseExperience=useRef<(()=>void)|null>(null);
   const experienceAbort=useRef<AbortController|null>(null);
   const taskThought=useRef<{id:string;requestId:string;notifiedStatuses:Set<BoothTask["status"]>}|null>(null);
@@ -108,6 +116,8 @@ export function BoothApp(){
   const displayTask=latest?.status==="succeeded"&&latest.id===dismissedCompletionId?null:latest;
   function receiveSnapshot(snapshot:BoothSnapshot){
     snapshotRevision.current++;
+    const previous=currentState.current;
+    if(previous?.active?.id!==snapshot.active?.id||previous?.alert!==snapshot.alert)setChecked(false);
     currentState.current=snapshot;
     if(submission.current&&snapshot.tasks.some(task=>task.requestId===submission.current!.request.requestId))submission.current.snapshotSeen=true;
     setFeedback(current=>current?.source==="state"?null:current);
@@ -126,8 +136,8 @@ export function BoothApp(){
       if(task.requestId===taskThought.current?.requestId&&task.status!=="submitting"&&task.status!=="executing"&&!taskThought.current.notifiedStatuses.has(task.status)){
         const id=taskThought.current.id;
         taskThought.current.notifiedStatuses.add(task.status);
-        const phase=task.status==="succeeded"?"done" as const:"error" as const;
-        setMessages(current=>[...current.map(message=>message.role==="thinking"&&message.id===id?{...message,phase}:message),{role:"assistant",content:taskSummary(task)+"："+taskNotices[task.status]}]);
+        const reply=taskReplies[task.status];
+        setMessages(current=>[...current.map(message=>message.role==="thinking"&&message.id===id?{...message,phase:"done" as const}:message),{role:"assistant",content:reply}]);
       }
       observedTasks.current.set(task.id,task.status);notifiedStates.current.add(key);
     }
@@ -152,7 +162,10 @@ export function BoothApp(){
   useEffect(()=>{const timer=setInterval(()=>setWaitingTick(t=>t+1),1000);return()=>clearInterval(timer);},[]);
   const elapsedWaitMs=state?.waiting?state.waiting.elapsedMs+(waitingAnchor.current?.waiting===state.waiting?Math.max(0,performance.now()-waitingAnchor.current.at):0):0;
   const overdue=!!state?.waiting&&(state.waiting.overdue||elapsedWaitMs>=state.waiting.remindAfterMs);
-  useEffect(()=>{const list=messageList.current;if(list)list.scrollTop=list.scrollHeight;},[messages,thinking]);
+  useLayoutEffect(()=>{
+    if(messages.length===0)followLatest.current=true;
+    const list=messageList.current;if(list&&followLatest.current)list.scrollTop=list.scrollHeight;
+  },[messages,thinking]);
   useLayoutEffect(()=>{if(composerInput.current)resizeComposer(composerInput.current);},[text,!!state]);
   useEffect(()=>{
     const input=composerInput.current;if(!input)return;
@@ -162,16 +175,36 @@ export function BoothApp(){
   },[!!state]);
   useEffect(()=>{
     const list=messageList.current;if(!list)return;
-    let followLatest=true,width=list.clientWidth,height=list.clientHeight;
+    let width=list.clientWidth,height=list.clientHeight,contentHeight=list.scrollHeight,touchY:number|null=null;
     const trackPosition=()=>{
-      if(list.clientWidth===width&&list.clientHeight===height)followLatest=Math.abs(list.scrollHeight-list.clientHeight-list.scrollTop)<2;
+      const bottom=Math.abs(list.scrollHeight-list.clientHeight-list.scrollTop)<2;
+      // Content growth and browser scroll anchoring are not a request to read earlier messages.
+      if(bottom)followLatest.current=true;
+      else if(list.clientWidth===width&&list.clientHeight===height&&list.scrollHeight===contentHeight)followLatest.current=false;
     };
-    // Resize can arrive before the scroll event from the browser's End action.
-    const trackKeyboard=(event:KeyboardEvent)=>{if(event.key==="End")followLatest=true;else if(event.key==="Home")followLatest=false;};
-    const observer=new ResizeObserver(()=>{if(followLatest)list.scrollTop=list.scrollHeight;width=list.clientWidth;height=list.clientHeight;});
-    list.addEventListener("scroll",trackPosition);list.addEventListener("keydown",trackKeyboard);observer.observe(list);
+    // Record upward intent before concurrent typing or resize can move the content.
+    const trackKeyboard=(event:KeyboardEvent)=>{
+      if(event.key==="End")followLatest.current=true;
+      else if(["Home","PageUp","ArrowUp"].includes(event.key)||(event.key===" "&&event.shiftKey))followLatest.current=false;
+    };
+    const trackWheel=(event:WheelEvent)=>{if(event.deltaY<0)followLatest.current=false;};
+    const trackTouchStart=(event:TouchEvent)=>{touchY=event.touches[0]?.clientY??null;};
+    const trackTouchMove=(event:TouchEvent)=>{
+      const next=event.touches[0]?.clientY??null;
+      if(touchY!==null&&next!==null&&next>touchY)followLatest.current=false;
+      touchY=next;
+    };
+    const observer=new ResizeObserver(()=>{
+      if(followLatest.current)list.scrollTop=list.scrollHeight;
+      width=list.clientWidth;height=list.clientHeight;contentHeight=list.scrollHeight;
+    });
+    list.addEventListener("scroll",trackPosition);list.addEventListener("keydown",trackKeyboard);
+    list.addEventListener("wheel",trackWheel,{passive:true});list.addEventListener("touchstart",trackTouchStart,{passive:true});list.addEventListener("touchmove",trackTouchMove,{passive:true});observer.observe(list);
     if(transcript.current)observer.observe(transcript.current);
-    return()=>{observer.disconnect();list.removeEventListener("scroll",trackPosition);list.removeEventListener("keydown",trackKeyboard);};
+    return()=>{
+      observer.disconnect();list.removeEventListener("scroll",trackPosition);list.removeEventListener("keydown",trackKeyboard);
+      list.removeEventListener("wheel",trackWheel);list.removeEventListener("touchstart",trackTouchStart);list.removeEventListener("touchmove",trackTouchMove);
+    };
   },[!!state]);
   function confirmRecordedRequest(request:Pending){
     const current=submission.current;
@@ -222,7 +255,7 @@ export function BoothApp(){
       if(rejectedBeforeTask){setPending(null);clearSavedPending(request);}
       if(!submitted&&e instanceof RequestError&&[400,403,409,503].includes(e.status)&&!currentState.current?.tasks.some(task=>task.requestId===request.requestId)){
         const id=taskThought.current?.id;
-        setMessages(current=>[...current.map(message=>message.role==="thinking"&&message.id===id?{...message,phase:"error" as const}:message),{role:"assistant",content:"这次取物未能提交。"+e.message}]);
+        setMessages(current=>[...current.map(message=>message.role==="thinking"&&message.id===id?{...message,phase:"done" as const}:message),{role:"assistant",content:"这次取物未能提交。"+e.message}]);
       }
       setError(e instanceof RequestError?e.message:"尚未收到取物确认的反馈，请核对这次取物",rejectedBeforeTask?"selection":"request",request.requestId);
     }finally{if(submission.current===attempt)setBusy(false);}
@@ -233,14 +266,14 @@ export function BoothApp(){
     submission.current=null;
     voice.current?.cancel("experience-changed");voice.current?.clearReceipts();
     taskThought.current=null;
-    setMessages([]);updateText("");setThinking(false);setChatError("");
+    setMessages([]);updateText("");setThinking(false);
     setSelection([]);setError("");setExperienceTaskId(null);
     prepareExperience(true);
   }
   async function chat(input=text,fromQuickPrompt=false){
     if(!input.trim()||thinking||(fromQuickPrompt&&text.length>0))return;
     voice.current?.cancel("sent-draft");const speechRecords=voice.current?.takeReceipts()??[];
-    setThinking(true);setChatError("");updateText("");
+    setThinking(true);updateText("");
     const version=selectionVersion.current,experience=experienceVersion.current,draft=draftVersion.current,taskId=state?.tasks[0]?.id;
     const userMessage:BoothChatMessage={role:"user",content:input.trim()};
     const next:BoothChatMessage[]=[...messages.filter((message):message is BoothChatMessage=>message.role==="user"||message.role==="assistant"),userMessage];
@@ -250,11 +283,19 @@ export function BoothApp(){
       const latestState=currentState.current,proposal=advice.selection;
       if(proposal&&proposal.length>0&&proposal.reduce((sum,line)=>sum+line.count,0)<=2&&proposal.every(line=>{const p=latestState?.products.find(p=>p.id===line.productId);return p&&line.count>=1&&line.count<=Math.min(p.maxCount,p.availableCount);})&&!blocked&&!latestState?.active&&!latestState?.alert&&!pending&&!busy&&taskId===latestState?.tasks[0]?.id&&version===selectionVersion.current){selectionVersion.current++;setSelection(proposal);}}
 
-    catch(e){if(experience===experienceVersion.current){setMessages(current=>current.map(message=>message.role==="thinking"&&message.id===thoughtId?{...message,phase:"error"}:message));setChatError(e instanceof Error?e.message:"智能助手暂不可用");if(draft===draftVersion.current)updateText(input);}}finally{if(experience===experienceVersion.current)setThinking(false);}
+    catch(e){if(experience===experienceVersion.current){
+      const notice=e instanceof RequestError?e.message:"暂时连不上助手，请稍后再试，也可以直接选择物品。";
+      setMessages(current=>[...current.map(message=>message.role==="thinking"&&message.id===thoughtId?{...message,phase:"done" as const}:message),{role:"assistant",content:notice}]);
+      if(draft===draftVersion.current)updateText(input);
+    }}finally{if(experience===experienceVersion.current)setThinking(false);}
   }
   async function resolve(){
-    setOperatorBusy(true);setError("");try{await requestSnapshot("/api/booth/operator/resolve",{confirmation:"已核对机器人停止"},{"X-Operator-Token":token});setChecked(false);setToken("");}
-    catch(e){setError(e instanceof Error?e.message:"处理失败");}finally{setOperatorBusy(false);}
+    if(!state||!checked)return;
+    setOperatorBusy(true);setError("");try{await requestSnapshot("/api/booth/operator/resolve",{confirmation:"已核对机器人停止",expectedTaskId:state.active?.id??null,expectedAlert:state.alert},{"X-Operator-Token":token});setChecked(false);setToken("");}
+    catch(e){
+      if(e instanceof RequestError&&e.status===409){setChecked(false);try{await requestSnapshot("/api/booth");}catch{/* Keep the recovery error visible if refreshing also fails. */}}
+      setError(e instanceof Error?e.message:"处理失败");
+    }finally{setOperatorBusy(false);}
   }
   async function resetStock(productId:string|null):Promise<boolean>{
     setOperatorBusy(true);setError("");
@@ -271,7 +312,7 @@ export function BoothApp(){
       <div className="experience-grid">
         <aside className="concierge-column"><section className="assistant-panel"><div className="assistant-heading"><span className="assistant-avatar"><Sparkles size={21}/></span><div><h2>展台助手</h2></div><button className="new-experience" onClick={startExperience} disabled={busy||!!pending||awaitingTaskSnapshot}>开始新体验</button><span className="ai-label">AI</span></div>
           <div className="chat-messages" ref={messageList} role="log" aria-label="访客对话" tabIndex={0} aria-live="polite"><div className="chat-transcript" ref={transcript}>{messages.length===0?<div className="chat-welcome">欢迎来到兰剑展台。想了解物品或需要选品建议，都可以在这里提问。</div>:messages.map((m,i)=>m.role==="thinking"?<ThinkingPanel key={i} message={m}/>:<div key={i} className={"chat-bubble "+m.role}>{m.content}</div>)}</div></div>
-          <div className="quick-prompts">{["帮我选一件物品","这里有什么？"].map(t=><button key={t} onClick={()=>void chat(t,true)} disabled={thinking||!state.ai.configured||text.length>0} title={text.length>0?"请先发送或清空输入框中的草稿":undefined}>{t}<ArrowUpRight size={12}/></button>)}</div>{chatError&&<p role="alert" className="chat-error">{chatError}</p>}
+          <div className="quick-prompts">{["帮我选一件物品","这里有什么？"].map(t=><button key={t} onClick={()=>void chat(t,true)} disabled={thinking||!state.ai.configured||text.length>0} title={text.length>0?"请先发送或清空输入框中的草稿":undefined}>{t}<ArrowUpRight size={12}/></button>)}</div>
           <form className="chat-composer" onSubmit={e=>{e.preventDefault();void chat();}}><VoiceInput ref={voice} draft={speechDraft.current} onText={updateText} disabled={!state.ai.configured}/><textarea ref={composerInput} rows={1} aria-label="告诉助手你的需求" placeholder={state.ai.configured?"想了解什么？":"助手暂未配置，可直接选物品"} maxLength={2000} value={text} onCompositionStart={()=>{composing.current=true;speechDraft.current.cancel();}} onCompositionEnd={()=>{composing.current=false;}} onKeyDown={e=>{if(e.key!=="Enter"||e.shiftKey||e.nativeEvent.isComposing||composing.current||e.keyCode===229)return;e.preventDefault();void chat();}} onChange={e=>{updateText(e.target.value);if(!e.target.value)voice.current?.clearReceipts();}} disabled={!state.ai.configured}/><button aria-label="发送需求" aria-busy={thinking} disabled={thinking||!state.ai.configured||!text.trim()}>{thinking?<><LoaderCircle size={17} className="spin chat-send-spinner"/><span className="chat-send-waiting">稍候</span></>:<Send size={17}/>}</button></form><div className="assistant-footnote"><ShieldCheck size={12}/>助手提供建议，取物前请确认物品和数量</div></section>
         </aside>
         <aside className="service-column" aria-label="选品与任务状态">
@@ -304,6 +345,6 @@ export function BoothApp(){
       <dt>当前状态</dt><dd>{state.alert?"全局告警":latest?labels[latest.status]:"无当前任务"}</dd>
       {latest&&<><dt>任务标识</dt><dd>{latest.id}</dd><dt>任务记录原文</dt><dd>{latest.message}</dd></>}
       {state.alert&&<><dt>告警原文</dt><dd>{state.alert}</dd></>}
-    </dl></section><p>此操作仅解除网关接收新任务的限制，不向机器人发送停止或取消指令，也不会恢复库存。请先现场确认机器人已停止、物品情况已核对。入口可见不代表拥有操作权限。</p>{!state.operator.configured&&<p role="status" className="operator-waiting">工作人员操作凭据尚未配置，暂不能解除新任务限制或重置库存。请由启动服务的负责人设置 BOOTH_OPERATOR_TOKEN 并重启 API；不要在展示页面分享凭据。</p>}{state.active?.status==="executing"&&<p className="operator-waiting">机器人已接单，尚未收到完成通知，网关暂不接受新任务；请核对机器人实际情况并联系机器人负责人。此入口不能取消执行中任务，也不能凭等待时长解除新任务限制。</p>}<label>工作人员凭据<input type="password" value={token} onChange={e=>setToken(e.target.value)} autoComplete="off" disabled={!state.operator.configured}/></label><label className="check-label"><input type="checkbox" checked={checked} onChange={e=>setChecked(e.target.checked)} disabled={!state.operator.configured}/>已现场核对机器人停止及物品情况</label><button className="primary-button" onClick={()=>void resolve()} disabled={operatorBusy||!connected||!state.operator.configured||!checked||!token||(!state.alert&&!["fault","uncertain"].includes(state.active?.status??""))}><RefreshCw size={16}/>解除新任务限制</button><StockResetPanel products={state.products} disabled={operatorBusy||!connected||!state.operator.configured||!token} onReset={resetStock}/>{error&&<p role="alert">{error}</p>}</section></div>}
+    </dl></section><p>此操作仅解除网关接收新任务的限制，不向机器人发送停止或取消指令，也不会恢复库存。请先现场确认机器人已停止、物品情况已核对。入口可见不代表拥有操作权限。</p>{!state.operator.configured&&<p role="status" className="operator-waiting">工作人员操作凭据尚未配置，暂不能解除新任务限制或重置库存。请由启动服务的负责人设置 BOOTH_OPERATOR_TOKEN 并重启 API；不要在展示页面分享凭据。</p>}{state.active&&<p className="operator-waiting">如机器人已在现场停止、物品情况已核对，可以解除新任务限制，无需等待机器人补发完成或故障通知。等待时间较长本身不代表机器人已经停止。</p>}<label>工作人员凭据<input type="password" value={token} onChange={e=>setToken(e.target.value)} autoComplete="off" disabled={!state.operator.configured}/></label><label className="check-label"><input type="checkbox" checked={checked} onChange={e=>setChecked(e.target.checked)} disabled={!state.operator.configured}/>已现场核对机器人停止及物品情况</label><button className="primary-button" onClick={()=>void resolve()} disabled={operatorBusy||!state.operator.configured||!checked||!token||(!state.alert&&!state.active)}><RefreshCw size={16}/>解除新任务限制</button><StockResetPanel products={state.products} disabled={operatorBusy||!connected||!state.operator.configured||!token} onReset={resetStock}/>{error&&<p role="alert">{error}</p>}</section></div>}
   </div>;
 }

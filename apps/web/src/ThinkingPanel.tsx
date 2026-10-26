@@ -5,7 +5,7 @@ export interface ThinkingMessage {
   role:"thinking";
   id:string;
   content:string;
-  phase:"running"|"done"|"error";
+  phase:"running"|"done";
   kind:"chat"|"task";
   requestId?:string;
 }
@@ -31,7 +31,7 @@ export function ThinkingPanel({message}:{message:ThinkingMessage}){
     }),35);
     return()=>clearInterval(timer);
   },[message.content,message.phase]);
-  const title=message.phase==="running"?"思考中":message.phase==="done"?"思考已结束":"思考已中止";
+  const title=message.phase==="running"?"思考中":"思考已结束";
   return <details className={"thinking-panel phase-"+message.phase} role="group" aria-label="思考过程" open={expanded} onToggle={event=>setExpanded(event.currentTarget.open)}>
     <summary><span>{message.phase==="running"&&<LoaderCircle size={14} className="spin"/>}{title}<ChevronRight size={16} className="thinking-toggle-icon" aria-hidden="true"/></span></summary>
     <div className="thinking-copy" aria-live="off">{characters.slice(0,visible).join("").split("\n\n").map((paragraph,index)=><p key={index}>{paragraph}</p>)}</div>

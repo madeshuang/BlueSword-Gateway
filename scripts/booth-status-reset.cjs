@@ -38,7 +38,7 @@ async function ready(url,process){await until(async()=>{if(process.exitCode!==nu
     await page.clock.runFor(1000);await page.locator('.task-panel.idle').waitFor({timeout:2000});
     await page.locator('.task-panel').getByText('等待你的选择',{exact:true}).waitFor();
     passed.push('完成状态保留十秒后恢复等待选择');
-    assert.equal(await page.locator('.chat-bubble.assistant').filter({hasText:'矿泉水 × 1：已取好，请到交付处领取。'}).count(),1,'顶部复位保留完成回复');
+    assert.equal(await page.locator('.chat-bubble.assistant').getByText('物品已经取好，可以到交付处领取了。',{exact:true}).count(),1,'顶部复位保留完成回复');
     const idleSnapshot=await (await fetch(apiUrl+'/api/booth')).json();assert.deepEqual(idleSnapshot.tasks,completedSnapshot.tasks,'顶部复位保留任务记录');assert.equal(idleSnapshot.active,null);
     await page.getByRole('region',{name:'取物确认',exact:true}).getByRole('heading',{name:'请选择物品',exact:true}).waitFor();
     assert.equal(await page.locator('.order-panel .primary-button').count(),0,'完成后需要重新选择物品');

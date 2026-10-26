@@ -117,7 +117,7 @@ it("真实 DeepSeek：输出被截断时保留技术错误，不责怪访客表�
     const response = await fetch(url + "/api/booth/chat", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages: [{ role: "user", content: "这里有什么？" }] }) });
     expect(response.status).toBe(502);
-    expect((await response.json()).data).toBe("智能助手回复暂时无法处理，请稍后重试或直接选择物品");
+    expect((await response.json()).data).toBe("这次没能正常回复，可以再试一次，或直接选择物品。");
     expect(observations).toContainEqual(expect.objectContaining({ upstreamStatus: 200, category: "invalid_output" }));
     expect((await (await fetch(url + "/api/booth")).json()).tasks).toEqual([]);
   } finally { await limited.close(); }

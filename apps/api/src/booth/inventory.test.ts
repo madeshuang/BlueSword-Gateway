@@ -37,6 +37,7 @@ const post = (path: string, body: unknown = {}, headers: Record<string, string> 
   { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
 const order = (requestId: string, count = 1) => ({ requestId, productId: "water", count });
 const snapshot = async () => (await fetch(base + "/api/booth")).json();
+const recoveryTarget = async () => {const s=await snapshot();return {expectedTaskId:s.active?.id??null,expectedAlert:s.alert};};
 const remaining = async () => (await snapshot()).products.find((p: { id: string }) => p.id === "water").availableCount;
 
 describe("剩余库存 HTTP 边界", () => {
@@ -71,12 +72,12 @@ describe("剩余库存 HTTP 边界", () => {
     expect(await remaining()).toBe(3);
     receipt = null; await post("/api/booth/requests", order("inventory-uncertain"));
     expect(await remaining()).toBe(2);
-    await post("/api/booth/operator/resolve", { confirmation: "已核对机器人停止" }, { "X-Operator-Token": "test-operator" });
+    await post("/api/booth/operator/resolve", { confirmation:"已核对机器人停止",...await recoveryTarget()}, { "X-Operator-Token": "test-operator" });
     expect(await remaining()).toBe(2);
     receipt = true; await post("/api/booth/requests", order("inventory-fault"));
     await post("/api/task/error", { message: "测试：抓取中故障" });
     expect(await remaining()).toBe(1);
-    await post("/api/booth/operator/resolve", { confirmation: "已核对机器人停止" }, { "X-Operator-Token": "test-operator" });
+    await post("/api/booth/operator/resolve", { confirmation:"已核对机器人停止",...await recoveryTarget()}, { "X-Operator-Token": "test-operator" });
     expect(await remaining()).toBe(1);
   });
   it("重启保留剩余数量和受理不明的预留，修改初始配置不自动补满", async () => {
@@ -109,9 +110,9 @@ describe("剩余库存 HTTP 边界", () => {
     await post("/api/booth/requests", order("inventory-before-refill", 2));
     expect((await reset()).status).toBe(200);
     await post("/api/task/error", { message: "测试：库存未确认" }); expect((await reset()).status).toBe(200);
-    await post("/api/booth/operator/resolve", { confirmation: "已核对机器人停止" }, staff);
+    await post("/api/booth/operator/resolve", { confirmation:"已核对机器人停止",...await recoveryTarget()}, staff);
     await post("/api/task/error", { message: "测试：全局告警" }); expect((await reset()).status).toBe(200);
-    await post("/api/booth/operator/resolve", { confirmation: "已核对机器人停止" }, staff);
+    await post("/api/booth/operator/resolve", { confirmation:"已核对机器人停止",...await recoveryTarget()}, staff);
     const history = (await snapshot()).tasks;
     const response = await reset(); expect(response.status).toBe(200);
     expect((await response.json()).products.find((p: { id: string }) => p.id === "water").availableCount).toBe(3);
@@ -148,9 +149,9 @@ describe("剩余库存 HTTP 边界", () => {
     await post("/api/booth/requests", {requestId:"bulk-guard-active",productId:"gift",count:1}); expect((await post("/api/booth/operator/stock/reset-all",body,staff)).status).toBe(200);
     expect((await snapshot()).active.status).toBe("executing");
     await post("/api/task/error", {message:"测试：批量补货前核对"}); expect((await post("/api/booth/operator/stock/reset-all",body,staff)).status).toBe(200);
-    await post("/api/booth/operator/resolve", {confirmation:"已核对机器人停止"}, staff);
+    await post("/api/booth/operator/resolve", {confirmation:"已核对机器人停止",...await recoveryTarget()}, staff);
     await post("/api/task/error", {message:"测试：全局告警"}); expect((await post("/api/booth/operator/stock/reset-all",body,staff)).status).toBe(200);
-    await post("/api/booth/operator/resolve", {confirmation:"已核对机器人停止"}, staff);
+    await post("/api/booth/operator/resolve", {confirmation:"已核对机器人停止",...await recoveryTarget()}, staff);
     await app!.close(); app = undefined; await start({...configuration,operatorToken:undefined});
     await denied(503);
   });

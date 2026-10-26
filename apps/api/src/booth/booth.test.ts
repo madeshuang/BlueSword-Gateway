@@ -19,11 +19,58 @@ async function fakeRobot(reply:{success:boolean;data:string}={success:true,data:
 }
 async function start(c:BoothConfig,options:Parameters<typeof createBoothApplication>[1]={}){app=createBoothApplication(c,options);base="http://127.0.0.1:"+await app.listen(0);}
 async function post(path:string,body:unknown={},headers:Record<string,string>={}){return fetch(base+path,{method:"POST",headers:{"Content-Type":"application/json",...headers},body:JSON.stringify(body)});}
+async function recoveryTarget(){const s=await (await fetch(base+"/api/booth")).json();return {expectedTaskId:s.active?.id??null,expectedAlert:s.alert};}
 // Controlled supplier outputs include the new internal intent field; HTTP advice remains unchanged.
 const modelOutput=(value:unknown)=>JSON.stringify(value&&typeof value==="object"?{taskStatusQuery:false,...value}:value);
 const command=(requestId="request-one",count=1,productId="water")=>({requestId,count,productId});
 
 describe("体验关联取物进度 HTTP 边界",()=>{
+  it.each(["openai","deepseek"] as const)("%s回复格式或内容无效时提供重新尝试和手选提示",async provider=>{
+    const transport=vi.fn<typeof fetch>();
+    await start(config({aiProvider:provider,openaiKey:"fixture",deepseekKey:"fixture"}),{assistantTransport:transport});
+    for(const value of ["not JSON",JSON.stringify({reply:"",selection:null,taskStatusQuery:false})]){
+      transport.mockResolvedValueOnce(Response.json(provider==="openai"
+        ?{status:"completed",output:[{type:"message",content:[{type:"output_text",text:value}]}]}
+        :{choices:[{finish_reason:"stop",message:{content:value}}]}));
+      const response=await post("/api/booth/chat",{messages:[{role:"user",content:"这里有什么？"}]});
+      expect(response.status).toBe(502);
+      expect((await response.json()).data).toBe("这次没能正常回复，可以再试一次，或直接选择物品。");
+    }
+    expect((await(await fetch(base+"/api/booth")).json()).tasks).toEqual([]);
+  });
+  it.each(["openai","deepseek"] as const)("%s模型繁忙时提示稍后重试和直接选品，不建立任务",async provider=>{
+    const transport=vi.fn<typeof fetch>();
+    await start(config({aiProvider:provider,openaiKey:"fixture",deepseekKey:"fixture"}),{assistantTransport:transport});
+    for(const status of [429,500,503]){
+      transport.mockResolvedValueOnce(new Response("busy",{status}));
+      const response=await post("/api/booth/chat",{messages:[{role:"user",content:"这里有什么？"}]});
+      expect(response.status).toBe(502);
+      expect((await response.json()).data).toBe("助手暂时繁忙，请稍后再试，也可以直接选择物品。");
+    }
+    expect((await(await fetch(base+"/api/booth")).json()).tasks).toEqual([]);
+  });
+  it.each(["openai","deepseek"] as const)("%s连接失败和超时时提示稍后连接，原始错误不会发给访客",async provider=>{
+    const transport=vi.fn<typeof fetch>();
+    await start(config({aiProvider:provider,openaiKey:"fixture",deepseekKey:"fixture",openaiTimeoutMs:5,deepseekTimeoutMs:5}),{assistantTransport:transport});
+    transport.mockRejectedValueOnce(new Error("internal connection detail"));
+    const ask=()=>post("/api/booth/chat",{messages:[{role:"user",content:"这里有什么？"}]});
+    expect((await(await ask()).json()).data).toBe("暂时连不上助手，请稍后再试，也可以直接选择物品。");
+    transport.mockImplementationOnce(async(_url,init)=>new Promise((_ok,fail)=>init!.signal!.addEventListener("abort",()=>fail(init!.signal!.reason),{once:true})));
+    expect((await(await ask()).json()).data).toBe("暂时连不上助手，请稍后再试，也可以直接选择物品。");
+    transport.mockResolvedValueOnce(new Response("gateway timeout",{status:504}));
+    expect((await(await ask()).json()).data).toBe("暂时连不上助手，请稍后再试，也可以直接选择物品。");
+  });
+  it.each(["openai","deepseek"] as const)("%s收到响应头后连接中断仍提示连接失败，不误报回复内容无效",async provider=>{
+    const observations:unknown[]=[];
+    const transport=vi.fn<typeof fetch>().mockResolvedValue(new Response(new ReadableStream({start(controller){
+      controller.error(new TypeError("terminated",{cause:{code:"UND_ERR_SOCKET"}}));
+    }}),{status:200}));
+    await start(config({aiProvider:provider,openaiKey:"fixture",deepseekKey:"fixture"}),{assistantTransport:transport,onAiCall:event=>{observations.push(event);}});
+    const response=await post("/api/booth/chat",{messages:[{role:"user",content:"这里有什么？"}]});
+    expect(response.status).toBe(504);
+    expect((await response.json()).data).toBe("暂时连不上助手，请稍后再试，也可以直接选择物品。");
+    expect(observations).toContainEqual(expect.objectContaining({category:"connection",connectionCode:"UND_ERR_SOCKET",upstreamStatus:200}));
+  });
   it("现场目录中的十一种插图类型可以加载并通过网页快照读取",async()=>{
     const arts=["lighter_box","playing_card_box","pen_box","bottle","table_tennis_ball_box","shuttlecock_tube","air_pump","aoliao","anmuxi","haoliyou","shupian"];
     const products=arts.map(id=>({...config().products[0]!,id,name:id,art:id}));
@@ -70,7 +117,7 @@ describe("体验关联取物进度 HTTP 边界",()=>{
     reply="这次取物出了异常，是否结束、机器人是否停止都还未确认。先不要重复确认取物，请联系现场工作人员协助。";
     expect(await query()).toEqual({reply,selection:null});
     reply="机械臂已经抓到了水，预计十秒后送到。";expect((await query()).reply).toContain("出现异常");
-    await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止"},{"X-Operator-Token":"test-operator"});
+    await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止",...await recoveryTarget()},{"X-Operator-Token":"test-operator"});
     reply="工作人员已核对并解除新任务限制，但这不代表物品已经取好。领取情况请向现场工作人员确认。";
     expect(await query()).toEqual({reply,selection:null});
     reply="已经取好了，请到交付处领取。";expect((await query()).reply).toContain("这不代表取物完成");
@@ -131,7 +178,7 @@ describe("体验关联取物进度 HTTP 边界",()=>{
     expect(await ask(b.token)).toContain("纪念品 × 1");
     await post("/api/task/error",{message:"测试故障"});const fault=await ask(b.token);
     expect(fault).toContain("出现异常");expect(fault).toContain("尚未确认机器人是否停止");expect(fault).toContain("请联系现场工作人员");
-    await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止"},{"X-Operator-Token":"test-operator"});
+    await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止",...await recoveryTarget()},{"X-Operator-Token":"test-operator"});
     expect(await ask(b.token)).toContain("这不代表取物完成");
     await app!.close();app=undefined;await start(c,{assistantTransport:transport});
     expect(await ask(a.token)).toContain("取物完成通知");expect(await ask(b.token)).toContain("解除新任务限制");
@@ -228,7 +275,7 @@ describe("正式三接口与任务事实",()=>{
     await start(config({operatorToken:undefined}));
     const snapshot=await (await fetch(base+"/api/booth")).json();
     expect(snapshot.operator).toEqual({configured:false});
-    const response=await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止"});
+    const response=await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止",...await recoveryTarget()});
     expect(response.status).toBe(503);
     expect((await response.json()).data).toBe("工作人员操作凭据尚未配置");
     expect((await (await fetch(base+"/api/booth")).json()).tasks).toEqual(snapshot.tasks);
@@ -237,7 +284,7 @@ describe("正式三接口与任务事实",()=>{
     const enabled=await (await fetch(base+"/api/booth")).text();
     expect(JSON.parse(enabled).operator).toEqual({configured:true});
     expect(enabled).not.toContain("test-operator");
-    expect((await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止"})).status).toBe(403);
+    expect((await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止",...await recoveryTarget()})).status).toBe(403);
   });
   it("P9快照提前说明发单配置缺口，不暴露地址或产生任务",async()=>{
     await start(config({dispatchUrl:undefined,catalogConfirmed:true}));
@@ -416,9 +463,9 @@ describe("正式三接口与任务事实",()=>{
     await start(config({dispatchUrl:url}));expect((await (await post("/api/booth/requests",command())).json()).task.status).toBe("fault");
     expect(await (await post("/api/task/error",{message:"机械臂故障"})).json()).toEqual({code:1,data:"OK",success:true});
     expect((await post("/api/booth/requests",command("request-two"))).status).toBe(409);
-    expect((await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止"})).status).toBe(403);
+    expect((await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止",...await recoveryTarget()})).status).toBe(403);
     expect((await post("/api/booth/operator/resolve",{},{"X-Operator-Token":"test-operator"})).status).toBe(400);
-    expect((await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止"},{"X-Operator-Token":"test-operator"})).status).toBe(200);
+    expect((await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止",...await recoveryTarget()},{"X-Operator-Token":"test-operator"})).status).toBe(200);
     expect(app!.service.snapshot().active).toBeNull();expect(app!.service.snapshot().tasks[0]!.status).toBe("resolved");
   });
   it("响应丢失不重发、不解锁；重启与同键核对保持同一任务",async()=>{
@@ -472,15 +519,15 @@ describe("OpenAI Responses选品接入（可控对端，不冒充真实GPT）",(
   });
   it.each([401,429,500])("处理OpenAI HTTP %i，不泄漏上游原文或密钥",async status=>{
     const ai=new OpenAIBoothAssistant(config({openaiKey:"test-key"}),vi.fn<typeof fetch>().mockResolvedValue(new Response("test-key",{status})));
-    await expect(ai.advise([{role:"user",content:"你好"}])).rejects.toThrow(/智能助手/);
+    await expect(ai.advise([{role:"user",content:"你好"}])).rejects.toThrow(status===401?"智能助手认证或权限异常，请联系工作人员":"助手暂时繁忙，请稍后再试，也可以直接选择物品。");
   });
   it("密钥缺失、超时、未知物品、数量越界、不完整输出均显式失败",async()=>{
     await expect(new OpenAIBoothAssistant(config({openaiKey:undefined})).advise([])).rejects.toThrow("暂未连接");
-    await expect(new OpenAIBoothAssistant(config({openaiKey:"test"}),vi.fn<typeof fetch>().mockRejectedValue(new Error("timeout"))).advise([])).rejects.toThrow("超时");
+    await expect(new OpenAIBoothAssistant(config({openaiKey:"test"}),vi.fn<typeof fetch>().mockRejectedValue(new Error("timeout"))).advise([])).rejects.toThrow("暂时连不上助手，请稍后再试，也可以直接选择物品。");
     for(const value of [{...answer,selection:[{productId:"missing",count:1}]},{...answer,selection:[{productId:"water",count:99}]}]){
-      await expect(new OpenAIBoothAssistant(config({openaiKey:"test"}),vi.fn<typeof fetch>().mockResolvedValue(response(value))).advise([])).rejects.toThrow("回复暂时无法处理");
+      await expect(new OpenAIBoothAssistant(config({openaiKey:"test"}),vi.fn<typeof fetch>().mockResolvedValue(response(value))).advise([])).rejects.toThrow("这次没能正常回复，可以再试一次，或直接选择物品。");
     }
-    await expect(new OpenAIBoothAssistant(config({openaiKey:"test"}),vi.fn<typeof fetch>().mockResolvedValue(Response.json({status:"incomplete"}))).advise([])).rejects.toThrow("回复暂时无法处理");
+    await expect(new OpenAIBoothAssistant(config({openaiKey:"test"}),vi.fn<typeof fetch>().mockResolvedValue(Response.json({status:"incomplete"}))).advise([])).rejects.toThrow("这次没能正常回复，可以再试一次，或直接选择物品。");
   });
   it("目录配置拒绝重复ID和非法取值",()=>{
     const p=config().products[0]!;expect(()=>validateCatalog([p,p])).toThrow();expect(()=>validateCatalog([{...p,maxCount:0}])).toThrow();
@@ -665,13 +712,92 @@ describe("双供应商建议 HTTP 边界（可控对端，不冒充真实供应�
     for(const body of [text(valid,false),refusal,text("这不是JSON"),text(JSON.stringify({reply:" ",selection:null}))]){
       transport.mockResolvedValueOnce(Response.json(body));
       const response=await post("/api/booth/chat",{messages:[{role:"user",content:"一瓶水"}]});
-      expect(response.status).toBe(502);expect(await response.text()).toContain("回复暂时无法处理");
+      expect(response.status).toBe(502);expect((await response.json()).data).toBe("这次没能正常回复，可以再试一次，或直接选择物品。");
     }
     expect(transport).toHaveBeenCalledTimes(4);expect((await (await fetch(base+"/api/booth")).json()).tasks).toEqual([]);
   });
 
 });
 describe("等待提醒 HTTP 边界",()=>{
+  it.each([true,false])("人工处理提交中的任务后，迟到接单回复 success=%s 不影响新任务或库存",async success=>{
+    let release!:()=>void,arrived!:()=>void;
+    const gate=new Promise<void>(r=>release=r),started=new Promise<void>(r=>arrived=r);
+    const receipt={success,data:"迟到的回复"};
+    await start(config({dispatchUrl:await fakeRobot(receipt,async()=>{if(received.length===1){arrived();await gate;}})}));
+    const pending=post("/api/booth/requests",command());
+    try{
+      await started;
+      const before=await (await fetch(base+"/api/booth")).json();
+      expect(before.active.status).toBe("submitting");
+      expect((await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止",...await recoveryTarget()},{"X-Operator-Token":"test-operator"})).status).toBe(200);
+      expect((await (await fetch(base+"/api/booth")).json()).products).toEqual(before.products);
+      // The second command is accepted independently of the held first receipt.
+      receipt.success=true;
+      await post("/api/booth/requests",command("next-while-receipt-pending"));
+      const next=await (await fetch(base+"/api/booth")).json();
+      expect(next.active.status).toBe("executing");receipt.success=success;
+      release();expect((await pending).status).toBe(200);
+      const after=await (await fetch(base+"/api/booth")).json();
+      expect(after.tasks.find((t:{id:string})=>t.id===before.active.id).status).toBe("resolved");
+      expect(after.active).toEqual(next.active);expect(after.products).toEqual(next.products);expect(after.alert).toBeNull();
+      expect(received).toHaveLength(2);
+    }finally{release();await pending;}
+  });
+  it("跨天旧任务重启后仍需核对，人工处理后清除提醒并保留库存与记录",async()=>{
+    const d=mkdtempSync(join(tmpdir(),"booth-recovery-"));directories.push(d);
+    const c=config({databasePath:join(d,"state.sqlite"),dispatchUrl:await fakeRobot(),taskReminderMs:1000});
+    await start(c);const task=(await (await post("/api/booth/requests",command())).json()).task;
+    vi.spyOn(Date,"now").mockReturnValue(Date.parse(task.createdAt)+3*24*60*60*1000);
+    await app!.close();app=undefined;await start(c);
+    const before=await (await fetch(base+"/api/booth")).json();
+    expect(before.active).toMatchObject({id:task.id,status:"executing"});
+    expect(before.waiting).toMatchObject({taskId:task.id,elapsedMs:259200000,overdue:true});
+    expect((await post("/api/booth/requests",command("still-blocked"))).status).toBe(409);
+    const response=await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止",...await recoveryTarget()},{"X-Operator-Token":"test-operator"});
+    expect(response.status).toBe(200);const after=await response.json();
+    expect(after.active).toBeNull();expect(after.waiting).toBeNull();expect(after.products).toEqual(before.products);
+    expect(after.tasks).toHaveLength(1);expect(after.tasks[0]).toMatchObject({id:task.id,status:"resolved",createdAt:task.createdAt});
+    await app!.close();app=undefined;await start(c);
+    const restored=await (await fetch(base+"/api/booth")).json();
+    expect(restored.waiting).toBeNull();expect(restored.active).toBeNull();expect(restored.tasks).toEqual(after.tasks);expect(restored.products).toEqual(before.products);
+    expect(received).toHaveLength(1);
+  });
+  it("旧页面的人工解除不能处理后来出现的新任务或新告警",async()=>{
+    await start(config({dispatchUrl:await fakeRobot()}));
+    const staff={"X-Operator-Token":"test-operator"},confirmation="已核对机器人停止";
+    await post("/api/booth/requests",command());
+    const oldTarget=await recoveryTarget();
+    expect((await post("/api/booth/operator/resolve",{confirmation,...oldTarget},staff)).status).toBe(200);
+    const next=(await (await post("/api/booth/requests",command("new-task"))).json()).task;
+    expect((await post("/api/booth/operator/resolve",{confirmation,...oldTarget},staff)).status).toBe(409);
+    const current=await (await fetch(base+"/api/booth")).json();
+    expect(current.active).toMatchObject({id:next.id,status:"executing"});
+    expect(current.tasks.find((t:{id:string})=>t.id===oldTarget.expectedTaskId).status).toBe("resolved");
+    expect(received).toHaveLength(2);
+    await post("/api/task/finished",{});
+    await post("/api/task/error",{message:"先前告警"});const oldAlert=await recoveryTarget();
+    await post("/api/task/error",{message:"后来告警"});
+    expect((await post("/api/booth/operator/resolve",{confirmation,...oldAlert},staff)).status).toBe(409);
+    expect((await (await fetch(base+"/api/booth")).json()).alert).toBe("后来告警");
+    expect((await post("/api/booth/operator/resolve",{confirmation,...await recoveryTarget()},staff)).status).toBe(200);
+  });
+  it.each(["http","simulator"] as const)("%s已接单任务经工作人员核对即可解除新任务限制，库存和历史保留",async mode=>{
+    await start(config({mode,dispatchUrl:await fakeRobot()}));
+    const task=(await (await post("/api/booth/requests",command())).json()).task;
+    const before=await (await fetch(base+"/api/booth")).json();
+    expect(task.status).toBe("executing");
+    expect((await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止",...await recoveryTarget()})).status).toBe(403);
+    const staff={"X-Operator-Token":"test-operator"};
+    expect((await post("/api/booth/operator/resolve",{},staff)).status).toBe(400);
+    const response=await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止",...await recoveryTarget()},staff);
+    expect(response.status).toBe(200);
+    const after=await response.json();
+    expect(after.active).toBeNull();expect(after.waiting).toBeNull();
+    expect(after.tasks).toHaveLength(1);expect(after.tasks[0]).toMatchObject({id:task.id,status:"resolved"});
+    expect(after.products).toEqual(before.products);expect(received).toHaveLength(1);
+    expect((await post("/api/booth/requests",command("after-operator-recovery"))).status).toBe(200);
+    expect(received).toHaveLength(2);
+  });
   it("超过提醒阈值仍执行且阻止新单，重启保留等待起点，完成后清除提醒",async()=>{
     const d=mkdtempSync(join(tmpdir(),"booth-reminder-"));directories.push(d);
     const c=config({databasePath:join(d,"state.sqlite"),dispatchUrl:await fakeRobot(),taskReminderMs:1000});
@@ -680,7 +806,6 @@ describe("等待提醒 HTTP 边界",()=>{
     vi.spyOn(Date,"now").mockReturnValue(Date.parse(task.createdAt)+2000);
     expect((await (await fetch(base+"/api/booth")).json()).waiting).toMatchObject({taskId:task.id,overdue:true,elapsedMs:2000});
     expect((await post("/api/booth/requests",command("next-request"))).status).toBe(409);
-    expect((await post("/api/booth/operator/resolve",{confirmation:"已核对机器人停止"},{"X-Operator-Token":"test-operator"})).status).toBe(409);
     await app!.close();app=undefined;await start(c);
     const restored=await (await fetch(base+"/api/booth")).json();
     expect(restored.active).toMatchObject({id:task.id,status:"executing"});expect(restored.waiting.overdue).toBe(true);

@@ -23,6 +23,7 @@
     "test:integration:browser": "node scripts/booth-integration.cjs",
     "test:order:browser": "node scripts/booth-order-feedback.cjs",
     "test:screen:browser": "node scripts/booth-screen.cjs",
+    "test:manual:browser": "node scripts/booth-manual-recovery.cjs",
     "test:browser": "node scripts/booth-acceptance.cjs",
     "test:booth:browser": "node scripts/booth-acceptance.cjs",
     "verify:relay": "node scripts/verify-relay.cjs",

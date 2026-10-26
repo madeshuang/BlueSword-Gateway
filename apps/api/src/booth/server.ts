@@ -18,7 +18,18 @@ export function createBoothApplication(config: BoothConfig, options: { webDirect
   const serveWeb = options.webDirectory ? builtWeb(options.webDirectory) : undefined;
   const storage = new ApplicationStorage(config.databasePath);
   const diagnostics=new Diagnostics(storage,config.mode);
-  const service = new BoothService(storage, config, recordingRobotTransport(options.transport??fetch,diagnostics));
+  const recoverManualTask = config.manualRobot ? async (taskId:string|null) => {
+    if(!config.dispatchUrl)throw new BoothError("人工机器人工具地址未配置，新任务限制仍保留",503);
+    const target=new URL("/manual/reset",config.dispatchUrl);
+    if(target.protocol!=="http:"||!["127.0.0.1","localhost","[::1]"].includes(target.hostname)||target.username||target.password)
+      throw new BoothError("人工练习恢复只允许连接本机人工机器人工具",503);
+    let response:Response;
+    try{response=await fetch(target,{method:"POST",headers:{"Content-Type":"application/json","X-Operator-Token":config.operatorToken!},body:JSON.stringify({taskId}),signal:AbortSignal.timeout(5000),redirect:"error"});}
+    catch{throw new BoothError("无法确认人工工具是否已清理旧练习，新任务限制仍保留，请检查工具后重试",503);}
+    const result=await response.json().catch(()=>null);
+    if(!response.ok||result?.success!==true)throw new BoothError(typeof result?.error==="string"?result.error:"人工工具未确认清理旧练习，新任务限制仍保留",response.status===409?409:503);
+  } : undefined;
+  const service = new BoothService(storage, config, recordingRobotTransport(options.transport??fetch,diagnostics),recoverManualTask);
   const assistant = options.assistant ?? (config.aiProvider === "deepseek"
     ? new DeepSeekBoothAssistant(config,options.assistantTransport,options.onAiCall)
     : new OpenAIBoothAssistant(config,options.assistantTransport,options.onAiCall));
@@ -102,7 +113,7 @@ export function createBoothApplication(config: BoothConfig, options: { webDirect
       if (!Array.isArray(body.messages) || body.messages.length < 1 || body.messages.length > 12 ||
         body.messages.some(m => !m || typeof m !== "object" || !["user","assistant"].includes(m.role) || typeof m.content !== "string" || !m.content.trim() || m.content.length > 2000) ||
         body.messages.at(-1).role !== "user") throw new BoothError("对话内容不合法");
-      if (aiBusy) throw new BoothError("智能助手正在处理请求，请稍后再试",429);
+      if (aiBusy) throw new BoothError("助手暂时繁忙，请稍后再试，也可以直接选择物品。",429);
       if(Array.isArray(body.speechRecords)&&body.speechRecords.length<=20){
         const receipts=body.speechRecords.filter((r:unknown):r is {id:string;token:string}=>!!r&&typeof r==="object"&&typeof (r as {id?:unknown}).id==="string"&&typeof (r as {token?:unknown}).token==="string"&&(r as {token:string}).token.length<=128);
         try{diagnostics.linkSent(receipts,body.messages.at(-1).content);}
@@ -124,7 +135,7 @@ export function createBoothApplication(config: BoothConfig, options: { webDirect
     }
     if (url.pathname === "/api/booth/operator/resolve") {
       requireOperator(req,config.operatorToken);
-      service.resolve(body.confirmation); return json(res,200,service.snapshot());
+      await service.resolve(body.confirmation,body.expectedTaskId,body.expectedAlert); return json(res,200,service.snapshot());
     }
     if (url.pathname === "/api/booth/operator/stock/reset") {
       requireOperator(req,config.operatorToken);

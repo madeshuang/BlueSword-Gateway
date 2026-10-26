@@ -13,7 +13,9 @@ export interface BoothTaskProgress { conclusion: string; replyOptions: string[] 
 const unknownProgress = "暂时无法确认这次取物的进度，请查看页面取物状态，或联系现场工作人员。";
 export class BoothService {
   private listeners = new Set<() => void>();
-  constructor(readonly storage: ApplicationStorage, readonly config: BoothConfig, private readonly transport: typeof fetch = fetch) {
+  private operatorRecovering = false;
+  constructor(readonly storage: ApplicationStorage, readonly config: BoothConfig, private readonly transport: typeof fetch = fetch,
+    private readonly recoverManualTask?: (taskId:string|null)=>Promise<void>) {
     // Upgrade saved task data in place; never send an old task again during upgrade.
     const db = storage.db;
     db.exec("BEGIN IMMEDIATE");
@@ -75,6 +77,7 @@ export class BoothService {
     return task && blocks(task) ? task : null;
   }
   private dispatchBlockReason(): string | null {
+    if (this.operatorRecovering) return "工作人员正在处理本次取物，请稍候";
     if (!this.config.dispatchUrl) return "机器人连接尚未配置，暂不能提交任务";
     if (this.config.mode === "http" && !this.config.catalogConfirmed) return "现场物品位置尚未确认，暂不能提交任务";
     return null;
@@ -209,7 +212,7 @@ export class BoothService {
     let upstreamStatus: number | undefined;
     try {
       const response = await this.transport(this.config.dispatchUrl!, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json",...(this.recoverManualTask?{"X-Booth-Manual-Task":task.id}:{}) },
         body: JSON.stringify(task.command), signal: AbortSignal.timeout(this.config.robotTimeoutMs),
         redirect: "error",
       });
@@ -294,13 +297,23 @@ export class BoothService {
     } catch (error) { if (db.isTransaction) db.exec("ROLLBACK"); throw error; }
     this.publish();
   }
-  resolve(confirmed: unknown): void {
+  async resolve(confirmed: unknown, expectedTaskId: unknown, expectedAlert: unknown): Promise<void> {
     if (confirmed !== "已核对机器人停止") throw new BoothError("请先完成现场核对");
-    const task = this.active();
-    if (task && !["fault","uncertain"].includes(task.status)) throw new BoothError("执行中的任务不能在我方界面取消",409);
-    this.audit("operator_resolve", { activeId: task?.id ?? null });
-    if (task) this.update(task, "resolved", "工作人员已现场核对并解除新任务限制");
-    this.storage.set("booth", "alert", null); this.publish();
+    if (this.operatorRecovering) throw new BoothError("工作人员正在处理本次取物，请稍候",409);
+    const checkedTask=()=>{
+      const task=this.active(),alert=this.storage.get<string|null>("booth","alert")??null;
+      if(expectedTaskId!==(task?.id??null)||expectedAlert!==alert)throw new BoothError("任务或告警已变化，请更新页面并重新现场核对",409);
+      return task;
+    };
+    const original=checkedTask();
+    this.operatorRecovering=true;
+    try{
+      if(this.recoverManualTask){this.publish();await this.recoverManualTask(original?.id??null);}
+      const task=checkedTask();
+      this.audit("operator_resolve",{activeId:task?.id??null});
+      if(task)this.update(task,"resolved","工作人员已现场核对并解除新任务限制");
+      this.storage.set("booth","alert",null);
+    }finally{this.operatorRecovering=false;this.publish();}
   }
   private update(task: BoothTask, status: BoothTask["status"], message: string): void {
     const db = this.storage.db;

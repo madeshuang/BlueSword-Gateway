@@ -7,7 +7,7 @@ import { isDispatchCommand } from "../packages/contracts/src/booth.js";
 
 interface WireMessage { url:string; method:string; headers:Record<string,unknown>; headersScope:string; body:string }
 interface WireRecord { time:string; direction:string; request:WireMessage; response?:{status:number;headers:Record<string,unknown>;headersScope:string;body:string}; error?:string }
-export function createManualRobot(callbackBase: string) {
+export function createManualRobot(callbackBase: string, operatorToken = "manual-local-only") {
   const callback = new URL(callbackBase);
   if (callback.protocol !== "http:" || !["127.0.0.1","localhost","[::1]"].includes(callback.hostname) ||
     callback.username || callback.password || callback.search || callback.hash || callback.pathname !== "/") throw new Error("人工工具发送通知的目标只允许本机 HTTP 基址");
@@ -15,6 +15,7 @@ export function createManualRobot(callbackBase: string) {
   let phase: "idle" | "pending" | "accepted" | "sending" = "idle";
   let pending: {res:ServerResponse;record:WireRecord} | undefined;
   let item: unknown = null;
+  let taskId: string | null = null;
   const records: WireRecord[] = [];
   const responseHeaders={"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store"};
   const responseHeaderScope="本工具显式设置的头；不含 HTTP 服务自动补充字段";
@@ -37,7 +38,7 @@ export function createManualRobot(callbackBase: string) {
       if(req.method==="GET" && url.pathname==="/") {res.writeHead(200,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store"});res.end(html);return;}
       if(req.method==="GET" && ["/manual/state","/manual/report"].includes(url.pathname)) {
         if(url.pathname.endsWith("report")) res.setHeader("Content-Disposition",'attachment; filename="manual-interface-record.json"');
-        return json(res,200,{scope:"本机人工机器人工具的 HTTP 通信记录；不证明真实机器人动作或真实 AI 效果",phase,item,records});
+        return json(res,200,{scope:"本机人工机器人工具的 HTTP 通信记录；不证明真实机器人动作或真实 AI 效果",phase,item,taskId,records});
       }
       if(req.method!=="POST") return json(res,404,{error:"Not found"});
       if(!req.headers["content-type"]?.startsWith("application/json")) return json(res,415,{error:"请发送 application/json"});
@@ -48,6 +49,17 @@ export function createManualRobot(callbackBase: string) {
       const raw=Buffer.concat(chunks).toString("utf8");
       const body=raw?JSON.parse(raw):{};
       if(!body || typeof body!=="object" || Array.isArray(body)) return json(res,400,{error:"需要 JSON 对象"});
+      if(url.pathname==="/manual/reset") {
+        if(req.headers["x-operator-token"]!==operatorToken)return json(res,403,{error:"工作人员凭据不正确"});
+        if(phase==="sending")return json(res,409,{error:"人工工具正在发送结果通知，请等待发送结束后重新核对"});
+        if(phase!=="idle"&&body.taskId!==taskId)return json(res,409,{error:"人工工具中的任务已变化，请核对当前练习"});
+        const entry=record("网关 → 人工工具（结束旧练习）",{url:"http://"+req.headers.host+url.pathname,method:"POST",headers:safeHeaders(req.headers),headersScope:"实际收到的头；敏感字段已隐藏",body:raw});
+        if(pending){const old=pending;pending=undefined;old.record.error="工作人员已结束旧练习，关闭接单连接；未发送完成或故障通知";old.res.destroy();}
+        phase="idle";item=null;taskId=null;
+        const value={success:true,phase};entry.response={status:200,headers:responseHeaders,headersScope:responseHeaderScope,body:JSON.stringify(value)};
+        return json(res,200,value);
+      }
+      if(url.pathname.startsWith("/manual/")&&taskId!==null&&body.taskId!==taskId)return json(res,409,{error:"任务已变化，请更新人工工具页面后重新操作"});
       if(url.pathname==="/api/task/dispatch") {
         const entry=record("网关 → 人工机器人",{url:"http://"+req.headers.host+url.pathname,method:"POST",headers:safeHeaders(req.headers),headersScope:"实际收到的头；敏感字段已隐藏",body:raw});
         if(!isDispatchCommand(body)) {
@@ -56,7 +68,7 @@ export function createManualRobot(callbackBase: string) {
         if(phase!=="idle") {
           const value={code:1,data:"人工机器人工具中有尚未结束的任务",success:false};entry.response={status:200,headers:responseHeaders,headersScope:responseHeaderScope,body:JSON.stringify(value)};return json(res,200,value);
         }
-        item=body;phase="pending";pending={res,record:entry};
+        item=body;taskId=typeof req.headers["x-booth-manual-task"]==="string"?req.headers["x-booth-manual-task"]:null;phase="pending";pending={res,record:entry};
         res.on("close",()=>{if(pending?.res===res){entry.error="连接已断开，未发送接单回复；请在网关核对是否已转为无法确认接单的状态";pending=undefined;phase="idle";}});
         return;
       }
