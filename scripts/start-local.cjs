@@ -49,7 +49,7 @@ async function main() {
   const {tsImport} = await import('tsx/esm/api');
   let robot;
   if(!gateway) {
-    // 人工练习固定使用独立端口、目录和数据库，不改写 .env。
+    // 人工练习固定使用独立端口和数据库；清单由专用配置选择，不改写 .env。
     process.env.BOOTH_MANUAL_PORT='4101';
     process.env.BOOTH_MANUAL_ROBOT_PORT='4201';
     process.env.BOOTH_MANUAL_DB_PATH=path.join(root,'.data','booth-manual.sqlite');

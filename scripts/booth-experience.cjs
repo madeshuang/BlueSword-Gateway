@@ -1,3 +1,4 @@
+async function selectOnly(page,name){const remove=page.locator('.order-line button[aria-label^="移除"]');while(await remove.count())await remove.first().click();await page.getByRole('button',{name:'选择'+name,exact:true}).click();}
 // Real local API + SQLite + browser, with controlled HTTP AI/robot peers only.
 const assert=require('node:assert/strict');
 const {spawn}=require('node:child_process');
@@ -22,14 +23,14 @@ async function ready(url,process){await until(async()=>{if(process.exitCode!==nu
       res.writeHead(200,{'Content-Type':'application/json'});
       if(req.url==='/responses'){
         modelCalls++;assert.equal(body.tools,undefined);
-        return res.end(JSON.stringify({status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({reply:'不可采用的模型猜测：已完成',selection:{productId:'water',count:1},taskStatusQuery:true})}]}]}));
+        return res.end(JSON.stringify({status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({reply:'不可采用的模型猜测：已完成',selection:[{productId:'water',count:1}],taskStatusQuery:true})}]}]}));
       }
-      assert.equal(req.url,'/api/task/dispatch');assert.deepEqual(Object.keys(body).sort(),['count','item','location']);robotCalls++;
+      assert.equal(req.url,'/api/task/dispatch');assert.deepEqual(Object.keys(body).sort(),['items']);robotCalls++;
       if(robotCalls===1)await new Promise(r=>releaseReceipt=r);
       res.end(JSON.stringify({success:true,data:'received'}));
     });await new Promise(r=>peer.listen(0,'127.0.0.1',r));
     const upstream='http://127.0.0.1:'+peer.address().port,apiUrl='http://127.0.0.1:'+await port(),webPort=await port(),webUrl='http://127.0.0.1:'+webPort;
-    const api=launch(['--import','tsx','apps/api/src/booth/index.ts'],{PORT:apiUrl.split(':').at(-1),BOOTH_DB_PATH:join(output,'state.sqlite'),BOOTH_ROBOT_MODE:'http',ROBOT_DISPATCH_URL:upstream+'/api/task/dispatch',BOOTH_CATALOG_CONFIRMED:'true',BOOTH_AI_PROVIDER:'openai',OPENAI_BASE_URL:upstream,OPENAI_API_KEY:'controlled-fixture',DEEPSEEK_API_KEY:'',BOOTH_OPERATOR_TOKEN:'test-staff',BOOTH_TASK_REMINDER_MS:'120000'});
+    const api=launch(['--import','tsx','apps/api/src/booth/index.ts'],{PORT:apiUrl.split(':').at(-1),BOOTH_CATALOG_PATH:join(root,'scripts/fixtures/booth-catalog.json'),BOOTH_DB_PATH:join(output,'state.sqlite'),BOOTH_ROBOT_MODE:'http',ROBOT_DISPATCH_URL:upstream+'/api/task/dispatch',BOOTH_CATALOG_CONFIRMED:'true',BOOTH_AI_PROVIDER:'openai',OPENAI_BASE_URL:upstream,OPENAI_API_KEY:'controlled-fixture',DEEPSEEK_API_KEY:'',BOOTH_OPERATOR_TOKEN:'test-staff',BOOTH_TASK_REMINDER_MS:'120000'});
     await ready(apiUrl+'/api/health',api);
     const web=launch([join(dirname(webRequire.resolve('vite/package.json')),'bin/vite.js'),'--host','127.0.0.1','--port',String(webPort),'--strictPort'],{VITE_API_TARGET:apiUrl},join(root,'apps/web'));await ready(webUrl,web);
     browser=await chromium.launch({headless:true,...(process.platform==='win32'?{channel:process.env.PLAYWRIGHT_CHANNEL||'msedge'}:{})});
@@ -39,12 +40,12 @@ async function ready(url,process){await until(async()=>{if(process.exitCode!==nu
     async function ask(page,expected){const input=page.getByRole('textbox',{name:'告诉助手你的需求'});const replies=page.locator('.chat-bubble.assistant');const n=await replies.count();await input.fill('我的东西取好了吗？');await input.press('Enter');await until(async()=>await replies.count()===n+1);const text=await replies.last().innerText();assert(text.includes(expected),text);assert(!text.includes('模型猜测'));return text;}
     async function callback(path,body){const res=await fetch(apiUrl+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});assert.equal(res.status,200);}
     const a=await context.newPage();await visit(a);const original=await experience(a);
-    await a.getByRole('button',{name:'选择矿泉水',exact:true}).click();await a.getByRole('button',{name:'确认取物',exact:true}).click();await a.locator('.task-panel.submitting').waitFor();
+    await selectOnly(a,'矿泉水');await a.getByRole('button',{name:'确认取物',exact:true}).click();await a.locator('.task-panel.submitting').waitFor();
     await ask(a,'等待机器人回复是否接单');await a.reload();await until(async()=>!!await experience(a));assert.deepEqual(await experience(a),original);await ask(a,'等待机器人回复是否接单');
     releaseReceipt();await a.locator('.task-panel.executing').waitFor();await ask(a,'机器人已接单，尚未收到完成通知');assert.equal(robotCalls,1);passed.push('等待受理期间刷新恢复关联且不重复发送');
     await callback('/api/task/finished',{});await a.locator('.task-panel.succeeded').waitFor();await ask(a,'取物完成通知');passed.push('任务完成后仍可查询');
     const b=await context.newPage();await visit(b);assert.notEqual((await experience(b)).token,original.token);await ask(b,'暂时无法确认');
-    await b.getByRole('button',{name:'选择纪念品',exact:true}).click();await b.getByRole('button',{name:'确认取物',exact:true}).click();await b.locator('.task-panel.executing').waitFor();
+    await selectOnly(b,'纪念品');await b.getByRole('button',{name:'确认取物',exact:true}).click();await b.locator('.task-panel.executing').waitFor();
     await ask(b,'纪念品 × 1');await ask(a,'矿泉水 × 1');passed.push('两个标签各自只查询自己的任务');
     // window.open copies the opener's sessionStorage; the lifetime lock must split it.
     const popupReady=a.waitForEvent('popup');await a.evaluate(url=>window.open(url,'_blank'),webUrl);const duplicate=await popupReady;
@@ -63,7 +64,7 @@ async function ready(url,process){await until(async()=>{if(process.exitCode!==nu
     // Saving a credential must succeed before any task can be dispatched.
     const fail=await browser.newContext(),blocked=await fail.newPage();blocked.on('pageerror',e=>errors.push(e.message));
     await blocked.addInitScript(()=>{const set=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k==='bluesword.booth.experience')throw new DOMException('Injected','QuotaExceededError');return set.call(this,k,v);};});
-    await blocked.goto(webUrl);await blocked.getByRole('button',{name:'选择矿泉水',exact:true}).click();await blocked.getByRole('button',{name:'确认取物',exact:true}).click();await blocked.getByRole('alert').filter({hasText:'无法保存本页体验信息'}).first().waitFor();assert.equal(robotCalls,2);await ask(blocked,'暂时无法确认');passed.push('体验存储失败不发单且查询明确无法确认');
+    await blocked.goto(webUrl);await selectOnly(blocked,'矿泉水');await blocked.getByRole('button',{name:'确认取物',exact:true}).click();await blocked.getByRole('alert').filter({hasText:'无法保存本页体验信息'}).first().waitFor();assert.equal(robotCalls,2);await ask(blocked,'暂时无法确认');passed.push('体验存储失败不发单且查询明确无法确认');
     assert.deepEqual(errors,[]);assert.equal(robotCalls,2);
     writeFileSync(join(output,'report.json'),JSON.stringify({passed,robotCalls,controlledModelCalls:modelCalls,realAiCalls:0,realRobotCalls:0},null,2));console.log(JSON.stringify({output,passed,realAiCalls:0,realRobotCalls:0}));
   }finally{

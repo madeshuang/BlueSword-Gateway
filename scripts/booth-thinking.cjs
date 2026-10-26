@@ -1,3 +1,4 @@
+async function selectOnly(page,name){const remove=page.locator('.order-line button[aria-label^="移除"]');while(await remove.count())await remove.first().click();await page.getByRole('button',{name:'选择'+name,exact:true}).click();}
 // Browser and public HTTP boundaries; AI and robot peers are controlled local services.
 const assert=require('node:assert/strict');
 const {spawn}=require('node:child_process');
@@ -28,11 +29,11 @@ async function ready(url,process){await until(async()=>{if(process.exitCode!==nu
         modelRequests.push(body);await new Promise(r=>releaseModel=r);
         return res.end(JSON.stringify({status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({reply:'当前可选矿泉水等物品，请选择你需要的物品和数量。',selection:null,taskStatusQuery:false})}]}]}));
       }
-      assert.equal(req.url,'/api/task/dispatch');assert.deepEqual(Object.keys(body).sort(),['count','item','location']);robotCalls++;
+      assert.equal(req.url,'/api/task/dispatch');assert.deepEqual(Object.keys(body).sort(),['items']);robotCalls++;
       await new Promise(r=>releaseReceipt=r);res.end(JSON.stringify({success:true,data:'received'}));
     });await new Promise(r=>peer.listen(0,'127.0.0.1',r));
     const upstream='http://127.0.0.1:'+peer.address().port,apiUrl='http://127.0.0.1:'+await port(),webPort=await port(),webUrl='http://127.0.0.1:'+webPort;
-    const api=launch(['--import','tsx','apps/api/src/booth/index.ts'],{PORT:apiUrl.split(':').at(-1),BOOTH_DB_PATH:join(output,'state.sqlite'),BOOTH_ROBOT_MODE:'http',ROBOT_DISPATCH_URL:upstream+'/api/task/dispatch',BOOTH_CATALOG_CONFIRMED:'true',BOOTH_AI_PROVIDER:'openai',OPENAI_BASE_URL:upstream,OPENAI_API_KEY:'controlled-fixture',DEEPSEEK_API_KEY:'',BOOTH_OPERATOR_TOKEN:'test-staff',BOOTH_TASK_REMINDER_MS:'120000'});
+    const api=launch(['--import','tsx','apps/api/src/booth/index.ts'],{PORT:apiUrl.split(':').at(-1),BOOTH_CATALOG_PATH:join(root,'scripts/fixtures/booth-catalog.json'),BOOTH_DB_PATH:join(output,'state.sqlite'),BOOTH_ROBOT_MODE:'http',ROBOT_DISPATCH_URL:upstream+'/api/task/dispatch',BOOTH_CATALOG_CONFIRMED:'true',BOOTH_AI_PROVIDER:'openai',OPENAI_BASE_URL:upstream,OPENAI_API_KEY:'controlled-fixture',DEEPSEEK_API_KEY:'',BOOTH_OPERATOR_TOKEN:'test-staff',BOOTH_TASK_REMINDER_MS:'120000'});
     await ready(apiUrl+'/api/health',api);
     const web=launch([join(dirname(webRequire.resolve('vite/package.json')),'bin/vite.js'),'--host','127.0.0.1','--port',String(webPort),'--strictPort'],{VITE_API_TARGET:apiUrl},join(root,'apps/web'));await ready(webUrl,web);
     browser=await chromium.launch({headless:true,...(process.platform==='win32'?{channel:process.env.PLAYWRIGHT_CHANNEL||'msedge'}:{})});
@@ -53,7 +54,7 @@ async function ready(url,process){await until(async()=>{if(process.exitCode!==nu
     await toggle.click();assert.equal(await body.isVisible(),true,'结束后也可通过箭头所在标题展开');await toggle.click();
     assert.equal(robotCalls,0,'普通聊天不发单');passed.push('每轮聊天逐字展示、手动折叠和回复后结束');
     await page.emulateMedia({reducedMotion:'reduce'});
-    await page.getByRole('button',{name:'选择矿泉水',exact:true}).click();
+    await selectOnly(page,'矿泉水');
     await page.getByRole('button',{name:'确认取物',exact:true}).click();await until(()=>!!releaseReceipt);
     const taskThought=page.getByRole('group',{name:'思考过程'}).last();
     await taskThought.waitFor({timeout:2000});assert.match(await taskThought.locator('summary').innerText(),/思考中/);
@@ -85,7 +86,7 @@ async function ready(url,process){await until(async()=>{if(process.exitCode!==nu
     await callback('/api/task/finished',{});await pause(150);assert.equal(await completed.count(),1,'重复完成通知不重复回复');
     assert.equal(modelRequests.length,1,'完成通知直接形成助手消息，无需额外模型调用');
     passed.push('完成通知结束思考并自动回复，重复通知不重复回复');
-    await page.getByRole('button',{name:'选择小面包',exact:true}).click();await page.getByRole('button',{name:'确认取物',exact:true}).click();
+    await selectOnly(page,'小面包');await page.getByRole('button',{name:'确认取物',exact:true}).click();
     await until(()=>!!releaseReceipt);releaseReceipt();releaseReceipt=null;await page.locator('.task-panel.executing').waitFor();
     await callback('/api/task/error',{message:'受控测试故障'});await page.locator('.task-panel.fault').waitFor();
     const faultThought=page.getByRole('group',{name:'思考过程'}).last();
@@ -96,7 +97,7 @@ async function ready(url,process){await until(async()=>{if(process.exitCode!==nu
     passed.push('故障中止思考并提示协助，重复故障不重复回复');
     const resolved=await fetch(apiUrl+'/api/booth/operator/resolve',{method:'POST',headers:{'Content-Type':'application/json','X-Operator-Token':'test-staff'},body:JSON.stringify({confirmation:'已核对机器人停止'})});assert.equal(resolved.status,200);
     await page.locator('.task-panel.resolved').waitFor();
-    await page.getByRole('button',{name:'选择纪念品',exact:true}).click();await page.getByRole('button',{name:'确认取物',exact:true}).click();
+    await selectOnly(page,'纪念品');await page.getByRole('button',{name:'确认取物',exact:true}).click();
     await until(()=>!!releaseReceipt);releaseReceipt();releaseReceipt=null;await page.locator('.task-panel.executing').waitFor();
     await input.fill('继续介绍可选物品');await input.press('Enter');await until(()=>!!releaseModel);
     assert(!JSON.stringify(modelRequests.at(-1)).includes('我正在读取导航反馈'),'固定脚本不作为模型历史发送');
@@ -107,7 +108,7 @@ async function ready(url,process){await until(async()=>{if(process.exitCode!==nu
     await pause(150);assert.equal(await page.locator('.chat-bubble.assistant').count(),0,'旧回复和旧任务完成消息不串入新体验');
     passed.push('新体验隔离旧流程、迟到回复和旧任务完成通知');
     await page.route('**/api/booth/requests',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({data:'受控测试：暂不能提交取物'})}),{times:1});
-    await page.getByRole('button',{name:'选择矿泉水',exact:true}).click();await page.getByRole('button',{name:'确认取物',exact:true}).click();
+    await selectOnly(page,'矿泉水');await page.getByRole('button',{name:'确认取物',exact:true}).click();
     await page.getByRole('alert').filter({hasText:'受控测试：暂不能提交取物'}).waitFor();
     assert.match(await page.getByRole('group',{name:'思考过程'}).last().locator('summary').innerText(),/思考已中止/,'明确提交失败不能留在思考中');
     assert.equal(robotCalls,3,'明确提交失败不额外发单');passed.push('明确提交失败中止思考');
@@ -116,9 +117,9 @@ async function ready(url,process){await until(async()=>{if(process.exitCode!==nu
     await syncPage.route('**/api/booth/events',route=>route.continue({url:upstream+'/events'}));
     await syncPage.goto(webUrl);await syncPage.getByRole('textbox',{name:'告诉助手你的需求'}).waitFor();
     await syncPage.route('**/api/booth',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({data:'受控测试：状态同步暂不可用'})}));
-    await syncPage.getByRole('button',{name:'选择矿泉水',exact:true}).click();await syncPage.getByRole('button',{name:'确认取物',exact:true}).click();
+    await selectOnly(syncPage,'矿泉水');await syncPage.getByRole('button',{name:'确认取物',exact:true}).click();
     await until(()=>!!releaseReceipt);releaseReceipt();releaseReceipt=null;
-    await syncPage.getByRole('alert').filter({hasText:'受控测试：状态同步暂不可用'}).waitFor();
+    await syncPage.getByRole('alert').filter({hasText:'取物请求已提交，但暂时无法更新页面状态'}).waitFor();
     assert.match(await syncPage.getByRole('group',{name:'思考过程'}).last().locator('summary').innerText(),/思考中/,'成功提交后的同步失败保留思考');
     assert.equal(await syncPage.locator('.chat-bubble.assistant').filter({hasText:'未能提交'}).count(),0);
     await syncPage.unroute('**/api/booth');await syncPage.unroute('**/api/booth/events');
@@ -151,7 +152,7 @@ async function ready(url,process){await until(async()=>{if(process.exitCode!==nu
     const streamContext=await browser.newContext({reducedMotion:'reduce'}),streamPage=await streamContext.newPage();streamPage.on('pageerror',e=>errors.push(e.message));
     const clockTime=new Date('2026-10-15T00:00:00+08:00');await streamPage.clock.install({time:clockTime});await streamPage.clock.pauseAt(clockTime);
     await streamPage.goto(webUrl);await streamPage.locator('.task-panel.idle').waitFor();
-    await streamPage.getByRole('button',{name:'选择纪念品',exact:true}).click();await streamPage.getByRole('button',{name:'确认取物',exact:true}).click();
+    await selectOnly(streamPage,'纪念品');await streamPage.getByRole('button',{name:'确认取物',exact:true}).click();
     await until(()=>!!releaseReceipt);releaseReceipt();releaseReceipt=null;await streamPage.locator('.task-panel.executing').waitFor();
     const streamThought=streamPage.getByRole('group',{name:'思考过程'}).last(),streamCopy=streamThought.locator('.thinking-copy');
     for(let tick=0;tick<5;tick++) {

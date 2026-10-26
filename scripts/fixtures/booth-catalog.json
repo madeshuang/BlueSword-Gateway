@@ -1,0 +1,50 @@
+[
+  {
+    "id": "water",
+    "name": "矿泉水",
+    "category": "饮品",
+    "subtitle": "一份清爽，开启新的探索",
+    "description": "休息片刻，让机器人为你送来一瓶矿泉水。",
+    "location": "货架1-2层",
+    "maxCount": 3,
+    "initialStock": 3,
+    "art": "water",
+    "color": "#dcecf1"
+  },
+  {
+    "id": "snack",
+    "name": "小面包",
+    "category": "轻食",
+    "subtitle": "补充能量，继续精彩",
+    "description": "展会中的轻松时刻，来一份简单的能量补给。",
+    "location": "示例货架2-1层",
+    "maxCount": 3,
+    "initialStock": 3,
+    "art": "snack",
+    "color": "#f4e5d2"
+  },
+  {
+    "id": "gift",
+    "name": "纪念品",
+    "category": "好礼",
+    "subtitle": "将这段相遇，带回日常",
+    "description": "留下一份属于这次展会的纪念。",
+    "location": "示例货架3-1层",
+    "maxCount": 2,
+    "initialStock": 2,
+    "art": "gift",
+    "color": "#e5e6f1"
+  },
+  {
+    "id": "greens",
+    "name": "蔬菜礼盒",
+    "category": "鲜选",
+    "subtitle": "科技与自然的美好相遇",
+    "description": "感受智能科技与绿色生活之间的连接。",
+    "location": "示例货架4-1层",
+    "maxCount": 1,
+    "initialStock": 1,
+    "art": "greens",
+    "color": "#e3eddf"
+  }
+]

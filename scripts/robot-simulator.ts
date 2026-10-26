@@ -1,5 +1,6 @@
 /** 独立机器人模拟器，只监听本机回环地址；不是正式机器人能力。 */
 import { createServer } from "node:http";
+import { isDispatchCommand } from "../packages/contracts/src/booth.js";
 const callback = process.env.SIMULATOR_CALLBACK_URL ?? "http://127.0.0.1:4100";
 let scenario = process.env.SIMULATOR_SCENARIO ?? "success";
 let busy = false;
@@ -12,7 +13,7 @@ const server = createServer(async(req,res)=>{
     const body=text?JSON.parse(text):{};
     if (req.method==="POST" && url.pathname==="/simulation/scenario" && ["success","error","rejected","silent"].includes(body.scenario)) {scenario=body.scenario;return reply(true,scenario);}
     if(req.method!=="POST" || url.pathname!=="/api/task/dispatch") return reply(false,"Not found",404);
-    if(typeof body.location!=="string" || typeof body.item!=="string" || !Number.isSafeInteger(body.count) || body.count<1 || Object.keys(body).sort().join()!=="count,item,location") return reply(false,"报文不合法",400);
+    if(!isDispatchCommand(body)) return reply(false,"报文不合法",400);
     if(busy || scenario==="rejected") return reply(false,"机器人模拟器当前不能接受任务");
     busy=true;reply(true,"received");
     if(scenario==="silent") return;

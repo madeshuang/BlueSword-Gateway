@@ -1,3 +1,4 @@
+async function selectOnly(page,name){const remove=page.locator('.order-line button[aria-label^="移除"]');while(await remove.count())await remove.first().click();await page.getByRole('button',{name:'选择'+name,exact:true}).click();}
 const assert=require('node:assert/strict');
 const {spawn}=require('node:child_process');
 const {once}=require('node:events');
@@ -41,7 +42,7 @@ async function testStorageSubmission(browser,webUrl){
    await gate;
    return route.fulfill({status,contentType:'application/json',body:JSON.stringify(status===200?{}:{data:'测试：未收到确认反馈'})});
   });
-  await page.goto(webUrl);await page.getByRole('button',{name:'选择矿泉水',exact:true}).click();
+  await page.goto(webUrl);await selectOnly(page,'矿泉水');
   const submit=page.locator('.order-panel .primary-button');await until(()=>submit.isEnabled());await submit.click();
   await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
   console.log('Storage failure observation: '+JSON.stringify({disabled:await submit.isDisabled(),button:await submit.innerText(),sent:sent.length,errors}));
@@ -85,14 +86,14 @@ async function testStorageSubmission(browser,webUrl){
   robot=createServer(async(req,res)=>{
     let body='';for await(const c of req)body+=c;
     assert.equal(req.url,'/api/task/dispatch');assert.equal(req.method,'POST');
-    const command=JSON.parse(body);assert.deepEqual(Object.keys(command).sort(),['count','item','location']);requests.push(command);
+    const command=JSON.parse(body);assert.deepEqual(Object.keys(command).sort(),['items']);requests.push(command);
     if(mode==='receipt-pending')await new Promise(resolve=>releaseReceipt=resolve);
     res.writeHead(mode==='uncertain'?503:200,{'Content-Type':'application/json'});res.end(JSON.stringify({code:1,data:mode==='rejected'?'测试拒绝':'received',success:mode!=='rejected'}));
     if(mode==='success'||mode==='error'){const selected=mode;const t=setTimeout(async()=>{
       callbacks.delete(t);await fetch(apiUrl+(selected==='error'?'/api/task/error':'/api/task/finished'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(selected==='error'?{message:'测试故障：机械臂无法自动恢复'}:{result:'success'})}).catch(()=>{});
     },1600);callbacks.add(t);}
   });await new Promise(r=>robot.listen(robotPort,'127.0.0.1',r));
-  const fixtureCatalog=JSON.parse(readFileSync(join(root,'config/booth-catalog.example.json'),'utf8')).map(p=>({...p,initialStock:100}));
+  const fixtureCatalog=JSON.parse(readFileSync(join(root,'scripts/fixtures/booth-catalog.json'),'utf8')).map(p=>({...p,initialStock:100}));
   const fixtureCatalogPath=join(output,'acceptance-catalog.json');writeFileSync(fixtureCatalogPath,JSON.stringify(fixtureCatalog));
   const env={BOOTH_CATALOG_PATH:fixtureCatalogPath,PORT:String(apiPort),BOOTH_DB_PATH:join(output,'state.sqlite'),BOOTH_ROBOT_MODE:'http',ROBOT_DISPATCH_URL:'http://127.0.0.1:'+robotPort+'/api/task/dispatch',BOOTH_CATALOG_CONFIRMED:'true',BOOTH_TASK_REMINDER_MS:'500',BOOTH_AI_PROVIDER:'openai',DEEPSEEK_API_KEY:'',OPENAI_API_KEY:'',BOOTH_OPERATOR_TOKEN:'browser-test-operator'};
   let api=launch(['--import','tsx','apps/api/src/booth/index.ts'],env);await ready(apiUrl+'/api/health',api);
@@ -113,7 +114,7 @@ async function testStorageSubmission(browser,webUrl){
   // P9: missing dispatch URL must be visible before the visitor submits.
   await stop(api);api=launch(['--import','tsx','apps/api/src/booth/index.ts'],{...env,ROBOT_DISPATCH_URL:'',BOOTH_OPERATOR_TOKEN:''});await ready(apiUrl+'/api/health',api);
   await page.goto(webUrl);await page.getByRole('textbox',{name:'告诉助手你的需求'}).waitFor();
-  await page.getByRole('button',{name:'选择矿泉水',exact:true}).click();
+  await selectOnly(page,'矿泉水');
   assert.equal(await page.getByRole('button',{name:'确认取物',exact:true}).isDisabled(),true,'缺少机器人地址时不能确认取物');
   await page.getByText('机器人连接尚未配置，暂不能提交任务',{exact:true}).waitFor();
   assert.equal(await page.locator('.site-header').count(),0,'访客顶部品牌、标语及技术状态栏应删除');
@@ -161,14 +162,14 @@ async function testStorageSubmission(browser,webUrl){
   assert.equal(await page.getByText('物品较多时，可在列表内滚动浏览。',{exact:true}).count(),0);
   assert.equal(await page.locator('.site-footer').getByText('当前为模拟演示，未连接现场机器人。',{exact:true}).count(),0);
   await testStorageSubmission(browser,webUrl);
-  await page.getByRole('button',{name:'选择矿泉水',exact:true}).click();
+  await selectOnly(page,'矿泉水');
   await page.getByRole('button',{name:'增加数量',exact:true}).click();
   assert.equal(await page.getByLabel('已选数量').innerText(),'2');
   mode='receipt-pending';await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.submitting').waitFor();
   assert.equal(await notices.count(),0,'点击确认而未取得受理回执时不能播报受理或完成');
   await assertStatusAppearance(page.locator('.task-panel'),'rgb(82, 96, 109)','等待机器人接单');
   await until(()=>typeof releaseReceipt==='function');mode='success';releaseReceipt();await page.locator('.task-panel.executing').waitFor();
-  assert.equal(requests[0].count,2);
+  assert.equal(requests[0].items[0].count,2);
   await page.getByRole('group',{name:'思考过程'}).last().getByText('思考中',{exact:true}).waitFor();
   assert.equal(await page.locator('.chat-event').count(),0,'取物过程改为折叠说明');
   await assertStatusAppearance(page.locator('.task-panel'),'rgb(49, 95, 134)','机器人已接单');
@@ -193,14 +194,14 @@ async function testStorageSubmission(browser,webUrl){
     assert.deepEqual((await (await fetch(apiUrl+'/api/booth')).json()).tasks,historyBefore,'清理访客显示不能删除历史任务');
   }finally{await freshVisitor.close();}
 
-  mode='rejected';await page.getByRole('button',{name:'选择纪念品',exact:true}).click();await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.rejected').waitFor();
+  mode='rejected';await selectOnly(page,'纪念品');await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.rejected').waitFor();
   await assertStatusAppearance(page.locator('.task-panel'),'rgb(133, 98, 40)','机器人未接单');
   assert.match(await page.locator('.task-panel').innerText(),/机器人未接下这次取物/);
   assert.doesNotMatch(await page.locator('.task-panel').innerText(),/测试拒绝|已取好/);
   await openOperations(page);
   await page.getByRole('dialog').getByText('测试拒绝',{exact:true}).waitFor();
   await page.getByRole('button',{name:'关闭工作人员入口'}).click();
-  mode='error';await page.getByRole('button',{name:'选择小面包',exact:true}).click();await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.fault').waitFor();
+  mode='error';await selectOnly(page,'小面包');await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.fault').waitFor();
   await notices.filter({hasText:'这次取物需要工作人员协助'}).waitFor();
   await assertStatusAppearance(page.locator('.task-panel'),'rgb(158, 69, 62)','需要协助');
   await fetch(apiUrl+'/api/task/error',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'重复故障：仍需核对'})});
@@ -223,7 +224,7 @@ async function testStorageSubmission(browser,webUrl){
   await page.getByRole('dialog').getByText('工作人员已现场核对并解除新任务限制',{exact:true}).waitFor();
   await page.getByRole('button',{name:'关闭工作人员入口'}).click();
   await assertStatusAppearance(page.locator('.task-panel'),'rgb(82, 96, 109)','工作人员处理');
-  mode='uncertain';await page.getByRole('button',{name:'选择矿泉水',exact:true}).click();await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.uncertain').waitFor();
+  mode='uncertain';await selectOnly(page,'矿泉水');await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.uncertain').waitFor();
   await notices.filter({hasText:'机器人是否接单、这次取物是否结束尚未确认'}).waitFor();
   await assertStatusAppearance(page.locator('.task-panel'),'rgb(133, 98, 40)','需要核对');
   assert.match(await page.locator('.task-panel').innerText(),/是否结束尚未确认/);
@@ -235,10 +236,11 @@ async function testStorageSubmission(browser,webUrl){
   await page.clock.setSystemTime(new Date(Date.now()-3600000));
   mode='silent';const before=requests.length;
   await page.route('**/api/booth/requests',async route=>{await route.fetch();await route.fulfill({status:502,contentType:'application/json',body:JSON.stringify({data:'测试：反馈丢失'})});},{times:1});
-  await page.getByRole('button',{name:'选择矿泉水',exact:true}).click();await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.executing').waitFor();
-  await page.getByRole('alert').filter({hasText:'反馈丢失'}).waitFor();assert.equal(requests.length,before+1);
+  await selectOnly(page,'矿泉水');await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.executing').waitFor();
+  await page.getByRole('region',{name:'取物确认',exact:true}).getByRole('heading',{name:'请选择物品',exact:true}).waitFor();
+  assert.equal(await page.locator('.feedback-error').count(),0,'已知机器人接单后，不显示过期的网页反馈错误');assert.equal(requests.length,before+1);
   const otherContext=await browser.newContext(),other=await otherContext.newPage();await other.goto(webUrl);await other.locator('.task-panel.executing').waitFor();
-  await other.getByRole('button',{name:'选择纪念品',exact:true}).click();assert.equal(await other.getByRole('button',{name:'请等待当前任务',exact:true}).isDisabled(),true);
+  await selectOnly(other,'纪念品');assert.equal(await other.getByRole('button',{name:'请等待当前任务',exact:true}).isDisabled(),true);
   await otherContext.close();
   const taskId=(await (await fetch(apiUrl+'/api/booth')).json()).active.id;
   await page.getByRole('alert').filter({hasText:'等待时间较长'}).waitFor({timeout:5000});
@@ -263,7 +265,7 @@ async function testStorageSubmission(browser,webUrl){
 
   // Browser only fixture: no request is sent to OpenAI; this checks recommendation UX, not model quality.
   await stop(api);api=launch(['--import','tsx','apps/api/src/booth/index.ts'],{...env,OPENAI_API_KEY:'browser-fixture-not-a-real-key'});await ready(apiUrl+'/api/health',api);
-  await page.route('**/api/booth/chat',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({reply:'已为你选择两瓶矿泉水，请在取物栏确认。',selection:{productId:'water',count:2}})}));
+  await page.route('**/api/booth/chat',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({reply:'已为你选择两瓶矿泉水，请在取物栏确认。',selection:[{productId:'water',count:2}]})}));
   await page.reload();const input=page.getByRole('textbox',{name:'告诉助手你的需求'});await until(()=>input.isEnabled());
   assert.equal(await input.getAttribute('placeholder'),'想了解什么？');
   assert.equal(await notices.count(),0,'首次快照不播报历史完成任务');
@@ -277,27 +279,30 @@ async function testStorageSubmission(browser,webUrl){
     await page.unroute('**/api/booth/chat');
     let release,arrived;
     const held=new Promise(r=>release=r),started=new Promise(r=>arrived=r);
-    await page.route('**/api/booth/chat',async route=>{arrived();await held;await route.fulfill({status,contentType:'application/json',body:JSON.stringify(status===200?{reply,selection:{productId:'water',count:2}}:{data:reply})});});
+    await page.route('**/api/booth/chat',async route=>{arrived();await held;await route.fulfill({status,contentType:'application/json',body:JSON.stringify(status===200?{reply,selection:[{productId:'water',count:2}]}:{data:reply})});});
     const completed=page.waitForResponse(r=>r.url().endsWith('/api/booth/chat'));
+    void completed.catch(()=>{});
     await input.fill('请帮我选择');await page.getByRole('button',{name:'发送需求'}).click();await started;
     try{await action();}finally{release();}
     await completed;await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
-    await until(()=>input.isEnabled());
+    await until(()=>page.getByRole('button',{name:'发送需求',exact:true}).getAttribute('aria-busy').then(value=>value==='false'));
   }
   // P2: controlled delayed advice must not overwrite a newer manual selection.
-  await delayedAdvice(()=>page.getByRole('button',{name:'选择纪念品',exact:true}).click());
+  await delayedAdvice(()=>selectOnly(page,'纪念品'));
   assert.equal(await page.getByRole('button',{name:'选择纪念品',exact:true}).getAttribute('aria-pressed'),'true');
   assert.equal(await page.getByLabel('已选数量').innerText(),'1');
   assert.equal(requests.length,before+1);
-  await page.getByRole('button',{name:'选择矿泉水',exact:true}).click();
+  await selectOnly(page,'矿泉水');
   await page.getByRole('button',{name:'增加数量',exact:true}).click();
-  await delayedAdvice(()=>page.getByRole('button',{name:'增加数量',exact:true}).click());
-  assert.equal(await page.getByLabel('已选数量').innerText(),'3');
-  await delayedAdvice(async()=>{await page.getByRole('button',{name:'减少数量',exact:true}).click();await page.getByRole('button',{name:'减少数量',exact:true}).click();});
+  await delayedAdvice(()=>page.getByRole('button',{name:'减少数量',exact:true}).click());
   assert.equal(await page.getByLabel('已选数量').innerText(),'1');
+  await delayedAdvice(()=>page.getByRole('button',{name:'增加数量',exact:true}).click());
+  assert.equal(await page.getByLabel('已选数量').innerText(),'2');
+  await page.getByRole('button',{name:'减少数量',exact:true}).click();
   mode='rejected';const submittedBefore=requests.length;
   await delayedAdvice(async()=>{await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.rejected').waitFor();});
-  assert.equal(await page.getByLabel('已选数量').innerText(),'1');
+  await page.getByRole('region',{name:'取物确认',exact:true}).getByRole('heading',{name:'请选择物品',exact:true}).waitFor();
+  assert.equal(await page.locator('.product-card[aria-pressed="true"]').count(),0,'迟到建议不能重新填回已提交的选择');
   assert.equal(requests.length,submittedBefore+1);
   await delayedAdvice(async()=>{await page.getByRole('button',{name:'开始新体验',exact:true}).click();},'上一位访客的迟到建议');
   assert.equal(await page.locator('.chat-bubble').count(),0);
@@ -308,7 +313,7 @@ async function testStorageSubmission(browser,webUrl){
   assert.equal(await page.locator('.chat-error').count(),0);
   assert.equal(await input.inputValue(),'新访客的输入');
   await page.clock.setSystemTime(new Date(Date.now()+3600000));
-  mode='silent';await page.getByRole('button',{name:'选择纪念品',exact:true}).click();
+  mode='silent';await selectOnly(page,'纪念品');
   await delayedAdvice(async()=>{
     const response=await fetch(apiUrl+'/api/booth/requests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requestId:'other-browser-delayed-advice',productId:'water',count:1})});assert.equal(response.status,200);
     await page.locator('.task-panel.executing').waitFor();
@@ -322,7 +327,7 @@ async function testStorageSubmission(browser,webUrl){
   assert.equal((await (await fetch(apiUrl+'/api/booth')).json()).active.id,activeBeforeReset.id);
   assert.equal(await page.locator('.task-panel.executing').count(),1);
   assert.equal(await notices.count(),0,'开始新体验清空通知，但不重置任务去重记录');
-  await page.getByRole('button',{name:'选择纪念品',exact:true}).click();
+  await selectOnly(page,'纪念品');
   await delayedAdvice(async()=>{
     await fetch(apiUrl+'/api/task/finished',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({result:'success'})});await page.locator('.task-panel.succeeded').waitFor();
   });
@@ -355,7 +360,7 @@ async function testStorageSubmission(browser,webUrl){
   let releaseSnapshot,snapshotArrived;
   const heldSnapshot=new Promise(resolve=>releaseSnapshot=resolve),snapshotStarted=new Promise(resolve=>snapshotArrived=resolve);
   await page.route('**/api/booth',async route=>{const response=await route.fetch();snapshotArrived();await heldSnapshot;await route.fulfill({response});},{times:1});
-  mode='silent';await page.getByRole('button',{name:'选择矿泉水',exact:true}).click();
+  mode='silent';await selectOnly(page,'矿泉水');
   await page.getByRole('button',{name:'确认取物',exact:true}).click();await snapshotStarted;
   await page.locator('.task-panel.executing').waitFor();
   const staleDelivered=page.waitForResponse(response=>response.url().endsWith('/api/booth'));
@@ -395,6 +400,7 @@ async function testStorageSubmission(browser,webUrl){
   }finally{releaseStream();await reconnectContext.close();}
   assert.equal(chatRequests.length,10);
 
+  await selectOnly(page,'矿泉水');
   let desktopCatalogHeight;
   for(const [width,height] of [[1440,900],[1366,768],[1024,768],[768,1024],[390,844],[320,568]]){
     await page.setViewportSize({width,height});await page.evaluate(()=>window.scrollTo(0,0));
@@ -427,7 +433,7 @@ async function testStorageSubmission(browser,webUrl){
   try{
     for(const [width,height] of [[1440,900],[1366,768],[1024,768]]){
       await proportionPage.setViewportSize({width,height});await proportionPage.goto(webUrl);
-      await proportionPage.getByRole('button',{name:'选择矿泉水',exact:true}).click();
+      await selectOnly(proportionPage,'矿泉水');
       await proportionPage.getByRole('button',{name:'增加数量',exact:true}).click();
       const chat=await proportionPage.locator('.assistant-panel').boundingBox(),order=await proportionPage.getByRole('region',{name:'取物确认'}).boundingBox();
       assert(chat&&order);assert.equal(chat.height,540,'删除目录说明后仍保持桌面对话区高度稳定');
@@ -518,7 +524,7 @@ async function testStorageSubmission(browser,webUrl){
   await page.setViewportSize({width:1366,height:768});await page.reload();
   await page.getByRole('button',{name:'选择矿泉水',exact:true}).waitFor();
   assert.equal(await page.locator('.product-card').count(),28);
-  await page.getByRole('button',{name:'选择矿泉水',exact:true}).click();await page.evaluate(()=>window.scrollTo(0,0));
+  await selectOnly(page,'矿泉水');await page.evaluate(()=>window.scrollTo(0,0));
   const largerHeight=(await page.locator('.catalog-panel').boundingBox()).height;
   assert(Math.abs(largerHeight-desktopCatalogHeight)<1,'目录从4款增至28款不应增加目录卡或页面主体高度');
   const list=page.getByRole('region',{name:'可选物品列表'}),listBox=await list.boundingBox();
@@ -527,14 +533,14 @@ async function testStorageSubmission(browser,webUrl){
   await page.mouse.move(listBox.x+listBox.width/2,listBox.y+listBox.height/2);await page.mouse.wheel(0,500);
   await until(()=>list.evaluate(el=>el.scrollTop>0));
   await list.focus();await page.keyboard.press('End');
-  await page.getByRole('button',{name:'选择测试物品 24',exact:true}).click();
+  await selectOnly(page,'测试物品 24');
   await page.getByRole('region',{name:'取物确认'}).getByRole('heading',{name:'测试物品 24',exact:true}).waitFor();
   assert.equal(await page.getByLabel('已选数量').innerText(),'1');
   assert.equal(await page.getByRole('button',{name:'增加数量',exact:true}).isDisabled(),true,'末项沿用蔬菜礼盒的数量上限1');
   assert.equal(await page.evaluate(()=>window.scrollY),0,'在商品列表内浏览和选品不应推走首屏确认区');
   const lastConfirm=await page.getByRole('button',{name:'确认取物',exact:true}).boundingBox();
   assert(lastConfirm&&lastConfirm.y+lastConfirm.height<=768,'列表末项仍可在首屏确认');
-  await page.getByRole('button',{name:'选择矿泉水',exact:true}).click();
+  await selectOnly(page,'矿泉水');
   await page.getByRole('button',{name:'增加数量',exact:true}).click();
   assert.equal(await page.getByLabel('已选数量').innerText(),'2');
   assert.equal(requests.length,touchRequests,'浏览、选品和数量调整不能自动发单');

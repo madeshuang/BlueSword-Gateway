@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { BoothAdvice, BoothSnapshot, BoothStockProduct, BoothTask, DispatchCommand } from "@bluesword/contracts";
+import { taskSummary } from "@bluesword/contracts";
 import { ApplicationStorage } from "../storage.js";
 import type { BoothConfig } from "./config.js";
 
@@ -13,16 +14,32 @@ const unknownProgress = "暂时无法确认这次取物的进度，请查看页�
 export class BoothService {
   private listeners = new Set<() => void>();
   constructor(readonly storage: ApplicationStorage, readonly config: BoothConfig, private readonly transport: typeof fetch = fetch) {
-    const current = this.active();
+    // Upgrade saved task data in place; never send an old task again during upgrade.
     const db = storage.db;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      type LegacyTask = Omit<BoothTask, "items" | "command"> & {productId:string; command:{item:string;location:string;count:number}};
+      for (const saved of storage.list<BoothTask | LegacyTask>("booth_tasks")) {
+        if ("items" in saved) continue;
+        const {productId, command, ...rest} = saved;
+        storage.set("booth_tasks", saved.id, {...rest,
+          items:[{productId, name:command.item, location:command.location, count:command.count}],
+          command:{items:[command]}} satisfies BoothTask);
+      }
+      db.exec("COMMIT");
+    } catch (error) { if (db.isTransaction) db.exec("ROLLBACK"); throw error; }
+    const current = this.active();
     db.exec("BEGIN IMMEDIATE");
     try {
       for (const product of config.products) {
         if (storage.get<number>("booth_stock", product.id) === undefined) {
           // On first upgrade, keep the legacy active task's items unavailable too.
-          const reserved = current?.productId === product.id ? current.command.count : 0;
+          const reserved = current?.items.find(item => item.productId === product.id)?.count ?? 0;
           storage.set("booth_stock", product.id, Math.max(0, product.initialStock - reserved));
         }
+      }
+      if (current && storage.get("booth_refundable",current.id) === undefined) {
+        storage.set("booth_refundable",current.id,Object.fromEntries(current.items.map(item=>[item.productId,item.count])));
       }
       db.exec("COMMIT");
     } catch (error) { if (db.isTransaction) db.exec("ROLLBACK"); throw error; }
@@ -43,12 +60,15 @@ export class BoothService {
   }
   stockAdvice(advice: BoothAdvice): BoothAdvice {
     if (!advice.selection) return advice;
-    const product = this.config.products.find(p => p.id === advice.selection!.productId);
-    if (!product) throw new BoothError("物品不在目录中");
-    const available = this.availableCount(product.id);
-    return advice.selection.count > available
-      ? { reply: this.stockShortage(product.name,advice.selection.count,available), selection:null } : advice;
+    for (const line of advice.selection) {
+      const product = this.config.products.find(p => p.id === line.productId);
+      if (!product) throw new BoothError("物品不在目录中");
+      const available = this.availableCount(product.id);
+      if (line.count > available) return {reply:this.stockShortage(product.name,line.count,available),selection:null};
+    }
+    return advice;
   }
+
   active(): BoothTask | null {
     const id = this.storage.get<string>("booth", "active");
     const task = id ? this.storage.get<BoothTask>("booth_tasks", id) : undefined;
@@ -112,7 +132,7 @@ export class BoothService {
         resolved: "工作人员已核对并解除新任务限制，这不代表取物完成。领取情况请向现场工作人员确认。",
       };
       if (!conclusions[task.status]) return unknown;
-      const conclusion = `${task.command.item} × ${task.command.count}：${conclusions[task.status]}`;
+      const conclusion = `${taskSummary(task)}：${conclusions[task.status]}`;
       const replyOptions: Record<BoothTask["status"],string[]> = {
         submitting: [
           "还在等机器人接单，请稍候，先不要重复确认取物。",
@@ -137,13 +157,14 @@ export class BoothService {
       return unknown;
     }
   }
-  async dispatch(productId: unknown, count: unknown, requestId: unknown, token?: unknown): Promise<BoothTask> {
+  async dispatch(selection: unknown, requestId: unknown, token?: unknown): Promise<BoothTask> {
     // Legacy callers may dispatch without an experience; such tasks cannot later be claimed.
     const experience = token === undefined ? null : this.experience(token);
     if (typeof requestId !== "string" || !/^[a-zA-Z0-9_-]{8,100}$/.test(requestId)) throw new BoothError("请求标识不合法");
-    const product = this.config.products.find(p => p.id === productId);
-    if (!product || typeof count !== "number" || !Number.isSafeInteger(count) || count < 1 || count > product.maxCount) throw new BoothError("物品或数量不在可选范围内");
-    const command: DispatchCommand = { location: product.location, item: product.name, count };
+    if (!Array.isArray(selection) || selection.length < 1 || selection.length > 2) throw new BoothError("请选择一至两种物品，每单最多两件");
+    if (selection.some(line=>!line||typeof line.productId!=="string"||!Number.isSafeInteger(line.count)||line.count<1)) throw new BoothError("物品或数量不在可选范围内");
+    const chosen = selection.map(line=>({productId:line.productId as string,count:line.count as number})).sort((a,b)=>a.productId.localeCompare(b.productId));
+    if (new Set(chosen.map(line=>line.productId)).size !== chosen.length) throw new BoothError("同一种物品请合并数量");
     const db = this.storage.db;
     let task: BoothTask;
     db.exec("BEGIN IMMEDIATE");
@@ -152,18 +173,29 @@ export class BoothService {
       const prior = priorId ? this.storage.get<BoothTask>("booth_tasks", priorId) : undefined;
       if (prior) {
         if ((this.storage.get<string>("booth_task_experiences",prior.id) ?? null) !== (experience?.key ?? null)) throw new BoothError("这次取物属于另一段体验，请勿重复确认，联系工作人员核对",409);
-        if (prior.productId !== product.id || JSON.stringify(prior.command) !== JSON.stringify(command)) throw new BoothError("同一请求标识的参数不同",409);
+        if (JSON.stringify(prior.items.map(({productId,count})=>({productId,count})).sort((a,b)=>a.productId.localeCompare(b.productId))) !== JSON.stringify(chosen)) throw new BoothError("同一请求标识的参数不同",409);
         db.exec("COMMIT"); return prior;
       }
+      // New limits apply to new tasks; checking a saved request must never resend it.
+      if (chosen.reduce((sum,line)=>sum+line.count,0)>2) throw new BoothError("每单最多两件");
+      const items = chosen.map(line=>{
+        const product=this.config.products.find(p=>p.id===line.productId);
+        if (!product || line.count>product.maxCount) throw new BoothError("物品或数量不在可选范围内");
+        return {...line,name:product.name,location:product.location};
+      });
+      const command:DispatchCommand={items:items.map(line=>({location:line.location,item:line.productId,count:line.count}))};
       if (this.active() || this.storage.get("booth", "alert")) throw new BoothError("当前任务尚未结束，请等待或联系工作人员",409);
       const reason = this.dispatchBlockReason();
       if (reason) throw new BoothError(reason,503);
-      const available = this.availableCount(product.id);
-      if (count > available) throw new BoothError(this.stockShortage(product.name,count,available),409);
+      for (const item of items) {
+        const available = this.availableCount(item.productId);
+        if (item.count > available) throw new BoothError(this.stockShortage(item.name,item.count,available),409);
+      }
       const now = new Date().toISOString();
-      task = { id: randomUUID(), requestId, productId: product.id, command, status: "submitting", createdAt: now, updatedAt: now, message: "正在等待机器人接单" };
+      task = { id: randomUUID(), requestId, items, command, status: "submitting", createdAt: now, updatedAt: now, message: "正在等待机器人接单" };
       this.storage.set("booth_tasks", task.id, task);
-      this.storage.set("booth_stock", product.id, available - count);
+      this.storage.set("booth_refundable",task.id,Object.fromEntries(items.map(item=>[item.productId,item.count])));
+      for (const item of items) this.storage.set("booth_stock", item.productId, this.availableCount(item.productId) - item.count);
       this.storage.set("booth_requests", requestId, task.id);
       if (experience) {
         this.storage.set("booth_task_experiences",task.id,experience.key);
@@ -178,7 +210,7 @@ export class BoothService {
     try {
       const response = await this.transport(this.config.dispatchUrl!, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(command), signal: AbortSignal.timeout(this.config.robotTimeoutMs),
+        body: JSON.stringify(task.command), signal: AbortSignal.timeout(this.config.robotTimeoutMs),
         redirect: "error",
       });
       upstreamStatus = response.status;
@@ -248,12 +280,16 @@ export class BoothService {
     const db = this.storage.db;
     db.exec("BEGIN IMMEDIATE");
     try {
-      if (this.active() || this.storage.get("booth", "alert")) throw new BoothError("请先核对并处理当前任务或告警，再补货重置",409);
+      const active = this.active();
+      const refundable = active ? this.storage.get<Record<string,number>>("booth_refundable",active.id) ?? {} : {};
       for (const product of products) {
         const before = this.availableCount(product.id);
         this.storage.set("booth_stock",product.id,product.initialStock);
         this.audit("operator_stock_reset",{ productId:product.id, before, after:product.initialStock });
+        // A reset supersedes only this product's earlier reservation accounting.
+        delete refundable[product.id];
       }
+      if (active) this.storage.set("booth_refundable",active.id,refundable);
       db.exec("COMMIT");
     } catch (error) { if (db.isTransaction) db.exec("ROLLBACK"); throw error; }
     this.publish();
@@ -271,7 +307,9 @@ export class BoothService {
     db.exec("BEGIN IMMEDIATE");
     try {
       if (status === "rejected" && task.status === "submitting") {
-        this.storage.set("booth_stock", task.productId, this.availableCount(task.productId) + task.command.count);
+        const refundable = this.storage.get<Record<string,number>>("booth_refundable",task.id) ?? {};
+        for (const item of task.items) this.storage.set("booth_stock",item.productId,this.availableCount(item.productId)+(refundable[item.productId] ?? 0));
+        this.storage.set("booth_refundable",task.id,{});
       }
       this.storage.set("booth_tasks", task.id, { ...task, status, message, updatedAt: new Date().toISOString() });
       db.exec("COMMIT");

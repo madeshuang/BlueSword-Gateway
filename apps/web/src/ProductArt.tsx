@@ -1,6 +1,18 @@
 import type { BoothProduct } from "@bluesword/contracts";
+import { Flame, Club, PenLine, CupSoda, CircleDot, Feather, Wind, Cookie, Milk, CakeSlice, Popcorn } from "lucide-react";
+const siteIcons = { lighter_box: Flame, playing_card_box: Club, pen_box: PenLine, bottle: CupSoda,
+  table_tennis_ball_box: CircleDot, shuttlecock_tube: Feather, air_pump: Wind, aoliao: Cookie,
+  anmuxi: Milk, haoliyou: CakeSlice, shupian: Popcorn };
 export function ProductArt({product,small=false}:{product:BoothProduct;small?:boolean}) {
   if(product.imageUrl)return <img className="product-image" src={product.imageUrl} alt={product.name}/>;
+  if (Object.hasOwn(siteIcons, product.art)) {
+    const Icon = siteIcons[product.art as keyof typeof siteIcons];
+    return <svg viewBox="0 0 260 220" className="product-art" aria-hidden="true">
+      <ellipse cx="130" cy="188" rx="68" ry="12" fill="#244b57" opacity=".12"/>
+      <rect x="62" y="32" width="136" height="146" rx="24" fill="#fff" opacity=".85"/>
+      <Icon x="85" y="58" width="90" height="90" color="#244b57" strokeWidth="1.5"/>
+    </svg>;
+  }
   const id="art-"+product.id+(small?"-small":"-large");
   return <svg viewBox="0 0 260 220" className="product-art" aria-hidden="true"><defs>
     <linearGradient id={id+"-glass"}><stop stopColor="#fff"/><stop offset=".5" stopColor="#eaf4f5"/><stop offset="1" stopColor="#b1ccd5"/></linearGradient>

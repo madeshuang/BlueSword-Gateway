@@ -14,8 +14,8 @@ export class OpenAIBoothAssistant {
         taskStatusQuery: { type: "boolean" },
         selection: { anyOf: [
           { type: "null" },
-          { type: "object", additionalProperties: false, required: ["productId","count"],
-            properties: { productId: { type: "string", enum: this.config.products.map(p => p.id) }, count: { type: "integer", minimum: 1, maximum: Math.max(...this.config.products.map(p=>p.maxCount)) } } },
+          { type: "array", minItems: 1, maxItems: 2, items: { type: "object", additionalProperties: false, required: ["productId","count"],
+            properties: { productId: { type: "string", enum: this.config.products.map(p => p.id) }, count: { type: "integer", minimum: 1, maximum: 2 } } } },
         ] },
       },
     };

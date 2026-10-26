@@ -23,7 +23,7 @@ it.each(["http","simulator"] as const)("%s浏览器录音、草稿竞争和记�
   }));
   let aiCalls=0;
   app=createBoothApplication({...readBoothConfig(),mode,databasePath:":memory:",operatorToken:"fixture-operator",openaiKey:"fixture",speech:{enabled:true,provider:"ali",aliKey:"fixture",aliWorkspace:undefined,tencentAppId:undefined,tencentSecretId:undefined,tencentSecretKey:undefined}},
-    {webDirectory:resolve("apps/web/dist"),speechConnect:()=>new WebSocket("ws://127.0.0.1:"+(cloud!.address() as {port:number}).port),assistant:{async advise(){aiCalls++;return {reply:"请确认物品和数量",selection:{productId:"water",count:1},taskStatusQuery:false};}}});
+    {webDirectory:resolve("apps/web/dist"),speechConnect:()=>new WebSocket("ws://127.0.0.1:"+(cloud!.address() as {port:number}).port),assistant:{async advise(){aiCalls++;return {reply:"请确认物品和数量",selection:[{productId:"water",count:1}],taskStatusQuery:false};}}});
   const base="http://127.0.0.1:"+await app.listen(0);
   browser=await chromium.launch({headless:true,channel:"msedge",args:["--use-fake-ui-for-media-stream","--use-fake-device-for-media-stream"]});
   const context=await browser.newContext({permissions:["microphone"]}),page=await context.newPage();

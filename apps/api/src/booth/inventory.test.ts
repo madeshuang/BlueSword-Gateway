@@ -63,7 +63,7 @@ describe("剩余库存 HTTP 边界", () => {
     expect(await remaining()).toBe(1);
     const excess = await post("/api/booth/requests", order("inventory-excess", 2));
     expect(excess.status).toBe(409); expect((await excess.json()).data).toMatch(/剩余|只剩/);
-    expect(received).toEqual([{ location: "货架1-2层", item: "矿泉水", count: 2 }]);
+    expect(received).toEqual([{items:[{ location: "货架1-2层", item: "water", count: 2 }]}]);
   });
   it("明确拒绝退回预留，受理不明、故障及人工解除不自动补回", async () => {
     await start(await config());
@@ -100,17 +100,17 @@ describe("剩余库存 HTTP 边界", () => {
     await app!.close(); app = undefined; await start(configuration);
     expect(await remaining()).toBe(1); expect(received).toHaveLength(0);
   });
-  it("补货重置需要凭据及现场确认，任务和告警阻止重置，完成记录保留", async () => {
+  it("补货重置需要凭据及现场确认，任务和告警不阻止重置，完成记录保留", async () => {
     const configuration = await config(); await start(configuration);
     const resetBody = { productId: "water", confirmation: "已核对并补满库存" }, staff = { "X-Operator-Token": "test-operator" };
     const reset = (headers: Record<string,string> = staff, body: unknown = resetBody) => post("/api/booth/operator/stock/reset", body, headers);
     expect((await reset({})).status).toBe(403);
     expect((await reset(staff, { ...resetBody, confirmation: "" })).status).toBe(400);
     await post("/api/booth/requests", order("inventory-before-refill", 2));
-    expect((await reset()).status).toBe(409);
-    await post("/api/task/error", { message: "测试：库存未确认" }); expect((await reset()).status).toBe(409);
+    expect((await reset()).status).toBe(200);
+    await post("/api/task/error", { message: "测试：库存未确认" }); expect((await reset()).status).toBe(200);
     await post("/api/booth/operator/resolve", { confirmation: "已核对机器人停止" }, staff);
-    await post("/api/task/error", { message: "测试：全局告警" }); expect((await reset()).status).toBe(409);
+    await post("/api/task/error", { message: "测试：全局告警" }); expect((await reset()).status).toBe(200);
     await post("/api/booth/operator/resolve", { confirmation: "已核对机器人停止" }, staff);
     const history = (await snapshot()).tasks;
     const response = await reset(); expect(response.status).toBe(200);
@@ -133,7 +133,7 @@ describe("剩余库存 HTTP 边界", () => {
     expect((await snapshot()).products.map((p: {availableCount:number})=>p.availableCount)).toEqual([3,3,2,1]);
     expect((await snapshot()).tasks).toEqual(history);
   });
-  it("全部补货需要独立确认与凭据，任务和告警时拒绝且所有库存不变", async () => {
+  it("全部补货需要独立确认与凭据，任务和告警时可补货但不解除任务限制", async () => {
     const configuration = await config(); await start(configuration);
     await post("/api/booth/requests", order("bulk-guard-water", 2)); await post("/api/task/finished");
     await post("/api/booth/requests", {requestId:"bulk-guard-snack",productId:"snack",count:1}); await post("/api/task/finished");
@@ -145,10 +145,11 @@ describe("剩余库存 HTTP 边界", () => {
     };
     await denied(403, {}); await denied(403, {"X-Operator-Token":"incorrect"});
     await denied(400, staff, {confirmation:"已核对并补满库存"});
-    await post("/api/booth/requests", {requestId:"bulk-guard-active",productId:"gift",count:1}); await denied(409);
-    await post("/api/task/error", {message:"测试：批量补货前核对"}); await denied(409);
+    await post("/api/booth/requests", {requestId:"bulk-guard-active",productId:"gift",count:1}); expect((await post("/api/booth/operator/stock/reset-all",body,staff)).status).toBe(200);
+    expect((await snapshot()).active.status).toBe("executing");
+    await post("/api/task/error", {message:"测试：批量补货前核对"}); expect((await post("/api/booth/operator/stock/reset-all",body,staff)).status).toBe(200);
     await post("/api/booth/operator/resolve", {confirmation:"已核对机器人停止"}, staff);
-    await post("/api/task/error", {message:"测试：全局告警"}); await denied(409);
+    await post("/api/task/error", {message:"测试：全局告警"}); expect((await post("/api/booth/operator/stock/reset-all",body,staff)).status).toBe(200);
     await post("/api/booth/operator/resolve", {confirmation:"已核对机器人停止"}, staff);
     await app!.close(); app = undefined; await start({...configuration,operatorToken:undefined});
     await denied(503);
@@ -157,7 +158,7 @@ describe("剩余库存 HTTP 边界", () => {
     let sent: Record<string,any> = {};
     const transport: typeof fetch = async (_url, init) => {
       sent = JSON.parse(init!.body as string);
-      const output = JSON.stringify({ reply: "请确认两瓶水", selection: { productId: "water", count: 2 }, taskStatusQuery: false });
+      const output = JSON.stringify({ reply: "请确认两瓶水", selection: [{ productId: "water", count: 2 }], taskStatusQuery: false });
       return Response.json(provider === "openai"
         ? { status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: output }] }] }
         : { choices: [{ finish_reason: "stop", message: { content: output } }] });
@@ -172,12 +173,12 @@ describe("剩余库存 HTTP 边界", () => {
     expect(await remaining()).toBe(1); expect(received).toHaveLength(1);
   });
   it.each(["openai","deepseek"] as const)("%s回复等待期间库存变化时重新核对，售罄建议也不能选取", async provider => {
-    let changeDuringReply = true, suggestion = 3;
+    let changeDuringReply = true, suggestion = 2;
     const transport: typeof fetch = async () => {
       if (changeDuringReply) {
         await post("/api/booth/requests", order("inventory-during-ai", 2)); await post("/api/task/finished", {});
       }
-      const output = JSON.stringify({ reply:"请确认取物", selection:{productId:"water",count:suggestion}, taskStatusQuery:false });
+      const output = JSON.stringify({ reply:"请确认取物", selection:[{productId:"water",count:suggestion}], taskStatusQuery:false });
       return Response.json(provider === "openai"
         ? {status:"completed",output:[{type:"message",content:[{type:"output_text",text:output}]}]}
         : {choices:[{finish_reason:"stop",message:{content:output}}]});
@@ -186,7 +187,7 @@ describe("剩余库存 HTTP 边界", () => {
     const chat = () => post("/api/booth/chat",{messages:[{role:"user",content:"请给我水"}]}).then(response=>response.json());
     const stale = await chat(); expect(stale.selection).toBeNull(); expect(stale.reply).toMatch(/只剩 1/);
     changeDuringReply = false; suggestion = 1;
-    expect((await chat()).selection).toEqual({productId:"water",count:1});
+    expect((await chat()).selection).toEqual([{productId:"water",count:1}]);
     await post("/api/booth/requests",order("inventory-ai-last")); await post("/api/task/finished",{});
     const empty = await chat(); expect(empty.selection).toBeNull(); expect(empty.reply).toContain("已取完");
     expect((await post("/api/booth/requests",order("inventory-ai-empty"))).status).toBe(409);

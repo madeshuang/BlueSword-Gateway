@@ -14,7 +14,7 @@ if (process.argv.includes("--manual")) {
   process.env.BOOTH_HOST = "127.0.0.1";
   process.env.BOOTH_ROBOT_MODE = "simulator";
   process.env.BOOTH_DB_PATH = process.env.BOOTH_MANUAL_DB_PATH ?? ".data/booth-manual.sqlite";
-  process.env.BOOTH_CATALOG_PATH = "config/booth-catalog.example.json";
+  process.env.BOOTH_CATALOG_PATH = process.env.BOOTH_MANUAL_CATALOG_PATH?.trim() || "config/booth-catalog.example.json";
   process.env.BOOTH_CATALOG_CONFIRMED = "true";
   process.env.ROBOT_DISPATCH_URL = "http://127.0.0.1:" + (process.env.BOOTH_MANUAL_ROBOT_PORT ?? "4201") + "/api/task/dispatch";
   process.env.ROBOT_TIMEOUT_MS = "120000";
