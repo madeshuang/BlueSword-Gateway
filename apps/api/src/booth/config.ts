@@ -13,6 +13,8 @@ export interface BoothConfig {
   openaiKey: string | undefined; openaiModel: string; openaiTimeoutMs: number;
   taskReminderMs: number;
   operatorToken: string | undefined;
+  /** 仅由 --manual 启动入口启用，不由机器人地址或 simulator 模式推断。 */
+  manualRobot?: boolean;
   speech?: SpeechConfig;
 }
 export function readBoothConfig(): BoothConfig {

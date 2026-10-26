@@ -53,7 +53,8 @@ async function ready(url,process){await until(async()=>{if(process.exitCode!==nu
     await ask(duplicate,'暂时无法确认');passed.push('继承sessionStorage的新标签不认领原任务');
     const separate=await browser.newContext({viewport:{width:390,height:844}}),other=await separate.newPage();await visit(other);await ask(other,'暂时无法确认');passed.push('独立浏览器上下文不认领共享任务');
     await callback('/api/task/error',{message:'测试故障'});await b.locator('.task-panel.fault').waitFor();const fault=await ask(b,'出现异常');assert(fault.includes('尚未确认机器人是否停止'));
-    const resolved=await fetch(apiUrl+'/api/booth/operator/resolve',{method:'POST',headers:{'Content-Type':'application/json','X-Operator-Token':'test-staff'},body:JSON.stringify({confirmation:'已核对机器人停止'})});assert.equal(resolved.status,200);await ask(b,'这不代表取物完成');passed.push('异常与人工解除不冒充完成');
+    const recoverySnapshot=await (await fetch(apiUrl+'/api/booth')).json();
+    const resolved=await fetch(apiUrl+'/api/booth/operator/resolve',{method:'POST',headers:{'Content-Type':'application/json','X-Operator-Token':'test-staff'},body:JSON.stringify({confirmation:'已核对机器人停止',expectedTaskId:recoverySnapshot.active?.id??null,expectedAlert:recoverySnapshot.alert})});assert.equal(resolved.status,200);await ask(b,'这不代表取物完成');passed.push('异常与人工解除不冒充完成');
     await a.getByRole('button',{name:'开始新体验',exact:true}).click();await until(async()=>{const v=await experience(a);return !!v&&v.token!==original.token;});await ask(a,'暂时无法确认');await a.reload();await ask(a,'暂时无法确认');passed.push('开始新体验后及刷新后保持隔离');
     await ask(other,'暂时无法确认');
     await a.screenshot({path:join(output,'desktop-new-experience.png'),fullPage:true});await b.screenshot({path:join(output,'desktop-resolved.png'),fullPage:true});await other.screenshot({path:join(output,'narrow-unassociated.png'),fullPage:true});

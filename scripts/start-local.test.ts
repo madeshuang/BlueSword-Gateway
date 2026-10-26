@@ -81,11 +81,12 @@ it.each([false,true])("一键入口隔离练习数据库，按配置加载练习
       if((await(await fetch(robot+"/manual/state")).json()).phase==="pending")break;
       await new Promise(ok=>setTimeout(ok,20));
     }
-    expect((await(await fetch(robot+"/manual/state")).json()).item).toEqual({items:[{location:"待配置",item:"pen_box",count:1},{location:"待配置",item:"playing_card_box",count:1}]});
-    expect((await post(robot,"/manual/accept")).status).toBe(200);
+    const manualState=await(await fetch(robot+"/manual/state")).json();
+    expect(manualState.item).toEqual({items:[{location:"待配置",item:"pen_box",count:1},{location:"待配置",item:"playing_card_box",count:1}]});
+    expect((await post(robot,"/manual/accept",{taskId:manualState.taskId})).status).toBe(200);
     expect((await(await dispatch).json()).task.status).toBe("executing");
     expect((await(await fetch(gateway+"/api/booth")).json()).active.status).toBe("executing");
-    expect((await post(robot,"/manual/finished")).status).toBe(200);
+    expect((await post(robot,"/manual/finished",{taskId:manualState.taskId})).status).toBe(200);
     const state=await(await fetch(gateway+"/api/booth")).json();
     expect(state.tasks[0].status).toBe("succeeded");
     child.stdin!.write("q\n");expect(await exited).toBe(0);

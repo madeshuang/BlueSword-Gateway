@@ -23,7 +23,7 @@ if (process.argv.includes("--manual")) {
 const port = Number(process.env.PORT ?? 4100);
 if (!Number.isSafeInteger(port) || port < 0 || port > 65535) throw new Error("PORT 不合法");
 const host = process.env.BOOTH_HOST ?? "127.0.0.1";
-const app = createBoothApplication(readBoothConfig(), process.argv.includes("--serve-web") ? {webDirectory:resolve("apps/web/dist")} : {});
+const app = createBoothApplication({...readBoothConfig(),manualRobot:process.argv.includes("--manual")}, process.argv.includes("--serve-web") ? {webDirectory:resolve("apps/web/dist")} : {});
 await app.listen(port, host);
 console.log("BlueSword-Gateway API: http://" + host + ":" + port);
 let stopping = false;

@@ -63,29 +63,34 @@ export async function requestAdvice(request: AdviceRequest, products: BoothProdu
       response = await transport(request.url, { method: "POST", redirect: "error", signal,
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + request.key }, body: JSON.stringify(request.body) });
     } catch (error) {
-      const cause = error instanceof Error ? error.cause : undefined;
-      const code = cause && typeof cause === "object" && "code" in cause ? cause.code : undefined;
-      if (typeof code === "string" && ["UND_ERR_CONNECT_TIMEOUT","UND_ERR_SOCKET","ECONNRESET","ECONNREFUSED","ENOTFOUND","EAI_AGAIN","ETIMEDOUT","CERT_HAS_EXPIRED","DEPTH_ZERO_SELF_SIGNED_CERT","UNABLE_TO_VERIFY_LEAF_SIGNATURE","ERR_TLS_CERT_ALTNAME_INVALID"].includes(code)) connectionCode = code;
-      throw new BoothAiError("智能助手连接超时或暂不可达，请稍后再试",504,signal.aborted ? "timeout" : "connection");
+      connectionCode=safeConnectionCode(error);
+      throw new BoothAiError("暂时连不上助手，请稍后再试，也可以直接选择物品。",504,signal.aborted ? "timeout" : "connection");
     }
     upstreamStatus = response.status;
     if (!response.ok) {
       await response.body?.cancel().catch(()=>{});
       const authentication = response.status === 401 || response.status === 403;
       const configuration = [400,404,405,422].includes(response.status);
+      if(response.status===408||response.status===504)throw new BoothAiError("暂时连不上助手，请稍后再试，也可以直接选择物品。",502,"timeout",response.status);
       throw new BoothAiError(authentication ? "智能助手认证或权限异常，请联系工作人员" :
-        response.status === 429 ? "智能助手当前繁忙，请稍后再试" : "智能助手暂不可用，请直接选择物品",502,
+        response.status === 429 || response.status >= 500 ? "助手暂时繁忙，请稍后再试，也可以直接选择物品。" : "智能助手暂不可用，请直接选择物品",502,
         authentication ? "authentication" : response.status === 429 ? "rate_limit" : configuration ? "configuration" : "upstream",response.status);
+    }
+    let text:string;
+    try{text=await response.text();}
+    catch(error){
+      connectionCode=safeConnectionCode(error);
+      throw new BoothAiError("暂时连不上助手，请稍后再试，也可以直接选择物品。",504,signal.aborted?"timeout":"connection",response.status);
     }
     let advice: BoothModelAdvice;
     try {
-      const data: unknown = await response.json();
+      const data: unknown = JSON.parse(text);
       const safe = safeResponseMetadata(data,request.key);
       returnedModel = safe.returnedModel; usage = safe.usage;
       advice = validateAdvice(decode(data),products);
     } catch {
-      if (signal.aborted) throw new BoothAiError("智能助手连接超时或暂不可达，请稍后再试",504,"timeout",response.status);
-      throw new BoothAiError("智能助手回复暂时无法处理，请稍后重试或直接选择物品",502,"invalid_output",response.status);
+      if (signal.aborted) throw new BoothAiError("暂时连不上助手，请稍后再试，也可以直接选择物品。",504,"timeout",response.status);
+      throw new BoothAiError("这次没能正常回复，可以再试一次，或直接选择物品。",502,"invalid_output",response.status);
     }
     report("succeeded",null);
     return advice;
@@ -93,6 +98,12 @@ export async function requestAdvice(request: AdviceRequest, products: BoothProdu
     report("failed",error instanceof BoothAiError ? error.category : "internal");
     throw error;
   }
+}
+
+function safeConnectionCode(error:unknown):string|null {
+  const cause=error instanceof Error?error.cause:undefined;
+  const code=cause&&typeof cause==="object"&&"code" in cause?cause.code:undefined;
+  return typeof code==="string"&&["UND_ERR_CONNECT_TIMEOUT","UND_ERR_SOCKET","ECONNRESET","ECONNREFUSED","ENOTFOUND","EAI_AGAIN","ETIMEDOUT","CERT_HAS_EXPIRED","DEPTH_ZERO_SELF_SIGNED_CERT","UNABLE_TO_VERIFY_LEAF_SIGNATURE","ERR_TLS_CERT_ALTNAME_INVALID"].includes(code)?code:null;
 }
 
 function safeResponseMetadata(data: unknown, key: string): Pick<AiCallDiagnostics,"returnedModel" | "usage"> {

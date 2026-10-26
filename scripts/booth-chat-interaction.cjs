@@ -152,7 +152,7 @@ async function presentation(page){return page.evaluate(()=>{
     await heldChat(async started=>{
       await input.fill('  请帮我看看\n第二行需求  ');await send.click();await started;assert.equal(await input.inputValue(),'');
     },'测试失败：请重试',503);
-    await page.getByRole('alert').filter({hasText:'测试失败：请重试'}).waitFor();
+    await page.locator('.chat-bubble.assistant').getByText('测试失败：请重试',{exact:true}).waitFor();
     assert.equal(await input.inputValue(),'  请帮我看看\n第二行需求  ','失败时恢复原始输入，包括用户原来的空格和换行');
     assert((await input.boundingBox()).height>emptyHeight,'恢复多行输入后也应自动增高');passed.push('请求失败恢复原始输入');
     await heldChat(async started=>{
@@ -160,7 +160,7 @@ async function presentation(page){return page.evaluate(()=>{
       assert.equal(await input.isEnabled(),true,'等待回复时可编辑下一条草稿');
       await input.fill('这是新的未发送草稿');
     },'测试失败：保留新草稿',503);
-    await page.getByRole('alert').filter({hasText:'测试失败：保留新草稿'}).waitFor();
+    await page.locator('.chat-bubble.assistant').getByText('测试失败：保留新草稿',{exact:true}).waitFor();
     assert.equal(await input.inputValue(),'这是新的未发送草稿','失败恢复不得覆盖用户新输入');passed.push('失败不覆盖新草稿');
     const prompts=page.locator('.quick-prompts button'),beforeQuick= requests.length;
     for(const draft of ['已有未发送草稿','   ']){
@@ -184,17 +184,17 @@ async function presentation(page){return page.evaluate(()=>{
     await heldChat(async started=>{
       await page.getByRole('button',{name:'帮我选一件物品',exact:true}).click();await started;
     },'快捷提问失败',503);
-    await page.getByRole('alert').filter({hasText:'快捷提问失败'}).waitFor();assert.equal(await input.inputValue(),'帮我选一件物品');passed.push('快捷提问失败恢复本次问题');
+    await page.locator('.chat-bubble.assistant').getByText('快捷提问失败',{exact:true}).waitFor();assert.equal(await input.inputValue(),'帮我选一件物品');passed.push('快捷提问失败恢复本次问题');
     await heldChat(async started=>{
       await input.fill('不应恢复的旧输入');await send.click();await started;await input.fill('临时新草稿');await input.fill('');
     },'主动清空后失败',503);
-    await page.getByRole('alert').filter({hasText:'主动清空后失败'}).waitFor();assert.equal(await input.inputValue(),'','用户编辑后主动清空也不得恢复旧输入');passed.push('尊重用户主动清空');
+    await page.locator('.chat-bubble.assistant').getByText('主动清空后失败',{exact:true}).waitFor();assert.equal(await input.inputValue(),'','用户编辑后主动清空也不得恢复旧输入');passed.push('尊重用户主动清空');
     await heldChat(async started=>{
       await input.fill('上一轮体验的输入');await send.click();await started;
       await page.getByRole('button',{name:'开始新体验',exact:true}).click();await input.fill('新体验的草稿');
     },'旧体验迟到错误',503);
     await until(()=>page.locator('.chat-thinking').count().then(n=>n===0));assert.equal(await input.inputValue(),'新体验的草稿');
-    assert.equal(await page.locator('.chat-error').count(),0);passed.push('新体验隔离迟到错误');
+    assert.equal(await page.locator('.chat-bubble.assistant').getByText('旧体验迟到错误',{exact:true}).count(),0);passed.push('新体验隔离迟到错误');
     await page.screenshot({path:join(output,'preserved-draft.png'),fullPage:true});
     assert.deepEqual(errors,[]);
     writeFileSync(join(output,'report.json'),JSON.stringify({passed,chatRequests:requests.length,realAiCalls:0,robotCalls:0,readyStyle,waitingStyle},null,2));
