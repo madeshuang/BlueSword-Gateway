@@ -57,6 +57,7 @@
 .welcome{min-height:0;padding:22px 0;align-items:center}
 .welcome h1{font-size:30px;line-height:1.35}.welcome-copy>.eyebrow{margin:0 0 12px}.welcome-note{display:none}
 .experience-grid{align-items:start}.concierge-column{grid-template-columns:1fr;gap:14px;min-width:0}.service-column{display:grid;grid-template-columns:1fr;gap:14px;min-width:0}
+.selection-workspace{display:grid;gap:14px;min-width:0}
 .concierge-column .assistant-panel{display:flex;flex-direction:column;height:540px}.concierge-column .assistant-panel>:not(.chat-messages){flex-shrink:0}.concierge-column .chat-messages{flex:1;min-height:0;max-height:none}.chat-composer textarea{font-size:14px}.quick-prompts button{font-size:11px}
 .quantity-control{height:44px}.quantity-control button{height:42px;width:44px}.primary-button{min-height:44px}
 .catalog-panel{border:1px solid #e1e6da;background:#f5f7f0;padding:14px;min-width:0}.catalog-panel summary{cursor:pointer;font-size:14px;font-weight:550;color:#496746;min-height:44px;line-height:44px}.catalog-panel[open] summary{margin-bottom:12px;border-bottom:1px solid #e1e6da;padding-bottom:8px}
@@ -110,3 +111,71 @@
 @media(max-width:580px){.order-line{flex-wrap:wrap}.order-line .order-details{flex-basis:calc(100% - 90px)}}
 
 @media(min-width:900px){.order-line .order-details p:first-of-type{display:none}.service-column .order-panel{padding:18px}.order-line .order-details{min-width:85px}.order-line{gap:8px}}
+
+/* 现场宽屏使用可用宽度；普通窗口沿用现有布局。 */
+@media(min-width:1800px){
+  .experience-grid{--selection-height:clamp(620px,calc(100dvh - 360px),1700px)}
+  .booth-shell{max-width:none;padding-inline:clamp(48px,3vw,120px)}
+  .welcome,.experience-grid{gap:clamp(28px,1.5vw,56px)}
+  .welcome{padding-block:clamp(24px,2vh,40px)}
+  .welcome h1{font-size:clamp(34px,1.4vw,48px)}
+  .welcome-copy>p{font-size:clamp(15px,.65vw,20px)}
+  .welcome-copy>.eyebrow{font-size:clamp(12px,.55vw,18px)}
+  .welcome-copy>.eyebrow .bluesword-logo{width:clamp(130px,5.5vw,180px)}
+  .concierge-column .assistant-panel{height:var(--selection-height)}
+  .assistant-heading{padding:24px;gap:16px}
+  .assistant-heading h2{font-size:clamp(18px,.75vw,26px)}
+  .new-experience,.ai-label{font-size:clamp(13px,.55vw,18px);padding:9px 12px}
+  .chat-messages{padding:20px 24px}
+  .chat-welcome,.chat-bubble{font-size:clamp(18px,.75vw,26px);padding:14px 18px}
+  .quick-prompts{padding:14px 24px;gap:12px}
+  .quick-prompts button{font-size:clamp(14px,.6vw,20px);padding:10px 14px}
+  .chat-composer{margin:0 24px 16px;gap:12px}
+  .chat-composer textarea{font-size:clamp(18px,.75vw,26px);line-height:1.6;min-height:52px;max-height:180px;padding:8px 14px}
+  .chat-composer button,.chat-composer .speech-button{width:52px;height:52px}
+  .chat-composer button svg{width:22px;height:22px}
+  .assistant-footnote{font-size:clamp(12px,.5vw,17px);padding-bottom:20px}
+  .chat-error,.thinking-panel{font-size:clamp(15px,.6vw,20px)}
+  .service-column{align-content:start;gap:20px}
+  .selection-workspace{gap:20px}
+  .catalog-panel{padding:20px}
+  .catalog-panel summary{font-size:clamp(18px,.8vw,26px)}
+  .catalog-count{font-size:clamp(14px,.6vw,20px)}
+  .catalog-panel .category-tabs button{font-size:clamp(14px,.6vw,20px);height:44px;padding-inline:16px}
+  .catalog-panel .product-grid{grid-template-columns:repeat(auto-fill,minmax(clamp(190px,9vw,300px),1fr));height:clamp(280px,calc(100dvh - 800px),1050px);gap:16px;padding:4px 6px 6px 4px}
+  .catalog-panel .product-scene{height:clamp(140px,6vw,210px)}
+  .catalog-panel .product-copy{padding:14px 16px 18px}
+  .catalog-panel .product-copy h3{font-size:clamp(17px,.75vw,24px);overflow-wrap:anywhere}
+  .catalog-panel .product-copy p{font-size:clamp(12px,.5vw,18px)}
+  .product-category,.product-number{font-size:clamp(11px,.45vw,16px)}
+  .product-stock{font-size:clamp(12px,.5vw,18px);padding:5px 6px}
+  .choose-mark{width:36px;height:36px}
+  .service-column .order-panel{padding:24px;gap:20px}
+  .order-line{gap:16px}
+  .order-art{width:80px;height:80px}
+  .order-panel h3{font-size:clamp(20px,.85vw,28px)}
+  .service-column .order-panel p,.service-column .order-details .eyebrow{font-size:clamp(15px,.65vw,22px)}
+  .quantity-control{height:56px}
+  .quantity-control button{width:56px;height:54px}
+  .quantity-control output{font-size:20px;min-width:28px}
+  .primary-button{font-size:clamp(17px,.75vw,24px);min-height:56px;padding:14px 22px}
+  .task-panel{padding:22px;gap:10px 16px}
+  .task-panel h3{font-size:clamp(20px,.85vw,28px)}
+  .task-heading .eyebrow,.task-panel .task-status,.task-heading .task-updated{font-size:clamp(14px,.6vw,20px)}
+  .task-panel>p,.waiting-reminder,.service-column>.task-note,.feedback-error{font-size:clamp(15px,.65vw,22px)}
+  .experience-steps,.site-footer>p{font-size:clamp(13px,.55vw,18px)}
+  .operator-modal{width:clamp(520px,22vw,720px);max-width:calc(100vw - 40px)}
+  .operator-modal p,.operator-modal label,.operator-modal label.check-label,.operator-details,.operator-stock-targets{font-size:16px}
+  .operator-modal input[type=checkbox]{width:20px;height:20px;flex-shrink:0}
+}
+
+/* 高度充足时，确认区向上展开，物品列表使用剩余空间。 */
+@media(min-width:1800px) and (min-height:1000px){
+  .selection-workspace{height:var(--selection-height);grid-template-rows:minmax(0,1fr) auto}
+  .selection-workspace>.catalog-panel{display:flex;flex-direction:column;min-height:0}
+  .selection-workspace>.catalog-panel:not([open]){align-self:start}
+  .selection-workspace>.catalog-panel[open]::details-content{display:flex;flex-direction:column;flex:1;min-height:0}
+  .selection-workspace>.catalog-panel>div{display:flex;flex-direction:column;flex:1;min-height:0}
+  .selection-workspace .catalog-panel summary,.selection-workspace .category-tabs{flex-shrink:0}
+  .selection-workspace .product-grid{height:0;min-height:0;flex:1}
+}
