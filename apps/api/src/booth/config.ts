@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { BoothProduct } from "@bluesword/contracts";
+import { productArts } from "@bluesword/contracts";
 import type {SpeechConfig} from "./speech-provider.js";
 
 export interface BoothConfig {
@@ -65,7 +66,7 @@ export function validateCatalog(value: unknown): asserts value is BoothProduct[]
       ["id","name","category","subtitle","description","location","color"].some(k => typeof p[k] !== "string" || !p[k].trim()) ||
       !Number.isSafeInteger(p.maxCount) || p.maxCount < 1 || p.maxCount > 100 ||
       !Number.isSafeInteger(p.initialStock) || p.initialStock < 0 || p.initialStock > 100000 ||
-      !["water","snack","gift","greens"].includes(p.art) || ids.has(p.id)) throw new Error("目录字段缺失、重复或取值不合法");
+      !productArts.includes(p.art) || ids.has(p.id)) throw new Error("目录字段缺失、重复或取值不合法");
     if (!/^#[0-9a-f]{6}$/i.test(p.color)) throw new Error("目录 color 必须为六位十六进制色值");
     if (p.imageUrl !== undefined && (typeof p.imageUrl !== "string" || !p.imageUrl.startsWith("/products/") || p.imageUrl.includes(".."))) throw new Error("商品照片须使用 /products/ 下本地素材");
     ids.add(p.id);

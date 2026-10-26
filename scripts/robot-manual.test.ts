@@ -15,7 +15,7 @@ it("人工对端等待明确点击，展示原始接口记录，受理不会自�
   const post = (path:string,body:unknown={})=>fetch(base+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
   try {
     expect(await (await fetch(base)).text()).toContain("原始接口记录");
-    const raw = {location:"货架1-2层",item:"矿泉水",count:1};
+    const raw = {items:[{location:"货架1-2层",item:"water",count:1},{location:"货架2",item:"snack",count:1}]};
     let replied=false;
     const dispatch = post("/api/task/dispatch",raw).then(response=>{replied=true;return response;});
     let state: any;

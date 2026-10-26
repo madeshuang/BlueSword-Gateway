@@ -19,11 +19,11 @@ async function ready(url,process){await until(async()=>{if(process.exitCode!==nu
   try{
     robot=createServer(async(req,res)=>{
       let text='';for await(const c of req)text+=c;
-      assert.equal(req.url,'/api/task/dispatch');assert.deepEqual(Object.keys(JSON.parse(text)).sort(),['count','item','location']);robotCalls++;
+      assert.equal(req.url,'/api/task/dispatch');assert.deepEqual(Object.keys(JSON.parse(text)).sort(),['items']);robotCalls++;
       res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({success:true,data:'received'}));
     });await new Promise(r=>robot.listen(0,'127.0.0.1',r));
     const upstream='http://127.0.0.1:'+robot.address().port,apiUrl='http://127.0.0.1:'+await port(),webPort=await port(),webUrl='http://127.0.0.1:'+webPort;
-    const api=launch(['--import','tsx','apps/api/src/booth/index.ts'],{PORT:apiUrl.split(':').at(-1),BOOTH_DB_PATH:join(output,'state.sqlite'),BOOTH_ROBOT_MODE:'http',ROBOT_DISPATCH_URL:upstream+'/api/task/dispatch',BOOTH_CATALOG_CONFIRMED:'true',BOOTH_AI_PROVIDER:'openai',OPENAI_API_KEY:'',DEEPSEEK_API_KEY:'',BOOTH_TASK_REMINDER_MS:'120000'});
+    const api=launch(['--import','tsx','apps/api/src/booth/index.ts'],{PORT:apiUrl.split(':').at(-1),BOOTH_CATALOG_PATH:join(root,'scripts/fixtures/booth-catalog.json'),BOOTH_DB_PATH:join(output,'state.sqlite'),BOOTH_ROBOT_MODE:'http',ROBOT_DISPATCH_URL:upstream+'/api/task/dispatch',BOOTH_CATALOG_CONFIRMED:'true',BOOTH_AI_PROVIDER:'openai',OPENAI_API_KEY:'',DEEPSEEK_API_KEY:'',BOOTH_TASK_REMINDER_MS:'120000'});
     await ready(apiUrl+'/api/health',api);
     const web=launch([join(dirname(webRequire.resolve('vite/package.json')),'bin/vite.js'),'--host','127.0.0.1','--port',String(webPort),'--strictPort'],{VITE_API_TARGET:apiUrl},join(root,'apps/web'));await ready(webUrl,web);
     browser=await chromium.launch({headless:true,...(process.platform==='win32'?{channel:process.env.PLAYWRIGHT_CHANNEL||'msedge'}:{})});
@@ -40,7 +40,8 @@ async function ready(url,process){await until(async()=>{if(process.exitCode!==nu
     passed.push('完成状态保留十秒后恢复等待选择');
     assert.equal(await page.locator('.chat-bubble.assistant').filter({hasText:'矿泉水 × 1：已取好，请到交付处领取。'}).count(),1,'顶部复位保留完成回复');
     const idleSnapshot=await (await fetch(apiUrl+'/api/booth')).json();assert.deepEqual(idleSnapshot.tasks,completedSnapshot.tasks,'顶部复位保留任务记录');assert.equal(idleSnapshot.active,null);
-    assert.equal(await page.getByRole('button',{name:'确认取物',exact:true}).isEnabled(),true,'完成后可以继续确认取物');
+    await page.getByRole('region',{name:'取物确认',exact:true}).getByRole('heading',{name:'请选择物品',exact:true}).waitFor();
+    assert.equal(await page.locator('.order-panel .primary-button').count(),0,'完成后需要重新选择物品');
     await page.screenshot({path:join(output,'desktop-idle-after-completion.png'),fullPage:true});
     await page.setViewportSize({width:390,height:844});await page.screenshot({path:join(output,'narrow-idle-after-completion.png'),fullPage:true});await page.setViewportSize({width:1440,height:900});
     passed.push('顶部复位保留聊天完成回复及后台任务记录');

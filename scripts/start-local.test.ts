@@ -39,7 +39,7 @@ it("一键启动以.env选择AI，允许空密钥并拒绝已被占用的端口"
   }
 });
 
-it("一键入口隔离练习数据库，真实HTTP受理后等待完成，q退出释放两个服务",async()=>{
+it.each([false,true])("一键入口隔离练习数据库，按配置加载练习清单（指定清单：%s），接单后等待完成并正常退出",async(customCatalog)=>{
   const root=mkdtempSync(join(tmpdir(),"booth-launch-http-"));
   let child:ReturnType<typeof spawn>|undefined;
   try {
@@ -50,7 +50,12 @@ it("一键入口隔离练习数据库，真实HTTP受理后等待完成，q退�
     for(const app of ["api","web"])if(existsSync(resolve("apps",app,"node_modules")))symlinkSync(resolve("apps",app,"node_modules"),join(root,"apps",app,"node_modules"),"junction");
     copyFileSync(resolve("tsconfig.json"),join(root,"tsconfig.json"));
     copyFileSync(resolve("scripts/package.json"),join(root,"scripts/package.json"));
-    const settings="BOOTH_AI_PROVIDER=deepseek\nDEEPSEEK_API_KEY=\nPORT=1\nBOOTH_HOST=192.0.2.1\nROBOT_DISPATCH_URL=http://127.0.0.1:1/forbidden\nBOOTH_DB_PATH=must-not-open.sqlite\nBOOTH_MANUAL_DB_PATH=must-not-open.sqlite\n";
+    if(customCatalog){
+      const products=JSON.parse(readFileSync(resolve("config/booth-catalog.example.json"),"utf8"));
+      products[1].name="练习用扑克牌";
+      writeFileSync(join(root,"practice-catalog.json"),JSON.stringify(products));
+    }
+    const settings="BOOTH_AI_PROVIDER=deepseek\nDEEPSEEK_API_KEY=\nPORT=1\nBOOTH_HOST=192.0.2.1\nROBOT_DISPATCH_URL=http://127.0.0.1:1/forbidden\nBOOTH_DB_PATH=must-not-open.sqlite\nBOOTH_MANUAL_DB_PATH=must-not-open.sqlite\nBOOTH_CATALOG_PATH=must-not-load.json\n"+(customCatalog?"BOOTH_MANUAL_CATALOG_PATH=practice-catalog.json\n":"");
     writeFileSync(join(root,".env"),settings);
     child=spawn(process.execPath,[join(root,"scripts/start-local.cjs"),"--no-browser"],{stdio:["pipe","pipe","pipe"]});
     const exited=new Promise<number|null>(ok=>child!.once("exit",ok));
@@ -66,12 +71,17 @@ it("一键入口隔离练习数据库，真实HTTP受理后等待完成，q退�
     const post=(base:string,path:string,body:unknown={})=>fetch(base+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const gateway="http://127.0.0.1:4101",robot="http://127.0.0.1:4201";
     expect(await(await fetch(gateway)).text()).toContain('<div id="root">');
-    expect((await(await fetch(gateway+"/api/booth")).json()).ai).toMatchObject({provider:"DeepSeek",configured:false});
-    const dispatch=post(gateway,"/api/booth/requests",{productId:"water",count:1,requestId:"launcher-test-001"});
+    const initial=await(await fetch(gateway+"/api/booth")).json();
+    expect(initial.ai).toMatchObject({provider:"DeepSeek",configured:false});
+    expect(initial.products.map((p:{id:string})=>p.id)).toEqual(["lighter_box","playing_card_box","pen_box","bottle","table_tennis_ball_box","shuttlecock_tube","air_pump","aoliao","anmuxi","haoliyou","shupian"]);
+    expect(initial.products[1].name).toBe(customCatalog?"练习用扑克牌":"兰剑智能扑克牌");
+    const items=[{productId:"playing_card_box",count:1},{productId:"pen_box",count:1}];
+    const dispatch=post(gateway,"/api/booth/requests",{items,requestId:"launcher-test-001"});
     for(let n=0;n<100;n++){
       if((await(await fetch(robot+"/manual/state")).json()).phase==="pending")break;
       await new Promise(ok=>setTimeout(ok,20));
     }
+    expect((await(await fetch(robot+"/manual/state")).json()).item).toEqual({items:[{location:"待配置",item:"pen_box",count:1},{location:"待配置",item:"playing_card_box",count:1}]});
     expect((await post(robot,"/manual/accept")).status).toBe(200);
     expect((await(await dispatch).json()).task.status).toBe("executing");
     expect((await(await fetch(gateway+"/api/booth")).json()).active.status).toBe("executing");
@@ -136,9 +146,10 @@ it("正式一键入口使用.env的端口、机器人地址和数据库，未配
     expect(existsSync(join(root,".data/gateway-test.sqlite"))).toBe(true);
     expect(existsSync(join(root,".data/booth-manual.sqlite"))).toBe(false);
     const post=(route:string,body:unknown)=>fetch(base+route,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    const dispatched=await post("/api/booth/requests",{productId:"water",count:1,requestId:"gateway-launch-001"});
+    expect(state.products).toHaveLength(11);
+    const dispatched=await post("/api/booth/requests",{productId:"playing_card_box",count:1,requestId:"gateway-launch-001"});
     expect((await dispatched.json()).task.status).toBe("executing");
-    expect(received).toEqual([{path:"/api/task/dispatch",body:{location:"货架1-2层",item:"矿泉水",count:1}}]);
+    expect(received).toEqual([{path:"/api/task/dispatch",body:{items:[{location:"待配置",item:"playing_card_box",count:1}]}}]);
     expect((await post("/api/task/finished",{result:"success"})).status).toBe(200);
     expect((await(await fetch(base+"/api/booth")).json()).tasks[0].status).toBe("succeeded");
     child.stdin!.write("q\n");expect(await exited).toBe(0);

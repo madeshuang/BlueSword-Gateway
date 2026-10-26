@@ -7,7 +7,7 @@ import { BoothError, BoothService } from "./service.js";
 import { DeepSeekBoothAssistant } from "./deepseek.js";
 import { OpenAIBoothAssistant } from "./openai.js";
 
-import type { AiCallObserver } from "./advice.js";
+import { explicitlyExceedsOrderLimit, type AiCallObserver } from "./advice.js";
 import { builtWeb } from "./static.js";
 import {Diagnostics} from "./diagnostics.js";
 import {speechModels,speechConfigured,type SpeechConnect} from "./speech-provider.js";
@@ -93,7 +93,9 @@ export function createBoothApplication(config: BoothConfig, options: { webDirect
       service.error(body.message.trim()); return json(res,200,{code:1,data:"OK",success:true});
     }
     if (url.pathname === "/api/booth/requests") {
-      const task = await service.dispatch(body.productId,body.count,body.requestId,req.headers["x-booth-experience"]);
+      // Old pages can still check their saved single-item request after an upgrade.
+      const selection = body.items === undefined ? [{productId:body.productId,count:body.count}] : body.items;
+      const task = await service.dispatch(selection,body.requestId,req.headers["x-booth-experience"]);
       return json(res,200,{task});
     }
     if (url.pathname === "/api/booth/chat") {
@@ -106,6 +108,7 @@ export function createBoothApplication(config: BoothConfig, options: { webDirect
         try{diagnostics.linkSent(receipts,body.messages.at(-1).content);}
         catch{console.warn(JSON.stringify({event:"developer_record_failed",kind:"speech-send"}));}
       }
+      if (explicitlyExceedsOrderLimit(body.messages.at(-1).content)) return json(res,200,{reply:"每单最多两件，请重新确认想取的物品和数量。",selection:null});
       aiBusy = true;
       try {
         const token = req.headers["x-booth-experience"];

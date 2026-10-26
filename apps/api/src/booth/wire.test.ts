@@ -42,7 +42,7 @@ it("通信记录截断超过32KiB的正文，实际发送内容保持完整",asy
   let received="";
   robot=createServer(async(req,res)=>{for await(const chunk of req)received+=chunk;res.end(JSON.stringify({success:true,data:"received"}));});
   await new Promise<void>(r=>robot!.listen(0,"127.0.0.1",r));
-  const config=readBoothConfig();config.products=config.products.map(p=>p.id==="water"?{...p,name:"矿泉水".repeat(5000)}:p);
+  const config=readBoothConfig();config.products=config.products.map(p=>p.id==="water"?{...p,location:"货架".repeat(10000)}:p);
   app=createBoothApplication({...config,databasePath:":memory:",mode:"http",catalogConfirmed:true,operatorToken:"fixture",dispatchUrl:"http://127.0.0.1:"+(robot.address() as {port:number}).port+"/api/task/dispatch"});
   const base="http://127.0.0.1:"+await app.listen(0);
   await fetch(base+"/api/booth/requests",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({productId:"water",count:1,requestId:"large-body"})});

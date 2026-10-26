@@ -3,6 +3,7 @@ import { createServer, type ServerResponse, type IncomingHttpHeaders } from "nod
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { isDispatchCommand } from "../packages/contracts/src/booth.js";
 
 interface WireMessage { url:string; method:string; headers:Record<string,unknown>; headersScope:string; body:string }
 interface WireRecord { time:string; direction:string; request:WireMessage; response?:{status:number;headers:Record<string,unknown>;headersScope:string;body:string}; error?:string }
@@ -49,8 +50,7 @@ export function createManualRobot(callbackBase: string) {
       if(!body || typeof body!=="object" || Array.isArray(body)) return json(res,400,{error:"需要 JSON 对象"});
       if(url.pathname==="/api/task/dispatch") {
         const entry=record("网关 → 人工机器人",{url:"http://"+req.headers.host+url.pathname,method:"POST",headers:safeHeaders(req.headers),headersScope:"实际收到的头；敏感字段已隐藏",body:raw});
-        if(typeof body.location!=="string" || !body.location.trim() || typeof body.item!=="string" || !body.item.trim() ||
-          !Number.isSafeInteger(body.count) || body.count<1 || Object.keys(body).sort().join()!=="count,item,location") {
+        if(!isDispatchCommand(body)) {
           const value={code:1,data:"报文不合法",success:false};entry.response={status:400,headers:responseHeaders,headersScope:responseHeaderScope,body:JSON.stringify(value)};return json(res,400,value);
         }
         if(phase!=="idle") {

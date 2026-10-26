@@ -11,11 +11,14 @@ const {chromium}=require('playwright');
 const root=resolve(__dirname,'..'),webRequire=createRequire(join(root,'apps/web/package.json'));
 mkdirSync(join(root,'.tmp'),{recursive:true});
 const output=mkdtempSync(join(root,'.tmp','booth-chat-interaction-'));
-const products=JSON.parse(readFileSync(join(root,'config/booth-catalog.example.json'),'utf8'));
+const products=JSON.parse(readFileSync(join(root,'scripts/fixtures/booth-catalog.json'),'utf8'));
 const snapshot={products,tasks:[],active:null,waiting:null,alert:null,mode:'simulator',catalogConfirmed:false,
   dispatch:{ready:false,reason:null},operator:{configured:false},ai:{provider:'OpenAI',model:'browser-fixture',configured:true}};
 const streams=new Set(),requests=[],errors=[],passed=[];
 const api=createServer((req,res)=>{
+  if(req.method==='GET'&&req.url==='/api/booth/speech'){
+    res.writeHead(200,{'Content-Type':'application/json'});return res.end(JSON.stringify({configured:false}));
+  }
   if(req.method==='POST'&&req.url==='/api/booth/experiences'){
     req.resume();res.writeHead(200,{'Content-Type':'application/json'});return res.end(JSON.stringify({id:randomUUID(),token:randomBytes(32).toString('hex')}));
   }
@@ -34,7 +37,7 @@ async function until(check){for(let i=0;i<100;i++){if(await check())return;await
 async function presentation(page){return page.evaluate(()=>{
   const style=el=>{const s=getComputedStyle(el);return {background:s.backgroundColor,color:s.color,opacity:s.opacity,filter:s.filter};};
   return {sections:['.booth-shell','.assistant-panel','.chat-messages','.chat-composer'].map(selector=>({selector,...style(document.querySelector(selector))})),
-    send:style(document.querySelector('.chat-composer button')),inputDisabled:document.querySelector('.chat-composer textarea').disabled,
+    send:style(document.querySelector('.chat-composer button[aria-label="发送需求"]')),inputDisabled:document.querySelector('.chat-composer textarea').disabled,
     bootScreens:document.querySelectorAll('.boot-screen').length,modals:document.querySelectorAll('.modal-backdrop').length};
 });}
 (async()=>{
@@ -179,9 +182,9 @@ async function presentation(page){return page.evaluate(()=>{
     await page.getByText('普通提问成功',{exact:true}).waitFor();assert.equal(await input.inputValue(),'普通回复期间的新草稿');passed.push('普通成功响应不清空新草稿');
     await input.fill('');
     await heldChat(async started=>{
-      await page.getByRole('button',{name:'我想要一瓶水',exact:true}).click();await started;
+      await page.getByRole('button',{name:'帮我选一件物品',exact:true}).click();await started;
     },'快捷提问失败',503);
-    await page.getByRole('alert').filter({hasText:'快捷提问失败'}).waitFor();assert.equal(await input.inputValue(),'我想要一瓶水');passed.push('快捷提问失败恢复本次问题');
+    await page.getByRole('alert').filter({hasText:'快捷提问失败'}).waitFor();assert.equal(await input.inputValue(),'帮我选一件物品');passed.push('快捷提问失败恢复本次问题');
     await heldChat(async started=>{
       await input.fill('不应恢复的旧输入');await send.click();await started;await input.fill('临时新草稿');await input.fill('');
     },'主动清空后失败',503);
