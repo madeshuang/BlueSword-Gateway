@@ -62,21 +62,21 @@ async function ready(url,child){await until(async()=>{if(child.exitCode!==null)t
   });}
   const empty=await selectionLayout();
   assert(Math.abs(empty.order.bottom-empty.chat.bottom)<=2,'未选择物品时确认区底部与聊天面板对齐');
-  await choose('兰剑智能扑克牌');const single=await selectionLayout();
+  await choose('可水洗掼蛋扑克牌');const single=await selectionLayout();
   await page.screenshot({path:join(output,'alignment-single.png'),scale:'css'});
   await order.getByRole('button',{name:'增加数量',exact:true}).click();const sameKind=await selectionLayout();
-  await order.getByRole('button',{name:'减少数量',exact:true}).click();await choose('兰剑智能圆珠笔');const twoKinds=await selectionLayout();
+  await order.getByRole('button',{name:'减少数量',exact:true}).click();await choose('高端签字笔');const twoKinds=await selectionLayout();
   await page.screenshot({path:join(output,'alignment-two-kinds.png'),scale:'css'});
   measurements.push({selectionAlignment:{empty,single,sameKind,twoKinds}});
   assert(Math.abs(single.order.bottom-single.chat.bottom)<=2,'单种物品确认区与聊天面板底部应对齐 '+JSON.stringify(single));
   assert(Math.abs(twoKinds.order.bottom-single.order.bottom)<=2,'增加第二种物品不应向下推动确认区 '+JSON.stringify({single,twoKinds}));
   assert(Math.abs(sameKind.order.bottom-single.order.bottom)<=2,'同种两件保持确认区位置');
   assert(twoKinds.list.height<single.list.height,'第二种物品增加的高度应由列表让出');
-  await order.getByRole('button',{name:'移除兰剑智能扑克牌',exact:true}).click();await order.getByRole('button',{name:'移除兰剑智能圆珠笔',exact:true}).click();
+  await order.getByRole('button',{name:'移除可水洗掼蛋扑克牌',exact:true}).click();await order.getByRole('button',{name:'移除高端签字笔',exact:true}).click();
   passed.push('未选、一件、同种两件和两种各一件的确认区底部稳定，列表随确认内容伸缩');
   for(const [width,height] of [[2560,1440],[2560,1300],[3840,2160],[1920,1080],[1920,900],[1799,1000],[1440,900],[1024,768],[390,844]]){
    await page.setViewportSize({width,height});await page.evaluate(()=>window.scrollTo(0,0));
-   await choose('兰剑智能扑克牌');await choose('兰剑智能圆珠笔');
+   await choose('可水洗掼蛋扑克牌');await choose('高端签字笔');
    const confirm=page.getByRole('button',{name:'确认取物',exact:true});
    const beforeScroll=await confirm.boundingBox();
    await accessible(confirm);
@@ -91,29 +91,29 @@ async function ready(url,child){await until(async()=>{if(child.exitCode!==null)t
    }
    await page.evaluate(()=>window.scrollTo(0,0));
    await page.screenshot({path:join(output,'two-items-'+width+'x'+height+'.png'),scale:'css'});
-   await order.getByRole('button',{name:'移除兰剑智能扑克牌',exact:true}).click();await order.getByRole('button',{name:'移除兰剑智能圆珠笔',exact:true}).click();
+   await order.getByRole('button',{name:'移除可水洗掼蛋扑克牌',exact:true}).click();await order.getByRole('button',{name:'移除高端签字笔',exact:true}).click();
    // The last product remains reachable even when this window needs list/page scrolling.
    await choose('乐事薯片');await order.getByRole('heading',{name:'乐事薯片',exact:true}).waitFor();await order.getByRole('button',{name:'移除乐事薯片',exact:true}).click();
    passed.push(width+'×'+height+'：双物品确认可操作，末项可浏览，无横向溢出');
   }
   await page.setViewportSize({width:2560,height:1440});await page.evaluate(()=>window.scrollTo(0,0));
-  await choose('兰剑智能扑克牌');await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.executing').waitFor();
+  await choose('可水洗掼蛋扑克牌');await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.executing').waitFor();
   assert.deepEqual(received.at(-1),{items:[{location:'待配置',item:'playing_card_box',count:1}]});
   await post('/api/task/finished');await page.locator('.task-panel.succeeded').waitFor();
-  await choose('兰剑智能扑克牌');await order.getByRole('button',{name:'增加数量',exact:true}).click();
+  await choose('可水洗掼蛋扑克牌');await order.getByRole('button',{name:'增加数量',exact:true}).click();
   await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.executing').waitFor();
   assert.deepEqual(received.at(-1),{items:[{location:'待配置',item:'playing_card_box',count:2}]});
   await post('/api/task/finished');await page.locator('.task-panel.succeeded').waitFor();
   await post('/api/booth/operator/stock/reset-all',{confirmation:'已核对并补满全部库存'},true);
-  await choose('兰剑智能扑克牌');await choose('兰剑智能圆珠笔');hold=true;
+  await choose('可水洗掼蛋扑克牌');await choose('高端签字笔');hold=true;
   await page.getByRole('button',{name:'确认取物',exact:true}).click();await page.locator('.task-panel.submitting').waitFor();await until(()=>!!pendingReply);
   assert.deepEqual(received.at(-1),{items:[{location:'待配置',item:'pen_box',count:1},{location:'待配置',item:'playing_card_box',count:1}]});
-  await order.getByRole('heading',{name:'请选择物品',exact:true}).waitFor();await choose('水杯');
+  await order.getByRole('heading',{name:'请选择物品',exact:true}).waitFor();await choose('USB防风打火机');
   await order.getByRole('button',{name:'增加数量',exact:true}).click();
   assert.equal(await order.getByRole('button',{name:'请等待当前任务',exact:true}).isDisabled(),true);
   pendingReply.end(JSON.stringify({success:true,data:'received'}));pendingReply=undefined;hold=false;
   await page.locator('.task-panel.executing').waitFor();assert.equal(await order.getByLabel('已选数量').textContent(),'2');
-  await order.getByRole('heading',{name:'水杯',exact:true}).waitFor();
+  await order.getByRole('heading',{name:'USB防风打火机',exact:true}).waitFor();
   passed.push('三种取物组合保持正确；等待时可改选，迟到接单回复保留新选择');
   const reminder=page.getByRole('alert').filter({hasText:'等待时间较长'});await reminder.waitFor();
   const staff=reminder.getByRole('button',{name:'联系工作人员核对',exact:true});await accessible(staff);await staff.click();
@@ -133,7 +133,7 @@ async function ready(url,child){await until(async()=>{if(child.exitCode!==null)t
   await dialog.getByRole('button',{name:'解除新任务限制',exact:true}).click();await page.locator('.task-panel.resolved').waitFor();await close.click();
   await page.getByRole('button',{name:'开始新体验',exact:true}).click();
   await page.route('**/api/booth/requests',route=>route.abort(),{times:1});
-  await choose('水杯');await page.getByRole('button',{name:'确认取物',exact:true}).click();
+  await choose('USB防风打火机');await page.getByRole('button',{name:'确认取物',exact:true}).click();
   await page.locator('.feedback-error').waitFor();const recheck=page.getByRole('button',{name:'核对这次取物',exact:true});await accessible(recheck);
   await page.screenshot({path:join(output,'unknown-request-2560.png'),scale:'css'});
   await recheck.click();await page.locator('.task-panel.executing').waitFor();await post('/api/task/finished');await page.locator('.task-panel.succeeded').waitFor();
