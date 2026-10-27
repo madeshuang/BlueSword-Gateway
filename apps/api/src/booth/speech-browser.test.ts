@@ -107,6 +107,7 @@ it.each(["http", "simulator"] as const)(
     );
     const base = "http://127.0.0.1:" + (await app.listen(0));
     browser = await chromium.launch({
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? {executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH} : {}),
       headless: true,
       args: [
         "--use-fake-ui-for-media-stream",
@@ -116,6 +117,7 @@ it.each(["http", "simulator"] as const)(
     const context = await browser.newContext({ permissions: ["microphone"] }),
       page = await context.newPage();
     await page.goto(base);
+    await page.getByRole("switch", { name: "识别后自动发送" }).uncheck();
     await page
       .getByRole("button", { name: "开始语音输入", exact: true })
       .click({ timeout: 3000 });
@@ -129,8 +131,6 @@ it.each(["http", "simulator"] as const)(
     const draft = page.getByRole("textbox", { name: "告诉助手你的需求" });
     await expect.poll(() => draft.inputValue()).toBe("两瓶矿泉水");
     expect(aiCalls).toBe(0);
-    await expect.poll(() => page.locator(".speech-feedback").count(), {timeout: 6000}).toBe(0);
-    expect(await draft.inputValue()).toBe("两瓶矿泉水");
     await draft.fill("一瓶矿泉水");
     await page.getByRole("button", { name: "发送需求", exact: true }).click();
     await expect.poll(() => aiCalls).toBe(1);
@@ -163,7 +163,6 @@ it.each(["http", "simulator"] as const)(
       .getByRole("button", { name: "取消语音输入", exact: true })
       .click();
     expect(await draft.inputValue()).toBe("保留草稿");
-    expect(await page.locator(".speech-feedback").count()).toBe(0);
     await begin();
     await draft.fill("录音期间的新草稿");
     await page
@@ -173,9 +172,6 @@ it.each(["http", "simulator"] as const)(
       .getByRole("status")
       .filter({ hasText: "输入内容已更改" })
       .waitFor();
-    expect(await draft.inputValue()).toBe("录音期间的新草稿");
-    await page.getByRole("button", {name: "关闭语音提示", exact: true}).click();
-    expect(await page.locator(".speech-feedback").count()).toBe(0);
     expect(await draft.inputValue()).toBe("录音期间的新草稿");
     await begin();
     await page.getByRole("button", { name: "发送需求", exact: true }).click();
@@ -274,6 +270,7 @@ it("未检测到讲话自动退出，麦克风权限拒绝不清空已有草稿"
   );
   const base = "http://127.0.0.1:" + (await app.listen(0));
   browser = await chromium.launch({
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? {executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH} : {}),
     headless: true,
     args: [
       "--use-fake-ui-for-media-stream",
@@ -320,9 +317,6 @@ it("未检测到讲话自动退出，麦克风权限拒绝不清空已有草稿"
       return data.records[0];
     })
     .toMatchObject({ status: "error", stopReason: "microphone-denied" });
-  await page.getByRole("button", {name: "关闭语音提示", exact: true}).click();
-  expect(await page.locator(".speech-feedback").count()).toBe(0);
-  expect(await draft.inputValue()).toBe("已有草稿");
 }, 35000);
 it("自动停止资源缺失时可手动停止，连续录音达到60秒仍能正常收尾", async () => {
   webFixture = mkdtempSync(resolve(tmpdir(), "speech-assets-"));
@@ -387,6 +381,7 @@ it("自动停止资源缺失时可手动停止，连续录音达到60秒仍能�
   );
   const base = "http://127.0.0.1:" + (await app.listen(0));
   browser = await chromium.launch({
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? {executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH} : {}),
     headless: true,
     args: [
       "--use-fake-ui-for-media-stream",
@@ -395,6 +390,7 @@ it("自动停止资源缺失时可手动停止，连续录音达到60秒仍能�
   });
   const page = await browser.newPage({ permissions: ["microphone"] });
   await page.goto(base);
+  await page.getByRole("switch", { name: "识别后自动发送" }).uncheck();
   await page
     .getByRole("button", { name: "开始语音输入", exact: true })
     .click({ timeout: 5000 });
@@ -428,3 +424,52 @@ it("自动停止资源缺失时可手动停止，连续录音达到60秒仍能�
     stopReason: "limit",
   });
 }, 90000);
+it.each(['http','simulator'] as const)('%s：连续语音识别七轮均弹出核对清单，自动发送开关持久化且保护修改中的草稿',async(mode)=>{
+  cloud=new WebSocketServer({port:0,host:'127.0.0.1'});await once(cloud,'listening');
+  let hold=false, release:undefined|(()=>void);
+  cloud.on('connection',ws=>ws.on('message',(raw,binary)=>{
+    if(binary)return;const data=JSON.parse(raw.toString());
+    if(data.header?.action==='run-task')ws.send(JSON.stringify({header:{event:'task-started'}}));
+    if(data.header?.action==='finish-task'){
+      const send=()=>{ws.send(JSON.stringify({payload:{output:{sentence:{sentence_id:0,text:'帮我拿一筒羽毛球。',sentence_end:true}}}}));ws.send(JSON.stringify({header:{event:'task-finished'}}));};
+      if(hold)release=send;else send();
+    }
+  }));
+  let calls=0;
+  const config=readBoothConfig();
+  app=createBoothApplication({...config,mode,manualRobot:mode==='simulator',databasePath:':memory:',catalogConfirmed:true,dispatchUrl:'http://127.0.0.1:1/never-dispatch',openaiKey:'fixture',operatorToken:'fixture',products:[{...config.products[0]!,id:'shuttlecock_tube',name:'羽毛球'}],speech:{...config.speech!,enabled:true,provider:'ali',aliKey:'fixture'}},{
+    webDirectory:resolve('apps/web/dist'),speechConnect:()=>new WebSocket('ws://127.0.0.1:'+(cloud!.address() as {port:number}).port),
+    assistant:{advise:async()=>{calls++;return {reply:'已选一筒羽毛球，请在界面确认后提交。',selection:null,taskStatusQuery:false};}},
+  });
+  const base='http://127.0.0.1:'+await app.listen(0);
+  const executablePath=process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+  browser=await chromium.launch({headless:true,...(executablePath?{executablePath}:{}),args:['--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream']});
+  const context=await browser.newContext({permissions:['microphone']});const page=await context.newPage();page.setDefaultTimeout(10000);
+  await page.goto(base);
+  const auto=page.getByRole('switch',{name:'识别后自动发送'}),draft=page.getByRole('textbox',{name:'告诉助手你的需求'});
+  const record=async()=>{await page.getByRole('button',{name:'开始语音输入',exact:true}).click();await page.getByRole('button',{name:'停止语音输入',exact:true}).click();};
+  expect(await auto.isChecked()).toBe(true);
+  expect(await page.locator('.voice-auto-send').innerText()).toBe('');
+  await record();
+  const dialog=page.getByRole('dialog',{name:'确认这份取物清单'});
+  await dialog.getByRole('button',{name:'暂不取物',exact:true}).click();
+  await auto.check();
+  for(let round=2;round<=7;round++){
+    await record();await dialog.waitFor();expect(calls).toBe(round);
+    expect(await dialog.getByText('羽毛球',{exact:true}).isVisible()).toBe(true);
+    expect(await draft.inputValue()).toBe('');
+    await dialog.getByRole('button',{name:'暂不取物',exact:true}).click();
+  }
+  expect(app.service.snapshot().tasks).toHaveLength(0);
+  const records=await(await fetch(base+'/api/booth/developer/speech',{headers:{'X-Operator-Token':'fixture'}})).json();
+  expect(records.records).toHaveLength(7);expect(records.records.every((r:{sentText:string})=>r.sentText==='帮我拿一筒羽毛球。')).toBe(true);
+  await page.reload();await auto.waitFor();expect(await auto.isChecked()).toBe(true);
+  hold=true;await record();await expect.poll(()=>!!release).toBe(true);
+  await draft.fill('不要覆盖这份草稿');release!();
+  await page.getByRole('status').filter({hasText:'输入内容已更改'}).waitFor();
+  expect(await draft.inputValue()).toBe('不要覆盖这份草稿');expect(calls).toBe(7);
+  hold=false;await auto.uncheck();await draft.fill('');await record();
+  await expect.poll(()=>draft.inputValue()).toBe('帮我拿一筒羽毛球。');expect(calls).toBe(7);
+  await page.screenshot({path:'.tmp/ui-preview/voice-auto-send.png'});
+  await page.reload();await auto.waitFor();expect(await auto.isChecked()).toBe(false);
+},90000);

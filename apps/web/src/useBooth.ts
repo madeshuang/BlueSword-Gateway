@@ -6,6 +6,7 @@ import type {
   BoothTask,
   BoothChatMessage,
   BoothAdvice,
+  BoothSelectionClarification,
   BoothSelectionItem,
 } from "@bluesword/contracts";
 import { taskSummary } from "@bluesword/contracts";
@@ -56,9 +57,10 @@ type Feedback = {
 type DisplayStatus = BoothTask["status"] | "idle" | "alert";
 type ConversationMessage = BoothChatMessage | ThinkingMessage;
 function taskThinkingContent(task: Pick<BoothTask, "items" | "status">) {
-  return task.status === "submitting"
+  const status = task.status === "submitting"
     ? "正在等待机器人回复是否接单。"
     : "机器人已接单，正在等待取物结果。";
+  return [status, "取物计划：按清单定位货架并识别物品。", "取物计划：抓取后送到交付处。", status].join("\n");
 }
 export const taskNotices: Partial<Record<BoothTask["status"], string>> = {
   executing: "已接单，请稍候。",
@@ -141,6 +143,7 @@ function resizeComposer(input: HTMLTextAreaElement) {
     input.scrollHeight + input.offsetHeight - input.clientHeight + "px";
 }
 export function useBooth() {
+  const [clarification,setClarification]=useState<BoothSelectionClarification|null>(null);
   const [proposalVersion, setProposalVersion] = useState(0);
   const [, setWaitingTick] = useState(0);
   const waitingAnchor = useRef<{
@@ -155,6 +158,7 @@ export function useBooth() {
     [feedback, setFeedback] = useState<Feedback | null>(null),
     [pending, setPending] = useState<Pending | null>(loadPending);
   const error = feedback?.message ?? "";
+  useEffect(()=>{setClarification(null);},[selection,pending,state?.active?.id,state?.alert]);
   function setError(
     message: string,
     source: Feedback["source"] = "other",
@@ -671,6 +675,12 @@ export function useBooth() {
   async function chat(input = text, fromQuickPrompt = false) {
     if (!input.trim() || thinking || (fromQuickPrompt && text.length > 0))
       return;
+    const spoken=input.trim().replace(/[。！!]+$/, "");
+    const choice=clarification?.choices.find(choice=>choice.label===spoken ||
+      (choice.kind==="add" && /^(一起取|都要|一起要|追加)$/.test(spoken)) ||
+      (choice.kind==="replace" && /^(替换|换成新的)$/.test(spoken)));
+    const selectionDecision=choice&&clarification?{kind:choice.kind,candidate:clarification.candidate}:undefined;
+    setClarification(null);
     voice.current?.cancel("sent-draft");
     const speechRecords = voice.current?.takeReceipts() ?? [];
     setThinking(true);
@@ -700,8 +710,7 @@ export function useBooth() {
         id: thoughtId,
         kind: "chat",
         phase: "running",
-        content:
-          "我会先结合你的需求和可选物品整理回复。如果需要取物，请先确认物品和数量，再交由机器人完成取送。",
+        content: "正在回复…",
       },
     ]);
     try {
@@ -709,7 +718,7 @@ export function useBooth() {
       if (experience !== experienceVersion.current) return;
       const advice = await api<BoothAdvice>(
         "/api/booth/chat",
-        { messages: next.slice(-11), speechRecords },
+        { messages: next.slice(-11), speechRecords, currentSelection: pending || state?.active ? [] : selection, selectionDecision },
         credential ? { "X-Booth-Experience": credential.token } : undefined,
       );
       if (experience !== experienceVersion.current) return;
@@ -723,9 +732,12 @@ export function useBooth() {
       ]);
       const latestState = currentState.current,
         proposal = advice.selection;
+      if(advice.clarification && !blocked && !latestState?.active && !latestState?.alert && !pending && !busy && version===selectionVersion.current && taskId===latestState?.tasks[0]?.id) {
+        setClarification(advice.clarification);
+      }
       if (
         proposal &&
-        selectionProblem(proposal, latestState?.products ?? []) === null &&
+        (proposal.length === 0 || selectionProblem(proposal, latestState?.products ?? []) === null) &&
         !blocked &&
         !latestState?.active &&
         !latestState?.alert &&
@@ -736,7 +748,7 @@ export function useBooth() {
       ) {
         selectionVersion.current++;
         setSelection(proposal);
-        setProposalVersion((value) => value + 1);
+        if (proposal.length) setProposalVersion((value) => value + 1);
       }
     } catch (e) {
       if (experience === experienceVersion.current) {
@@ -798,11 +810,19 @@ export function useBooth() {
       setOperatorBusy(false);
     }
   }
+  function beginSelectionConversation() {
+    if (!selectedItems.length) return;
+    setMessages(current => current.length ? current : [{
+      role: "assistant",
+      content: "已整理你选择的物品，请核对清单后确认取物。",
+    }]);
+  }
   return {
     state,
     connected,
     selection,
     selectedItems,
+    clarification,
     total,
     invalidSelection,
     selectionError,
@@ -843,6 +863,7 @@ export function useBooth() {
     removeItem,
     submit,
     startExperience,
+    beginSelectionConversation,
     chat,
     resolve,
     resetStock,

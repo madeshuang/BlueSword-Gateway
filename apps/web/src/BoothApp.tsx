@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   ArrowUp,
@@ -20,6 +20,8 @@ import blueBrain from "./assets/blue-brain.jpg";
 import blueswordLogo from "./assets/bluesword-logo.svg";
 import { globalAlertNotice, labels, taskNotices, useBooth } from "./useBooth";
 import { VoiceInput } from "./speech/VoiceInput";
+import { ThinkingPanel } from "./ThinkingPanel";
+import { TaskChecklist } from "./conversation/TaskChecklist";
 import { Modal } from "./conversation/Modal";
 import {
   CatalogDialog,
@@ -37,15 +39,37 @@ export function BoothApp() {
     null,
   );
   const [collapsed, setCollapsed] = useState(false);
+  const [voiceAutoSend,setVoiceAutoSend]=useState(()=>{
+    try{return localStorage.getItem("bluesword.voice-auto-send")!=="false";}catch{return true;}
+  });
+  function changeVoiceAutoSend(value:boolean){
+    setVoiceAutoSend(value);
+    try{localStorage.setItem("bluesword.voice-auto-send",String(value));}catch{/* Keep the preference for this page when storage is unavailable. */}
+  }
   const notified = useRef(new Set<string>());
   const priorProposal = useRef(0);
   const state = c.state;
-  const meaningful = c.messages.filter(
-    (message) =>
-      message.role !== "thinking" ||
-      (message.kind === "task" && message.phase === "running"),
-  );
+  const meaningful = c.messages;
   const welcome = meaningful.length === 0 && !c.thinking;
+  const [proposalOwner, setProposalOwner] = useState<number | null>(null);
+  const anchoredSelection = useRef("");
+  const selectionKey = JSON.stringify(c.selectedItems.map(item => [item.productId, item.count]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))));
+  useEffect(() => {
+    if (!c.selectedItems.length || c.pending || welcome) {
+      anchoredSelection.current = "";
+      setProposalOwner(null);
+      return;
+    }
+    // Move the single editable list only when its items or quantities change.
+    if (anchoredSelection.current === selectionKey) return;
+    for (let index = meaningful.length - 1; index >= 0; index--) {
+      if (meaningful[index]!.role === "assistant") {
+        anchoredSelection.current = selectionKey;
+        setProposalOwner(index);
+        return;
+      }
+    }
+  }, [selectionKey, c.selectedItems.length, c.pending, welcome, meaningful]);
   const visibleDialog = !!notice || c.operator || dialog !== null;
 
   function open(next: Dialog) {
@@ -170,6 +194,46 @@ export function BoothApp() {
         )}
       </main>
     );
+  const renderSelectionProposal = () => c.selectedItems.length > 0 && !c.pending && (
+              <section
+                className="selection-proposal recommendation-card"
+                aria-label="待确认取物清单"
+              >
+                <div className="proposal-heading">
+                  <strong>取物清单</strong>
+                  <small className="recommendation-status">待确认</small>
+                </div>
+                <div className="proposal-items">
+                  {c.selectedItems.map((item) => {
+                    const product = state.products.find(
+                      (p) => p.id === item.productId,
+                    );
+                    return (
+                      <span key={item.productId}>
+                        {product && <ProductSymbol product={product} />}
+                        <span>
+                          {product?.name ?? item.productId}
+                        </span>
+                        <strong className="recommendation-quantity">× {item.count}</strong>
+                      </span>
+                    );
+                  })}
+                </div>
+                <footer className="recommendation-actions">
+                <span>共 {c.total} 件 · 每单最多两件</span>
+                <button className="text-button" onClick={() => open("catalog")}>调整选择</button>
+                <button
+                  className="primary-button"
+                  onClick={() => open("order")}
+                >
+                  核对并确认
+                  <ArrowUpRight size={16} />
+                </button>
+                </footer>
+              </section>
+            );
+  const selectionProposal = renderSelectionProposal();
+
   return (
     <div className={`conversation-app${collapsed ? " sidebar-collapsed" : ""}`}>
       <aside className="conversation-sidebar" aria-label="主导航">
@@ -275,60 +339,31 @@ export function BoothApp() {
                     <div className="user-message" key={index}>
                       {message.content}
                     </div>
+                  ) : message.role === "thinking" ? (
+                    <Fragment key={message.id}>
+                      {message.kind === "chat" && <ThinkingPanel message={message}/>}
+                      {message.kind === "task" && state.tasks.filter(task=>task.requestId===message.requestId).map(task=><TaskChecklist key={task.id} task={task}/>) }
+                    </Fragment>
                   ) : (
                     <article
                       className="assistant-message"
-                      key={message.role === "thinking" ? message.id : index}
+                      key={index}
                     >
                       <div className="assistant-identity">
                         <img src={blueBrain} alt="" width={32} height={32} />
-                        <span>兰剑助手</span>
+                        <span>兰剑助手·布鲁</span>
                       </div>
-                      <p>{message.content}</p>
+                      <p className="assistant-bubble">{message.content}</p>
+                      {index === proposalOwner && selectionProposal}
+                      {index===meaningful.length-1 && c.clarification && <div className="selection-choices" role="group" aria-label="追加或替换清单">
+                        {c.clarification.choices.map(choice=><button className="secondary-button" key={choice.kind} disabled={c.thinking || c.busy || !c.connected} onClick={()=>void c.chat(choice.label)}>{choice.label}</button>)}
+                      </div>}
                     </article>
                   ),
                 )}
-                {c.thinking && (
-                  <div className="assistant-working" role="status">
-                    <LoaderCircle className="spin" size={17} />
-                    正在整理回复…
-                  </div>
-                )}
               </>
             )}
-            {c.selectedItems.length > 0 && !c.pending && (
-              <section
-                className="selection-proposal"
-                aria-label="待确认取物清单"
-              >
-                <div className="proposal-heading">
-                  <span>为你准备的取物清单</span>
-                  <small>{c.total} 件</small>
-                </div>
-                <div className="proposal-items">
-                  {c.selectedItems.map((item) => {
-                    const product = state.products.find(
-                      (p) => p.id === item.productId,
-                    );
-                    return (
-                      <span key={item.productId}>
-                        {product && <ProductSymbol product={product} />}
-                        <span>
-                          {product?.name ?? item.productId} × {item.count}
-                        </span>
-                      </span>
-                    );
-                  })}
-                </div>
-                <button
-                  className="primary-button"
-                  onClick={() => open("order")}
-                >
-                  核对并确认
-                  <ArrowUpRight size={16} />
-                </button>
-              </section>
-            )}
+            {c.displayTask && !meaningful.some(message=>message.role==="thinking" && message.requestId===c.displayTask!.requestId) && <TaskChecklist key={c.displayTask.id} task={c.displayTask}/>}
           </div>
         </div>
         <div className="composer-area">
@@ -423,8 +458,12 @@ export function BoothApp() {
                 ref={c.voice}
                 draft={c.speechDraft.current}
                 onText={c.updateText}
+                onRecognized={(value)=>{if(voiceAutoSend && !c.thinking && !visibleDialog)void c.chat(value);}}
                 disabled={!state.ai.configured}
               />
+              <label className="voice-auto-send" title="识别后自动发送给助手，取物仍需手动确认">
+                <input type="checkbox" role="switch" aria-label="识别后自动发送" checked={voiceAutoSend} onChange={event=>changeVoiceAutoSend(event.target.checked)}/>
+              </label>
               <button
                 type="submit"
                 className="send-button"
@@ -468,7 +507,10 @@ export function BoothApp() {
         <CatalogDialog
           booth={c}
           onClose={() => setDialog(null)}
-          onConfirm={() => setDialog("order")}
+          onConfirm={() => {
+            c.beginSelectionConversation();
+            setDialog("order");
+          }}
         />
       ) : dialog === "order" ? (
         <OrderDialog
@@ -548,7 +590,7 @@ export function BoothApp() {
             告诉我想要的物品，或点击“选物品”自行选择。每单最多两件，核对弹窗中的清单后确认取物。
           </p>
           <div className="assistant-note">
-            语音识别结果会先进入草稿，检查后再发送。需要现场协助时，请联系展台工作人员。
+            语音识别默认自动发送；关闭麦克风旁的开关后，识别结果先进入草稿。取物仍需手动核对并确认。需要现场协助时，请联系展台工作人员。
           </div>
           <footer className="modal-actions">
             <button className="primary-button" onClick={() => setDialog(null)}>

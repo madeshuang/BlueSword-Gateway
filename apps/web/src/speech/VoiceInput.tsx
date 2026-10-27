@@ -7,15 +7,17 @@ import {SpeechEndpoint,type StopReason} from "./endpoint";
 type Attempt={controller:AbortController;receipt?:SpeechReceipt;mic?:Awaited<ReturnType<typeof prepareMicrophone>>;socket?:WebSocket;timer?:ReturnType<typeof setInterval>;draftId:number;stoppedAt?:number;done:boolean;startedAt:number};
 export interface VoiceControl {cancel(reason?:string):void;takeReceipts():SpeechReceipt[];clearReceipts():void}
 async function post(path:string,body:unknown){const response=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal:AbortSignal.timeout(10000)});const data=await response.json();if(!response.ok)throw new Error(typeof data.data==="string"?data.data:"语音连接失败，请重试");return data;}
-export const VoiceInput=forwardRef<VoiceControl,{draft:SpeechDraft;onText:(text:string)=>void;disabled:boolean}>(function VoiceInput({draft,onText,disabled},ref){
-  const [configured,setConfigured]=useState(false),[phase,setPhase]=useState("idle"),[message,setMessage]=useState(""),[partial,setPartial]=useState(""),[autoDismiss,setAutoDismiss]=useState(false);
+export const VoiceInput=forwardRef<VoiceControl,{draft:SpeechDraft;onText:(text:string)=>void;onRecognized?:(text:string)=>void;disabled:boolean}>(function VoiceInput({draft,onText,onRecognized,disabled},ref){
+  const [configured,setConfigured]=useState(false),[phase,setPhase]=useState("idle"),[message,setMessage]=useState(""),[partial,setPartial]=useState("");
+  const recognitionHandler=useRef(onRecognized);
+  recognitionHandler.current=onRecognized;
   const active=useRef<Attempt|undefined>(undefined),receipts=useRef<SpeechReceipt[]>([]);
   function update(attempt:Attempt,value:Record<string,unknown>){if(attempt.receipt)void post(`/api/booth/speech/attempts/${attempt.receipt.id}`,{token:attempt.receipt.token,...value}).catch(()=>{console.warn("语音运行记录的草稿状态未能保存");});}
   function release(attempt:Attempt){clearInterval(attempt.timer);attempt.controller.abort();void attempt.mic?.cancel();attempt.socket?.close();if(active.current===attempt){active.current=undefined;setPhase("idle");}}
   function cancel(reason="cancelled"){
     const attempt=active.current;if(!attempt)return;attempt.done=true;draft.cancel();
     if(attempt.socket?.readyState===WebSocket.OPEN)attempt.socket.send(JSON.stringify({type:"cancel",reason}));
-    update(attempt,{status:"cancelled",reason});release(attempt);setPartial("");setMessage(reason==="no-speech"?"没有听到说话，请重试。":"");
+    update(attempt,{status:"cancelled",reason});release(attempt);setPartial("");setMessage(reason==="no-speech"?"没有听到说话，请重试。":reason==="experience-changed"||reason==="sent-draft"?"":"已取消。");
   }
   useImperativeHandle(ref,()=>({cancel,takeReceipts(){const current=receipts.current;receipts.current=[];setMessage("");setPartial("");return current;},clearReceipts(){receipts.current=[];setMessage("");setPartial("");}}));
   useEffect(()=>{let alive=true;void fetch("/api/booth/speech").then(r=>r.json()).then(data=>{if(alive)setConfigured(data.configured===true);}).catch(()=>{});return()=>{alive=false;const attempt=active.current;if(attempt){attempt.done=true;draft.cancel();if(attempt.socket?.readyState===WebSocket.OPEN)attempt.socket.send(JSON.stringify({type:"cancel",reason:"experience-changed"}));update(attempt,{status:"cancelled",reason:"experience-changed"});release(attempt);}};},[]);
@@ -25,11 +27,11 @@ export const VoiceInput=forwardRef<VoiceControl,{draft:SpeechDraft;onText:(text:
     try{await attempt.mic.stop();if(!attempt.controller.signal.aborted)attempt.socket?.send(JSON.stringify({type:"stop",reason}));}catch{fail(attempt,"录音停止失败，请重新尝试","capture-failed");}
   }
   function fail(attempt:Attempt,text:string,reason="connection-failed"){
-    if(attempt.done||active.current!==attempt)return;attempt.done=true;draft.cancel();update(attempt,{status:"error",reason});release(attempt);setAutoDismiss(false);setPartial("");setMessage(text.replace(/[，。；]+$/u,"")+"。");
+    if(attempt.done||active.current!==attempt)return;attempt.done=true;draft.cancel();update(attempt,{status:"error",reason});release(attempt);setPartial("");setMessage(text.replace(/[，。；]+$/u,"")+"。");
   }
   async function begin(){
     if(active.current||!configured||disabled)return;
-    const attempt:Attempt={controller:new AbortController(),draftId:draft.begin(),done:false,startedAt:0};active.current=attempt;setAutoDismiss(false);setPhase("starting");setPartial("");setMessage("正在准备麦克风…");
+    const attempt:Attempt={controller:new AbortController(),draftId:draft.begin(),done:false,startedAt:0};active.current=attempt;setPhase("starting");setPartial("");setMessage("正在准备麦克风…");
     const endpoint=new SpeechEndpoint();
     const microphone=prepareMicrophone(attempt.controller.signal,pcm=>{
       if(attempt.socket?.readyState===WebSocket.OPEN){if(attempt.socket.bufferedAmount>128000){fail(attempt,"语音传输积压，请检查网络");return;}attempt.socket.send(pcm);}
@@ -58,18 +60,13 @@ export const VoiceInput=forwardRef<VoiceControl,{draft:SpeechDraft;onText:(text:
           if(applied){onText(draft.value);receipts.current.push(attempt.receipt!);}
           update(attempt,{applied,...(applied&&elapsed!==undefined?{endToDraftMs:elapsed}:{})});release(attempt);
           if(data.recordSaved===false)console.warn("本次语音运行记录未能保存");
-          setAutoDismiss(applied && !!text.trim());
           setMessage(!text.trim()?"没有识别到文字，请重试。":applied?"可以修改文字，确认后发送。":"输入内容已更改或文字过长，请按需复制下方结果。");
+          if(applied)recognitionHandler.current?.(draft.value);
         }
       })().catch(()=>fail(attempt,"语音处理失败"));};
     }catch(error){const denied=error instanceof DOMException&&error.name==="NotAllowedError";fail(attempt,denied?"麦克风权限未允许":error instanceof Error?error.message:"无法启动录音",denied?"microphone-denied":"capture-failed");}
   }
-  useEffect(()=>{
-    if(phase!=="idle"||!message||!autoDismiss)return;
-    const timer=setTimeout(()=>setMessage(""),2500);
-    return()=>clearTimeout(timer);
-  },[phase,message,autoDismiss]);
   const busy=phase!=="idle";
   return <><button type="button" className={"speech-button "+(busy?"active":"")} aria-label={phase==="recording"?"停止语音输入":busy?"正在处理语音":"开始语音输入"} title={!configured?"语音暂未配置，可继续打字":undefined} disabled={disabled||!configured||phase==="starting"||phase==="waiting"} onClick={()=>phase==="recording"?void stop():void begin()}>{phase==="recording"?<Square size={16}/>:busy?<LoaderCircle size={17} className="spin"/>:<Mic size={18}/>}</button>
-    {(busy||message)&&<div className="speech-feedback"><div className="speech-feedback-heading"><span role="status">{message}</span>{busy?<button type="button" className="speech-cancel" aria-label="取消语音输入" onClick={()=>cancel()}><X size={15}/>取消</button>:<button type="button" className="speech-cancel" aria-label="关闭语音提示" title="关闭提示" onClick={()=>{setMessage("");setPartial("");}}><X size={16}/></button>}</div>{partial&&<p className="speech-preview" aria-label="语音识别预览">{partial}</p>}</div>}</>;
+    {(busy||message)&&<div className="speech-feedback"><div className="speech-feedback-heading"><span role="status">{message}</span>{busy&&<button type="button" className="speech-cancel" aria-label="取消语音输入" onClick={()=>cancel()}><X size={15}/>取消</button>}</div>{partial&&<p className="speech-preview" aria-label="语音识别预览">{partial}</p>}</div>}</>;
 });

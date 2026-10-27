@@ -78,7 +78,7 @@ a {
   grid-template-columns: 232px minmax(0, 1fr);
   height: 100dvh;
   min-height: 460px;
-  font-size: 14px;
+  font-size: 16.8px;
   line-height: 1.65;
 }
 .conversation-sidebar {
@@ -101,7 +101,7 @@ a {
 .sidebar-brand > span {
   display: block;
   margin-top: 13px;
-  font-size: 11px;
+  font-size: 14px;
   letter-spacing: 2.5px;
   color: var(--sub);
 }
@@ -114,7 +114,7 @@ a {
   justify-content: flex-start;
   padding: 11px 13px;
   border-radius: 9px;
-  font-size: 13px;
+  font-size: 15.6px;
   text-align: left;
   min-height: 43px;
 }
@@ -125,7 +125,7 @@ a {
 }
 .sidebar-caption {
   color: var(--sub);
-  font-size: 11px;
+  font-size: 14px;
   letter-spacing: 1px;
   padding: 28px 13px 9px;
 }
@@ -148,7 +148,7 @@ a {
   border-top: 1px solid var(--line);
   padding: 18px 10px 0;
   margin-top: 16px;
-  font-size: 12px;
+  font-size: 14.4px;
 }
 .visitor-profile > span {
   width: 33px;
@@ -161,7 +161,7 @@ a {
 }
 .visitor-profile small {
   display: block;
-  font-size: 11px;
+  font-size: 14px;
   color: var(--sub);
 }
 .conversation-main {
@@ -176,11 +176,11 @@ a {
   gap: 11px;
   min-height: 76px;
   padding: 18px 30px;
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 500;
 }
 .ai-badge {
-  font-size: 10px;
+  font-size: 14px;
   padding: 1px 6px;
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -189,7 +189,7 @@ a {
 }
 .connection-status {
   margin-left: auto;
-  font-size: 11px;
+  font-size: 14px;
   color: var(--sub);
   display: flex;
   align-items: center;
@@ -254,12 +254,12 @@ a {
 .brand-eyebrow {
   display: block;
   color: var(--brand);
-  font-size: 10px;
+  font-size: 14px;
   letter-spacing: 2.8px;
   margin-bottom: 13px;
 }
 .conversation-welcome h1 {
-  font-size: 36px;
+  font-size: 43.2px;
   line-height: 1.45;
   font-weight: 500;
   letter-spacing: -1px;
@@ -267,7 +267,7 @@ a {
 }
 .conversation-welcome > p {
   color: var(--sub);
-  font-size: 15px;
+  font-size: 18px;
 }
 .conversation-starters {
   display: grid;
@@ -283,7 +283,7 @@ a {
   flex-direction: column;
   align-items: flex-start;
   gap: 15px;
-  font-size: 13px;
+  font-size: 15.6px;
   text-align: left;
 }
 .conversation-starters svg {
@@ -294,7 +294,7 @@ a {
   max-width: 85%;
   padding: 11px 18px;
   background: var(--hover);
-  border-radius: 18px 18px 5px 18px;
+  border-radius: 22px 22px 12px 22px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.8;
@@ -305,7 +305,7 @@ a {
 }
 .assistant-identity {
   color: var(--brand);
-  font-size: 11px;
+  font-size: 14px;
   letter-spacing: 1px;
   display: flex;
   align-items: center;
@@ -313,7 +313,7 @@ a {
   margin-bottom: 11px;
 }
 .assistant-message p {
-  font-size: 15px;
+  font-size: 18px;
   line-height: 1.95;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -322,7 +322,7 @@ a {
   display: flex;
   align-items: center;
   gap: 9px;
-  font-size: 13px;
+  font-size: 15.6px;
   color: var(--sub);
 }
 .selection-proposal {
@@ -335,10 +335,10 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: 14.4px;
 }
 .proposal-heading small {
-  font-size: 12px;
+  font-size: 14.4px;
   color: var(--sub);
 }
 .proposal-items {
@@ -354,7 +354,7 @@ a {
   background: var(--side);
   padding: 7px 10px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 14.4px;
 }
 .proposal-items .product-symbol {
   background: transparent;
@@ -392,7 +392,7 @@ a {
   min-height: 40px;
   max-height: 155px;
   color: var(--ink);
-  font-size: 14px;
+  font-size: 16.8px;
   line-height: 1.6;
   padding: 0 2px;
   overflow-y: auto;
@@ -411,7 +411,7 @@ a {
 }
 .conversation-app .text-button {
   padding: 6px 8px;
-  font-size: 12px;
+  font-size: 14.4px;
   color: var(--sub);
   border-radius: 7px;
 }
@@ -428,7 +428,7 @@ a {
   background: #005e6c;
 }
 .composer-footnote {
-  font-size: 10px;
+  font-size: 14px;
   color: var(--sub);
   text-align: center;
   padding: 12px 0 17px;
@@ -443,14 +443,14 @@ a {
   border-radius: 10px;
   margin-bottom: 11px;
   color: var(--brand);
-  font-size: 12px;
+  font-size: 14.4px;
 }
 .task-strip > span {
   flex: 1;
 }
 .task-strip > button {
   color: var(--brand);
-  font-size: 11px;
+  font-size: 14px;
   white-space: nowrap;
   border-radius: 5px;
   padding: 4px;
@@ -471,7 +471,7 @@ a {
   padding: 10px 17px;
   border: 0;
   border-radius: 9px;
-  font-size: 13px;
+  font-size: 15.6px;
   min-height: 41px;
 }
 .conversation-app .primary-button:hover:not(:disabled) {
@@ -481,7 +481,7 @@ a {
   border: 1px solid var(--line);
   border-radius: 9px;
   padding: 9px 15px;
-  font-size: 13px;
+  font-size: 15.6px;
   min-height: 41px;
   background: #fff;
 }
@@ -513,18 +513,18 @@ a {
   margin-bottom: 21px;
 }
 .modal-header .brand-eyebrow {
-  font-size: 9px;
+  font-size: 14px;
   letter-spacing: 2.4px;
   margin-bottom: 10px;
 }
 .conversation-modal h2 {
-  font-size: 23px;
+  font-size: 27.6px;
   font-weight: 500;
   line-height: 1.4;
   letter-spacing: -0.5px;
 }
 .conversation-modal .modal-description {
-  font-size: 13px;
+  font-size: 15.6px;
   color: #65787c;
   line-height: 1.9;
   white-space: pre-wrap;
@@ -541,7 +541,7 @@ a {
 .assistant-note {
   background: var(--brand-soft);
   color: var(--brand);
-  font-size: 12px;
+  font-size: 14.4px;
   line-height: 1.8;
   padding: 12px 14px;
   border-radius: 9px;
@@ -549,7 +549,7 @@ a {
 }
 .form-error {
   color: #a04a32;
-  font-size: 12px;
+  font-size: 14.4px;
   line-height: 1.8;
   margin-top: 13px !important;
   overflow-wrap: anywhere;
@@ -563,7 +563,7 @@ a {
 .conversation-app .catalog-categories button {
   padding: 6px 10px;
   border-radius: 7px;
-  font-size: 12px;
+  font-size: 14.4px;
   color: var(--sub);
 }
 .conversation-app .catalog-categories button[aria-pressed="true"] {
@@ -583,7 +583,7 @@ a {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  font-size: 12px;
+  font-size: 14.4px;
   text-align: center;
   min-width: 0;
 }
@@ -592,7 +592,7 @@ a {
   background: var(--brand-soft);
 }
 .catalog-product small {
-  font-size: 11px;
+  font-size: 14px;
   color: var(--sub);
 }
 .product-symbol {
@@ -613,7 +613,7 @@ a {
 }
 .selection-count {
   margin-right: auto;
-  font-size: 12px;
+  font-size: 14.4px;
   color: var(--sub);
 }
 .confirmation-items {
@@ -632,12 +632,12 @@ a {
 }
 .confirmation-product strong {
   display: block;
-  font-size: 13px;
+  font-size: 15.6px;
   font-weight: 500;
 }
 .confirmation-product small {
   display: block;
-  font-size: 11px;
+  font-size: 14px;
   color: var(--sub);
   margin-top: 3px;
 }
@@ -645,7 +645,7 @@ a {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: 15.6px;
   flex-shrink: 0;
 }
 .quantity-control button {
@@ -662,7 +662,7 @@ a {
   display: flex;
   justify-content: space-between;
   margin: 17px 0;
-  font-size: 12px;
+  font-size: 14.4px;
 }
 .confirmation-total strong {
   font-weight: 500;
@@ -678,7 +678,7 @@ a {
   margin: 0 0 18px;
 }
 .conversation-modal .task-detail-title {
-  font-size: 17px;
+  font-size: 20.4px;
   font-weight: 500;
   margin-bottom: 12px;
 }
@@ -690,7 +690,7 @@ a {
   justify-content: space-between;
   gap: 15px;
   padding: 7px 0;
-  font-size: 12px;
+  font-size: 14.4px;
 }
 .operator-summary dt {
   color: var(--sub);
@@ -704,7 +704,7 @@ a {
   display: flex;
   flex-direction: column;
   gap: 7px;
-  font-size: 12px;
+  font-size: 14.4px;
   margin: 16px 0;
 }
 .field-label input,
@@ -721,14 +721,14 @@ a {
   border-top: 1px solid var(--line);
   padding: 14px 0;
   margin-top: 14px;
-  font-size: 13px;
+  font-size: 15.6px;
 }
 .operator-section summary {
   cursor: pointer;
   font-weight: 500;
 }
 .operator-section p {
-  font-size: 12px;
+  font-size: 14.4px;
   line-height: 1.8;
   color: var(--sub);
   margin: 13px 0;
@@ -737,7 +737,7 @@ a {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  font-size: 12px;
+  font-size: 14.4px;
   margin: 15px 0;
 }
 .check-label input {
@@ -745,13 +745,13 @@ a {
   margin: 4px 0 0;
 }
 .operator-stock h3 {
-  font-size: 14px;
+  font-size: 16.8px;
   font-weight: 500;
   margin-top: 15px;
 }
 .operator-stock-targets {
   padding-left: 18px;
-  font-size: 12px;
+  font-size: 14.4px;
   line-height: 1.9;
   color: var(--sub);
 }
@@ -768,19 +768,24 @@ a {
   align-items: center;
   gap: 4px;
   text-decoration: none;
-  font-size: 12px;
+  font-size: 14.4px;
 }
 .success-message {
   display: flex;
   align-items: center;
   gap: 8px;
   color: var(--brand);
-  font-size: 12px;
+  font-size: 14.4px;
 }
 .speech-button {
-  width: 34px;
-  height: 34px;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
   border-radius: 8px;
+}
+.speech-button svg {
+  width: 22px;
+  height: 22px;
 }
 .speech-button.active {
   background: var(--brand-soft) !important;
@@ -790,15 +795,14 @@ a {
   position: absolute;
   bottom: calc(100% + 10px);
   left: 0;
-  width: fit-content;
-  max-width: min(480px, 100%);
+  right: 0;
   z-index: 3;
-  padding: 10px 12px;
+  padding: 15px;
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 12px;
   box-shadow: 0 5px 25px #002c3615;
-  font-size: 12px;
+  font-size: 14.4px;
 }
 .speech-feedback-heading {
   display: flex;
@@ -807,7 +811,7 @@ a {
   justify-content: space-between;
 }
 .speech-cancel {
-  font-size: 12px;
+  font-size: 14.4px;
   padding: 5px;
   border-radius: 6px;
 }
@@ -831,11 +835,11 @@ a {
   width: 180px;
 }
 .boot-screen h1 {
-  font-size: 25px;
+  font-size: 30px;
   font-weight: 500;
 }
 .boot-screen p {
-  font-size: 14px;
+  font-size: 16.8px;
   color: var(--sub);
 }
 .sr-only {
@@ -871,16 +875,16 @@ a {
     width: 137px;
   }
   .sidebar-brand > span {
-    font-size: 10px;
+    font-size: 14px;
   }
   .conversation-welcome h1 {
-    font-size: 30px;
+    font-size: 36px;
   }
   .conversation-starters {
     gap: 9px;
   }
   .conversation-app .conversation-starters button {
-    font-size: 12px;
+    font-size: 14.4px;
     padding: 14px 12px;
   }
   .conversation-scroll {
@@ -924,13 +928,13 @@ a {
     margin-bottom: 27px;
   }
   .conversation-welcome h1 {
-    font-size: 28px;
+    font-size: 33.6px;
   }
   .conversation-welcome > p {
-    font-size: 13px;
+    font-size: 15.6px;
   }
   .brand-eyebrow {
-    font-size: 8px;
+    font-size: 14px;
     letter-spacing: 2px;
   }
   .conversation-starters {
@@ -952,10 +956,10 @@ a {
     padding: 14px 12px 10px;
   }
   .conversation-composer textarea {
-    font-size: 16px;
+    font-size: 19.2px;
   }
   .composer-footnote {
-    font-size: 9px;
+    font-size: 14px;
     padding: 9px 0 max(12px, env(safe-area-inset-bottom));
   }
   .conversation-modal {
@@ -970,7 +974,7 @@ a {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .conversation-modal h2 {
-    font-size: 21px;
+    font-size: 25.2px;
   }
   .confirmation-row {
     gap: 9px;
@@ -980,7 +984,7 @@ a {
     height: 42px;
   }
   .confirmation-product strong {
-    font-size: 12px;
+    font-size: 14.4px;
   }
   .quantity-control {
     gap: 5px;
@@ -993,21 +997,21 @@ a {
     gap: 7px;
   }
   .modal-actions button {
-    font-size: 12px;
+    font-size: 14.4px;
   }
   .assistant-message p {
-    font-size: 14px;
+    font-size: 16.8px;
   }
   .task-strip {
-    font-size: 11px;
+    font-size: 14px;
     gap: 7px;
     padding: 9px;
   }
   .connection-status {
-    font-size: 10px;
+    font-size: 14px;
   }
   .conversation-modal .field-label input {
-    font-size: 16px;
+    font-size: 19.2px;
   }
 }
 @media (max-height: 680px) and (min-width: 701px) {
@@ -1027,7 +1031,7 @@ a {
     margin-bottom: 18px;
   }
   .conversation-welcome h1 {
-    font-size: 29px;
+    font-size: 34.8px;
   }
   .conversation-starters {
     margin-top: 22px;
@@ -1074,11 +1078,11 @@ a {
 }
 .header-assistant-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .header-assistant-brand > img { width: 72px; height: 72px; object-fit: contain; flex-shrink: 0; }
-.header-assistant-brand strong { display: block; font-size: 14px; font-weight: 600; color: var(--ink); }
-.header-assistant-brand small { display: block; margin-top: 3px; font-size: 9px; letter-spacing: 1.3px; color: var(--brand); }
+.header-assistant-brand strong { display: block; font-size: 16.8px; font-weight: 600; color: var(--ink); }
+.header-assistant-brand small { display: block; margin-top: 3px; font-size: 14px; letter-spacing: 1.3px; color: var(--brand); }
 .welcome-brand-lockup { display: flex; align-items: center; gap: 28px; margin-bottom: 26px; }
 .welcome-wordmark > img { width: 190px; height: auto; display: block; margin-bottom: 22px; }
-.welcome-wordmark .brand-eyebrow { margin: 0; font-size: 9px; letter-spacing: 2px; }
+.welcome-wordmark .brand-eyebrow { margin: 0; font-size: 14px; letter-spacing: 2px; }
 .welcome-brain { border-left: 1px solid var(--line); padding-left: 24px; }
 .welcome-brain img { display: block; width: 148px; height: 148px; object-fit: contain; }
 .conversation-welcome h1 { font-weight: 550; }
@@ -1086,7 +1090,7 @@ a {
 .conversation-app .conversation-starters button:nth-child(2) { background: #f6f5fa; }
 .conversation-app .conversation-starters button:nth-child(3) { background: #faf7f1; }
 .conversation-app .conversation-starters button:hover { background: var(--brand-soft); border-color: var(--brand); }
-.assistant-identity { font-size: 12px; letter-spacing: .4px; }
+.assistant-identity { font-size: 14.4px; letter-spacing: .4px; }
 .assistant-identity img { width: 38px; height: 38px; object-fit: contain; }
 .user-message { background: #eaf3f5; }
 .sidebar-navigation .current-conversation { color: var(--brand); background: #e3eef0; }
@@ -1097,13 +1101,13 @@ a {
   .conversation-header { min-height: 80px; padding: 7px 14px; gap: 8px; }
   .header-assistant-brand { gap: 7px; }
   .header-assistant-brand > img { width: 60px; height: 60px; }
-  .header-assistant-brand strong { font-size: 12px; }
-  .header-assistant-brand small { font-size: 8px; letter-spacing: .4px; }
+  .header-assistant-brand strong { font-size: 14.4px; }
+  .header-assistant-brand small { font-size: 14px; letter-spacing: .4px; }
   .connection-status { font-size: 0; gap: 0; }
-  .connection-status.disconnected { font-size: 10px; }
+  .connection-status.disconnected { font-size: 14px; }
   .welcome-brand-lockup { gap: 14px; margin-bottom: 22px; }
   .welcome-wordmark > img { width: 148px; margin-bottom: 14px; }
-  .welcome-wordmark .brand-eyebrow { max-width: 175px; font-size: 8px; letter-spacing: 1px; }
+  .welcome-wordmark .brand-eyebrow { max-width: 175px; font-size: 14px; letter-spacing: 1px; }
   .welcome-brain { padding-left: 12px; }
   .welcome-brain img { width: 104px; height: 104px; }
 }
@@ -1123,8 +1127,8 @@ a {
 @media (min-width: 701px) {
   .conversation-app {
     --content-width: clamp(900px, 65vw, 1600px);
-    --body-size: clamp(17px, 1.15vw, 25px);
-    --ui-size: clamp(14px, .95vw, 21px);
+    --body-size: clamp(20.4px, 1.38vw, 30px);
+    --ui-size: clamp(16.8px, 1.14vw, 25.2px);
     --page-gutter: clamp(28px, 2.4vw, 72px);
     grid-template-columns: clamp(232px, 16vw, 340px) minmax(0, 1fr);
     font-size: var(--ui-size);
@@ -1136,54 +1140,54 @@ a {
   .assistant-message p, .user-message { font-size: var(--body-size); line-height: 1.85; }
   .assistant-identity { font-size: var(--ui-size); gap: 12px; margin-bottom: 14px; }
   .assistant-identity img { width: clamp(46px, 3.5vw, 72px); height: clamp(46px, 3.5vw, 72px); }
-  .conversation-welcome h1 { font-size: clamp(36px, 2.7vw, 64px); line-height: 1.35; }
+  .conversation-welcome h1 { font-size: clamp(43.2px, 3.24vw, 76.8px); line-height: 1.35; }
   .conversation-welcome > p { font-size: var(--body-size); margin-top: 18px; }
   .welcome-wordmark > img { width: clamp(210px, 16vw, 330px); }
-  .welcome-wordmark .brand-eyebrow { font-size: clamp(10px, .7vw, 15px); }
+  .welcome-wordmark .brand-eyebrow { font-size: clamp(14px, 0.84vw, 18px); }
   .welcome-brain img { width: clamp(160px, 12vw, 240px); height: clamp(160px, 12vw, 240px); }
   .welcome-brand-lockup { gap: clamp(28px, 3vw, 64px); margin-bottom: 30px; }
   .welcome-brain { padding-left: clamp(24px, 2.4vw, 56px); }
   .conversation-starters { gap: 16px; margin-top: 32px; }
   .conversation-app .conversation-starters button { min-height: clamp(108px, 8vw, 164px); padding: 22px; font-size: var(--ui-size); gap: 20px; }
   .conversation-starters svg { width: 26px; height: 26px; }
-  .conversation-composer { padding: 22px 22px 14px; border-radius: 14px; }
+  .conversation-composer { padding: 22px 22px 14px; border-radius: 20px; }
   .conversation-composer textarea { font-size: var(--body-size); min-height: 48px; }
   .conversation-app .text-button, .task-strip, .task-strip > button { font-size: var(--ui-size); }
   .composer-tools { margin-top: 10px; gap: 9px; }
   .conversation-app .send-button { width: 44px; height: 44px; }
-  .composer-footnote { font-size: clamp(11px, .8vw, 16px); padding-bottom: 18px; }
+  .composer-footnote { font-size: clamp(14px, 0.96vw, 19.2px); padding-bottom: 18px; }
   .conversation-app .sidebar-navigation button { font-size: var(--ui-size); min-height: 48px; }
   .sidebar-brand img { width: clamp(155px, 11vw, 240px); }
-  .sidebar-brand > span, .sidebar-caption, .visitor-profile small { font-size: clamp(11px, .8vw, 16px); }
+  .sidebar-brand > span, .sidebar-caption, .visitor-profile small { font-size: clamp(14px, 0.96vw, 19.2px); }
   .visitor-profile { font-size: var(--ui-size); }
   .selection-proposal { width: min(100%, 640px); padding: 24px; }
   .proposal-heading, .proposal-items > span, .proposal-heading small { font-size: var(--ui-size); }
   .conversation-app .primary-button, .conversation-app .secondary-button { font-size: var(--ui-size); min-height: 46px; }
   .conversation-modal { width: min(560px, calc(100% - 48px)); padding: 32px; }
   .conversation-modal.modal-wide { width: min(820px, calc(100% - 48px)); }
-  .conversation-modal h2 { font-size: 27px; }
-  .conversation-modal .modal-description, .conversation-app .catalog-product, .confirmation-product strong { font-size: 15px; }
-  .catalog-product small, .confirmation-product small { font-size: 13px; }
+  .conversation-modal h2 { font-size: 32.4px; }
+  .conversation-modal .modal-description, .conversation-app .catalog-product, .confirmation-product strong { font-size: 18px; }
+  .catalog-product small, .confirmation-product small { font-size: 15.6px; }
 }
 @media (min-width: 701px) and (max-width: 1100px) {
   .conversation-app { grid-template-columns: 202px minmax(0, 1fr); --page-gutter: 24px; }
   .sidebar-brand img { width: 145px; }
   .welcome-brand-lockup { gap: 16px; }
   .welcome-wordmark > img { width: 170px; }
-  .welcome-wordmark .brand-eyebrow { max-width: 210px; font-size: 9px; }
+  .welcome-wordmark .brand-eyebrow { max-width: 210px; font-size: 14px; }
   .welcome-brain { padding-left: 16px; }
   .welcome-brain img { width: 120px; height: 120px; }
-  .conversation-welcome h1 { font-size: 32px; }
-  .conversation-app .conversation-starters button { padding: 15px 12px; font-size: 13px; }
+  .conversation-welcome h1 { font-size: 38.4px; }
+  .conversation-app .conversation-starters button { padding: 15px 12px; font-size: 15.6px; }
 }
 @media (min-width: 2200px) {
   .conversation-header { min-height: 112px; }
   .header-assistant-brand > img { width: 88px; height: 88px; }
-  .header-assistant-brand small { font-size: 14px; }
-  .connection-status { font-size: 15px; }
+  .header-assistant-brand small { font-size: 16.8px; }
+  .connection-status { font-size: 18px; }
   .conversation-modal { width: min(720px, calc(100% - 64px)); }
   .conversation-modal.modal-wide { width: min(1000px, calc(100% - 64px)); }
-  .conversation-modal .modal-description, .conversation-app .catalog-product, .confirmation-product strong { font-size: 18px; }
+  .conversation-modal .modal-description, .conversation-app .catalog-product, .confirmation-product strong { font-size: 21.6px; }
 }
 @media (max-height: 760px) and (min-width: 701px) {
   .conversation-header { min-height: 76px; padding-block: 6px; }
@@ -1192,7 +1196,7 @@ a {
   .welcome-brand-lockup { margin-bottom: 18px; }
   .welcome-brain img { width: 116px; height: 116px; }
   .welcome-wordmark > img { width: 190px; margin-bottom: 14px; }
-  .conversation-welcome h1 { font-size: 34px; }
+  .conversation-welcome h1 { font-size: 40.8px; }
   .conversation-starters { margin-top: 22px; }
   .conversation-app .conversation-starters button { min-height: 84px; padding: 14px; gap: 10px; }
   .conversation-composer { padding: 15px 18px 10px; }
@@ -1200,84 +1204,184 @@ a {
   .composer-footnote { padding-block: 8px; }
 }
 @media (max-width: 700px) {
-  .assistant-identity { font-size: 14px; }
+  .assistant-identity { font-size: 16.8px; }
   .assistant-identity img { width: 44px; height: 44px; }
-  .assistant-message p, .user-message { font-size: 16px; line-height: 1.85; }
-  .conversation-welcome > p { font-size: 15px; }
-  .conversation-app .conversation-starters button { font-size: 14px; min-height: 48px; }
+  .assistant-message p, .user-message { font-size: 19.2px; line-height: 1.85; }
+  .conversation-welcome > p { font-size: 18px; }
+  .conversation-app .conversation-starters button { font-size: 16.8px; min-height: 48px; }
 }
 
-/* Scale the main experience only; navigation and modal accessibility stay unchanged. */
+/* Keep text at its authored size across the conversation workspace. */
 .conversation-workspace {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-width: 0;
   min-height: 0;
-  zoom: 0.8;
+
 }
 
-/* A compact catalog with persistent controls and individually recognizable goods. */
-.product-symbol svg { width: 30px; height: 30px; }
-.conversation-modal.catalog-modal[open] {
+/* Readable conversation surfaces and compact Blue Brain planning explanations. */
+.assistant-message {
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
+}
+.assistant-bubble {
+  padding: 22px 26px;
+  background: #f7f9fa;
+  border: 1px solid transparent;
+  border-radius: 12px 22px 22px 22px;
+}
+.user-message {
+  padding: 18px 24px;
+  background: #e2f0f3;
+  border: 1px solid #d9e9ed;
+}
+.thinking-panel {
   display: flex;
-  flex-direction: column;
-  width: min(860px, calc(100% - 40px));
-  max-height: min(860px, calc(100dvh - 40px));
-  padding: 28px;
-  overflow: hidden;
-}
-.catalog-modal .modal-header { margin-bottom: 10px; flex-shrink: 0; }
-.catalog-modal > .modal-description { font-size: 14px; flex-shrink: 0; }
-.catalog-modal .catalog-categories { margin: 18px 0; flex-shrink: 0; }
-.catalog-modal .catalog-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  overflow-y: auto;
-  min-height: 0;
-  padding: 4px;
-  scrollbar-width: thin;
-  scrollbar-color: #c1d7db transparent;
-}
-.conversation-app .catalog-modal .catalog-product {
-  flex-direction: row;
   align-items: center;
-  justify-content: flex-start;
-  gap: 16px;
-  min-height: 94px;
-  padding: 14px 32px 14px 16px;
-  text-align: left;
-  border-radius: 12px;
+  gap: 12px;
+  min-width: 0;
+  width: 100%;
+  min-height: 64px;
+  padding: 10px 16px;
+  border-left: 3px solid var(--brand);
+  border-radius: 4px 12px 12px 4px;
+  background: #f1f7f8;
+  color: #46636b;
+  font-size: var(--ui-size, 17px);
 }
-.catalog-modal .product-symbol { width: 60px; height: 60px; border-radius: 12px; }
-.catalog-modal .product-symbol svg { width: 40px; height: 40px; }
-.catalog-product-copy { min-width: 0; }
-.catalog-product-copy strong { display: block; font-size: 15px; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
-.catalog-modal .catalog-product small { display: block; font-size: 12px; margin-top: 6px; }
-.catalog-modal .product-check { right: 12px; top: 12px; background: var(--brand); color: white; border-radius: 50%; padding: 3px; width: 20px; height: 20px; }
-.catalog-actions { flex-shrink: 0; border-top: 1px solid var(--line); padding-top: 18px; margin-top: 18px; }
-.catalog-actions .selection-count { font-size: 14px; color: var(--brand); }
-.conversation-app .catalog-actions button { font-size: 14px; min-height: 44px; }
-@media (max-width: 600px) {
-  .conversation-modal.catalog-modal[open] { width: calc(100% - 20px); max-height: calc(100dvh - 24px); padding: 20px 14px 16px; }
-  .catalog-modal .catalog-grid { gap: 8px; }
-  .conversation-app .catalog-modal .catalog-product { flex-direction: column; gap: 10px; padding: 14px 8px; text-align: center; min-height: 140px; }
-  .catalog-modal .product-symbol { width: 52px; height: 52px; }
-  .catalog-modal .product-symbol svg { width: 36px; height: 36px; }
-  .catalog-product-copy strong { font-size: 13px; }
-  .catalog-modal .catalog-product small { font-size: 11px; }
-  .catalog-actions { gap: 8px; margin-top: 12px; padding-top: 12px; }
-  .catalog-actions .selection-count { width: 100%; font-size: 12px; }
-  .conversation-app .catalog-actions button { flex: 1; }
-  .catalog-modal .catalog-categories { gap: 2px; margin-block: 12px; }
-  .conversation-app .catalog-modal .catalog-categories button { font-size: 11px; padding: 6px 8px; }
-}
-@media (max-height: 600px) {
-  .conversation-modal.catalog-modal[open] { max-height: calc(100dvh - 16px); padding-block: 16px; }
-  .catalog-modal .catalog-categories { margin-block: 8px; }
-  .catalog-actions { margin-top: 10px; padding-top: 10px; }
+.thinking-panel > img { width: 40px; height: 40px; object-fit: contain; flex-shrink: 0; }
+.thinking-title { display: inline-flex; gap: 8px; align-items: center; white-space: nowrap; color: var(--brand); flex-shrink: 0; }
+.thinking-copy { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; animation: thinking-appear .25s ease-out; }
+.thinking-panel:not(.phase-running) { width: fit-content; min-height: 48px; background: transparent; border-color: var(--line); padding-block: 4px; }
+.thinking-panel:not(.phase-running) > img { width: 30px; height: 30px; }
+@keyframes thinking-appear { from { opacity: .3; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .thinking-copy { animation: none; } }
+@media (min-width: 701px) {
+  .conversation-modal { width: min(680px, calc(100% - 48px)); }
+  .conversation-modal.modal-wide { width: min(960px, calc(100% - 48px)); }
+  .conversation-modal { --ui-size: clamp(17px, 1.14vw, 25.2px); }
+  .conversation-modal .modal-description, .operator-section p, .check-label,
+  .operator-summary > div, .field-label, .operator-stock label:not(.check-label),
+  .operator-stock-targets, .record-links a, .success-message,
+  .confirmation-total, .selection-count, .quantity-control { font-size: var(--ui-size); }
+  .quantity-control button { width: 36px; height: 36px; }
+  .conversation-sidebar { overflow-y: auto; }
 }
 
-.speech-feedback-heading > [role="status"] { min-width: 0; overflow-wrap: anywhere; }
-.speech-feedback .speech-cancel { flex-shrink: 0; min-width: 30px; min-height: 30px; }
-.speech-preview { max-height: 150px; overflow-y: auto; }
+/* Intermediate task stages are a presentation simulation; terminal status follows callbacks. */
+.task-checklist { width: min(100%, 940px); border: 1px solid var(--line); border-radius: 20px; padding: 20px; background: #fff; font-size: var(--ui-size, 18px); }
+.task-checklist header { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+.task-checklist h3 { display: flex; align-items: center; gap: 12px; font-size: inherit; margin-right: auto; }
+.task-checklist h3 svg { color: var(--brand); }
+.checklist-status { color: var(--brand); background: var(--brand-soft); padding: 3px 14px; border-radius: 8px; }
+.checklist-count { color: var(--sub); white-space: nowrap; }
+.task-checklist ol { list-style: none; padding: 12px 0; margin: 0; }
+.checklist-step { position: relative; display: flex; align-items: flex-start; gap: 16px; padding: 12px 14px; border-radius: 10px; }
+.checklist-step:not(:last-child)::after { content: ""; position: absolute; left: 29px; top: 49px; bottom: -8px; width: 2px; background: var(--line); }
+.checklist-step > div { flex: 1; min-width: 0; }
+.checklist-step strong { font-weight: 550; }
+.checklist-step p { color: var(--sub); font-size: .9em; margin-top: 4px; overflow-wrap: anywhere; }
+.checklist-icon { display: grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; color: #879da2; }
+.checklist-step.done .checklist-icon { border-radius: 50%; background: var(--brand); color: white; }
+.checklist-step.running { background: #edf6f7; }
+.checklist-step.running .checklist-icon, .checklist-step.done .checklist-step-label, .checklist-step.running .checklist-step-label { color: var(--brand); }
+.checklist-step-label { color: var(--sub); font-size: .9em; white-space: nowrap; align-self: center; }
+.checklist-status.attention, .checklist-step.attention .checklist-icon { color: #8b5716; background: #fff6e8; }
+.checklist-notice { padding: 12px; color: #8b5716; background: #fff6e8; border-radius: 8px; }
+.checklist-plan { color: var(--sub); font-size: .85em; padding: 8px 14px 18px; }
+.task-checklist footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid var(--line); padding-top: 18px; color: var(--sub); font-size: .85em; }
+.task-checklist footer button { padding: 8px; border-radius: 6px; font-size: inherit; }
+
+/* One assistant turn: identity outside, answer and confirmation aligned beneath. */
+.assistant-message:has(.selection-proposal), .thinking-message { width: min(100%, 860px); }
+.assistant-message .selection-proposal { width: 100%; margin-top: 12px; padding: 20px 24px; background: #fff; }
+.assistant-message .proposal-items { margin: 12px 0 16px; }
+.thinking-card { padding: 24px; border: 1px solid #d3e6e9; border-radius: 14px; background: #f3f8f9; font-size: var(--ui-size, 18px); }
+.thinking-card header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.thinking-card header strong { display: flex; align-items: center; gap: 14px; font-weight: 600; }
+.thinking-card header strong svg { color: var(--brand); }
+.thinking-card header > span { color: var(--brand); background: #e2f1f3; border: 1px solid #cce5e9; border-radius: 8px; padding: 3px 12px; font-size: .85em; }
+.assistant-message .thinking-copy { font-size: inherit; line-height: 1.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #526b73; }
+.thinking-skeleton { display: grid; gap: 18px; margin: 24px 0; }
+.thinking-skeleton > div { display: flex; gap: 18px; align-items: center; }
+.thinking-skeleton i { width: 26px; height: 26px; border: 3px solid #d7e1e5; border-radius: 50%; flex-shrink: 0; }
+.thinking-skeleton span { width: 38%; height: 18px; border-radius: 6px; background: #dfe7eb; animation: skeleton-breathe 1.8s ease-in-out infinite; }
+.thinking-skeleton > div:nth-child(2) span { width: 48%; }
+.thinking-skeleton > div:nth-child(3) span { width: 32%; }
+.thinking-skeleton > div:nth-child(4) span { width: 44%; }
+.thinking-card footer { border-top: 1px solid #d9e8eb; padding-top: 16px; color: var(--sub); font-size: .85em; }
+@keyframes skeleton-breathe { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .thinking-skeleton span { animation: none; } }
+
+/* The waiting shell becomes a single recommendation surface. */
+.assistant-message .recommendation-card, .recommendation-card {
+  width: min(100%, 860px); margin-top: 0; padding: 24px;
+  border: 1px solid #d3e6e9; border-radius: 20px; background: #f3f8f9;
+}
+.recommendation-card .proposal-heading { font-size: var(--ui-size, 18px); margin-bottom: 18px; }
+.recommendation-card .proposal-heading strong { font-weight: 600; }
+.recommendation-card .recommendation-status { font-size: .85em; color: var(--brand); background: #e2f1f3; border: 1px solid #cce5e9; border-radius: 8px; padding: 3px 12px; }
+.assistant-message .recommendation-copy { font-size: var(--body-size, 20px); line-height: 1.75; }
+.recommendation-card .proposal-items { display: grid; gap: 0; margin: 18px 0; }
+.recommendation-card .proposal-items > span { display: flex; gap: 14px; padding: 14px 0; background: transparent; border-radius: 0; font-size: var(--ui-size, 18px); }
+.recommendation-card .proposal-items > span + span { border-top: 1px solid var(--line); }
+.recommendation-card .product-symbol { width: 42px; height: 42px; border-radius: 10px; background: #e2f1f3; }
+.recommendation-card .product-symbol svg { width: 24px; height: 24px; }
+.recommendation-quantity { margin-left: auto; font-weight: 500; white-space: nowrap; }
+.recommendation-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding-top: 18px; border-top: 1px solid #d9e8eb; }
+.recommendation-actions > span { margin-right: auto; color: var(--sub); font-size: .85em; }
+.recommendation-actions .text-button { padding: 10px 8px; color: var(--brand); }
+
+/* Quiet, spacious welcome without quick-prompt tiles. */
+.welcome-column .conversation-welcome { width: 100%; margin: 0; padding: clamp(36px, 6vh, 80px) 0; }
+.welcome-column .welcome-brand-lockup { margin-bottom: clamp(30px, 5vh, 64px); }
+.welcome-column .conversation-welcome > p { max-width: 42em; line-height: 1.9; margin-top: 22px; color: #60767c; }
+.thinking-finished { background: #f3f4f4; border-color: #e0e3e4; color: #768083; }
+.thinking-finished header strong, .thinking-finished header strong svg { color: #768083; }
+.thinking-finished header > span { color: #768083; background: #e9ecec; border-color: #dce0e0; }
+.assistant-message .thinking-finished .thinking-copy { color: #7a8588; animation: none; }
+.thinking-finished .thinking-skeleton span { background: #e2e5e5; animation: none; }
+.thinking-finished .thinking-skeleton i { border-color: #d9dede; }
+.thinking-finished footer { color: #7a8588; border-color: #dde2e2; }
+.voice-auto-send { display: inline-flex; align-items: center; gap: 8px; margin-left: 6px; font-size: clamp(14px, .9vw, 18px); color: var(--sub); cursor: pointer; white-space: nowrap; }
+.voice-auto-send input { appearance: none; width: 34px; height: 20px; border: 1px solid #bbcbd0; border-radius: 12px; background: #dfe7e9; margin: 0; position: relative; cursor: pointer; flex-shrink: 0; }
+.voice-auto-send input::after { content: ""; display: block; width: 14px; height: 14px; border-radius: 50%; background: white; position: absolute; top: 2px; left: 2px; transition: transform .15s; }
+.voice-auto-send input:checked { background: var(--brand); border-color: var(--brand); }
+.voice-auto-send input:checked::after { transform: translateX(14px); }
+
+.chat-waiting { display: flex; align-items: center; gap: 10px; color: var(--sub); font-size: var(--ui-size, 18px); line-height: 1.6; }
+.chat-waiting svg { flex-shrink: 0; }
+.selection-choices { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
+.selection-choices .secondary-button { border-radius: 12px; }
+.recommendation-card .proposal-items > span > span:not(.product-symbol) { font-weight: 600; }
+.recommendation-card .recommendation-quantity { font-weight: 650; }
+@media (prefers-reduced-motion: reduce) { .chat-waiting .spin { animation: none; } }
+
+/* Desktop type hierarchy: product names and section titles lead supporting copy. */
+@media (min-width: 701px) {
+  .conversation-welcome h1 { font-size: clamp(40.8px, 2.8vw, 64px); }
+  .conversation-welcome > p { font-size: clamp(20.4px, 1.25vw, 28px); }
+  .header-assistant-brand small, .connection-status { font-size: 18px; }
+  .conversation-app .desktop-sidebar-toggle { width: 40px; height: 40px; padding: 9px; }
+  .desktop-sidebar-toggle svg { width: 22px; height: 22px; }
+  .conversation-app .catalog-product, .confirmation-product strong {
+    font-size: clamp(20px, 1.15vw, 24px);
+  }
+  .conversation-app .catalog-categories button, .catalog-product small, .confirmation-product small {
+    font-size: clamp(17px, .94vw, 19px);
+  }
+  .assistant-note, .form-error { font-size: 18px; line-height: 1.75; }
+  .conversation-modal .task-detail-title { font-size: clamp(22px, 1.25vw, 27px); }
+  .operator-section summary, .operator-stock h3 {
+    font-size: clamp(20px, 1.15vw, 24px);
+    font-weight: 600;
+  }
+  .operator-section p, .operator-section label, .operator-section .check-label,
+  .operator-section .operator-stock-targets {
+    font-size: clamp(18px, 1.04vw, 22px);
+  }
+  .speech-feedback, .speech-cancel, .voice-auto-send { font-size: clamp(18px, 1vw, 20px); }
+}

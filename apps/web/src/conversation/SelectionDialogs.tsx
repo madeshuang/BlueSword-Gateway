@@ -2,15 +2,42 @@ import { useState } from "react";
 import {
   ArrowRight,
   Check,
+  Cookie,
+  CupSoda,
+  Flame,
+  Layers,
   Minus,
+  Package,
+  PenLine,
   Plus,
   X,
 } from "lucide-react";
+import type { BoothStockProduct } from "@bluesword/contracts";
 import type { BoothController } from "../useBooth";
 import { Modal } from "./Modal";
 
-import { ProductSymbol } from "./ProductSymbol";
-export { ProductSymbol } from "./ProductSymbol";
+export function ProductSymbol({
+  product,
+}: {
+  product: Pick<BoothStockProduct, "id" | "category" | "color">;
+}) {
+  const Icon = product.id.includes("pen")
+    ? PenLine
+    : product.id.includes("card")
+      ? Layers
+      : product.id.includes("bottle")
+        ? CupSoda
+        : product.id.includes("lighter")
+          ? Flame
+          : product.category.includes("零食")
+            ? Cookie
+            : Package;
+  return (
+    <span className="product-symbol" style={{ backgroundColor: product.color }}>
+      <Icon size={23} />
+    </span>
+  );
+}
 
 export function CatalogDialog({
   booth: c,
@@ -24,7 +51,7 @@ export function CatalogDialog({
   const [category, setCategory] = useState("全部");
   const products = c.state!.products;
   return (
-    <Modal title="选一份喜欢的物品" onClose={onClose} wide className="catalog-modal">
+    <Modal title="选一份喜欢的物品" onClose={onClose} wide>
       <p className="modal-description">
         也可以直接告诉我你的需求。每单最多选择两件。
       </p>
@@ -63,18 +90,18 @@ export function CatalogDialog({
                 }
               >
                 <ProductSymbol product={product} />
-                <span className="catalog-product-copy"><strong>{product.name}</strong>
+                <span>{product.name}</span>
                 <small>
                   {product.availableCount === 0
                     ? "暂时取完"
                     : `可取 ${product.availableCount} 件`}
-                </small></span>
+                </small>
                 {chosen && <Check size={15} className="product-check" />}
               </button>
             );
           })}
       </div>
-      <footer className="modal-actions catalog-actions">
+      <footer className="modal-actions">
         <span className="selection-count">已选 {c.total} / 2 件</span>
         <button className="secondary-button" onClick={onClose}>
           稍后再选
@@ -116,7 +143,7 @@ export function OrderDialog({
           return (
             <div className="confirmation-row" key={item.productId}>
               <ProductSymbol
-                product={product ?? { id: item.productId, color: "#eaf4f5" }}
+                product={product ?? { id: item.productId, category: "", color: "#eaf4f5" }}
               />
               <div className="confirmation-product">
                 <strong>{product?.name ?? item.productId}</strong>

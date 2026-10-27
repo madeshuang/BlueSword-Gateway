@@ -36,7 +36,11 @@ export interface BoothSnapshot {
   /** Exposes availability only, never the staff credential. */
   operator: { configured: boolean };
 }
-export interface BoothAdvice { reply: string; selection: BoothSelectionItem[] | null }
+export interface BoothSelectionClarification {
+  candidate: BoothSelectionItem[];
+  choices: Array<{kind: "add" | "replace" | "keep"; label: string}>;
+}
+export interface BoothAdvice { reply: string; selection: BoothSelectionItem[] | null; clarification?: BoothSelectionClarification }
 export interface BoothChatMessage { role: "user" | "assistant"; content: string }
 export function taskSummary(task: Pick<BoothTask, "items">): string {
   return task.items.map(item => `${item.name} × ${item.count}`).join("、");

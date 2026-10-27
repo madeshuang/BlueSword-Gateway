@@ -24,6 +24,71 @@ async function recoveryTarget(){const s=await (await fetch(base+"/api/booth")).j
 const modelOutput=(value:unknown)=>JSON.stringify(value&&typeof value==="object"?{taskStatusQuery:false,...value}:value);
 const command=(requestId="request-one",count=1,productId="water")=>({requestId,count,productId});
 
+it.each(['http','simulator'] as const)('%s承接数量时缺失selection仍能生成候选，不把口头已选当成功',async mode=>{
+  const source=config().products[0]!;
+  const products=[{...source,id:'cards',name:'扑克牌',initialStock:5,maxCount:2},{...source,id:'lighter',name:'USB防风打火机',initialStock:5,maxCount:2}];
+  await start(config({mode,products}),{assistant:{advise:async()=>({reply:'已选择USB防风打火机1份，请在界面确认取物。',selection:null,taskStatusQuery:false})}});
+  const ask=(previous:string,input='一份',currentSelection=[{productId:'cards',count:1}])=>post('/api/booth/chat',{currentSelection,messages:[{role:'user',content:'有打火机吗'},{role:'assistant',content:previous},{role:'user',content:input}]}).then(r=>r.json());
+  const result=await ask('有的，USB防风打火机目前可取5份，需要几份？');
+  expect(result.clarification?.candidate).toEqual([{productId:'lighter',count:1}]);
+  expect(result.reply).not.toContain('已选择');
+  const ambiguous=await ask('扑克牌和USB防风打火机都有，需要几份？');
+  expect(ambiguous.selection).toBeNull();
+  expect(ambiguous.reply).not.toContain('已选择');
+  const stale=await ask('你好，有什么可以帮你？');
+  expect(stale.selection).toBeNull();expect(stale.reply).not.toContain('已选择');
+  const first=await ask('USB防风打火机需要几份？','一份',[]);
+  expect(first.selection).toEqual([{productId:'lighter',count:1}]);
+  const tooMany=await ask('USB防风打火机需要几份？','三份',[]);
+  expect(tooMany.selection).toBeNull();expect(tooMany.reply).not.toContain('已选择');
+  expect(received).toHaveLength(0);
+});
+
+it.each(['http','simulator'] as const)('%s有歧义的新物品先确认追加或替换，决策仍校验数量',async mode=>{
+  const source=config().products[0]!;
+  const products=[{...source,id:'cards',name:'扑克牌',initialStock:5,maxCount:2},{...source,id:'ball',name:'乒乓球',initialStock:5,maxCount:2}];
+  await start(config({mode,products}),{assistant:{advise:async()=>({reply:'已选乒乓球一件。',selection:[{productId:'ball',count:1}],taskStatusQuery:false})}});
+  const currentSelection=[{productId:'cards',count:1}];
+  const messages=[{role:'user',content:'乒乓球一件'}];
+  const ask=(extra={})=>post('/api/booth/chat',{messages,currentSelection,...extra}).then(r=>r.json());
+  const advice=await ask();
+  expect(advice.selection).toBeNull();expect(advice.clarification.choices.map((c:{kind:string})=>c.kind)).toEqual(['add','replace','keep']);
+  const candidate=advice.clarification.candidate;
+  expect((await ask({selectionDecision:{kind:'add',candidate}})).selection).toEqual([...currentSelection,...candidate]);
+  expect((await ask({selectionDecision:{kind:'replace',candidate}})).selection).toEqual(candidate);
+  expect((await ask({selectionDecision:{kind:'keep',candidate}})).selection).toEqual(currentSelection);
+  expect((await ask({messages:[{role:'user',content:'换成一件乒乓球。'}]})).selection).toEqual(candidate);
+  const full=await ask({currentSelection:[{productId:'cards',count:2}]});
+  expect(full.clarification.choices.map((c:{kind:string})=>c.kind)).toEqual(['replace','keep']);
+  expect((await ask({currentSelection:[{productId:'cards',count:2}],selectionDecision:{kind:'add',candidate}})).selection).toBeNull();
+  expect((await post('/api/booth/chat',{messages,currentSelection,selectionDecision:{kind:'replace',candidate:[{productId:'missing',count:1}]}})).status).toBe(400);
+  expect(received).toHaveLength(0);
+});
+
+it.each(['http','simulator'] as const)('%s追加一件应按当前未提交清单计算，不累计已提交订单',async mode=>{
+  const source=config().products[0]!;
+  const lighter={...source,id:'lighter',name:'USB防风打火机',maxCount:2,initialStock:5};
+  const shuttle={...source,id:'shuttlecock_tube',name:'羽毛球',maxCount:2,initialStock:5};
+  await start(config({mode,products:[lighter,shuttle],dispatchUrl:await fakeRobot()}),{assistant:{advise:async()=>({reply:'再取羽毛球会超过每单最多两件的限制。',selection:null,taskStatusQuery:false})}});
+  const messages=[{role:'user',content:'来一个打火机。'},{role:'assistant',content:'已选打火机一件。'},{role:'user',content:'再来一桶羽毛球。'}];
+  const ask=(currentSelection:unknown)=>post('/api/booth/chat',{messages,currentSelection}).then(r=>r.json());
+  const two=await ask([{productId:'lighter',count:1}]);
+  expect(two.selection).toEqual([{productId:'lighter',count:1},{productId:'shuttlecock_tube',count:1}]);
+  expect(two.reply).not.toContain('超过');
+  expect((await ask([{productId:'shuttlecock_tube',count:1}])).selection).toEqual([{productId:'shuttlecock_tube',count:2}]);
+  for (const invalid of [[{productId:'missing',count:1}], [{productId:'lighter',count:1},{productId:'lighter',count:1}], [{productId:'lighter',count:3}]]) {
+    expect((await post('/api/booth/chat',{messages,currentSelection:invalid})).status).toBe(400);
+  }
+  const three=await ask([{productId:'lighter',count:2}]);
+  expect(three.selection).toBeNull();expect(three.reply).toContain('两件');
+  await app!.service.dispatch([{productId:'lighter',count:1}],'add-item-order');
+  const active=await ask([]);
+  expect(active.selection).toBeNull();expect(active.reply).toContain('已提交');expect(active.reply).not.toContain('超过');
+  app!.service.finished();
+  expect((await ask([])).selection).toEqual([{productId:'shuttlecock_tube',count:1}]);
+  expect(received).toHaveLength(1);
+});
+
 describe("体验关联取物进度 HTTP 边界",()=>{
   it.each(["openai","deepseek"] as const)("%s回复格式或内容无效时提供重新尝试和手选提示",async provider=>{
     const transport=vi.fn<typeof fetch>();
@@ -843,4 +908,31 @@ describe("OpenAI 独立端点 HTTP 边界",()=>{
     expect(body.text.format.strict).toBe(true);
   });
 
+});
+it.each(['openai','deepseek'] as const)('%s明确羽毛球请求重复三轮，模型漏清单也应提供确认项',async provider=>{
+  const source=config();
+  const product={...source.products[0]!,id:'shuttlecock_tube',name:'羽毛球',initialStock:3};
+  const transport=vi.fn<typeof fetch>().mockImplementation(async()=>Response.json(provider==='openai'
+    ?{status:'completed',output:[{type:'message',content:[{type:'output_text',text:modelOutput({reply:'已选一筒羽毛球，请在界面确认后提交。',selection:null})}]}]}
+    :{choices:[{finish_reason:'stop',message:{content:modelOutput({reply:'已选一筒羽毛球，请在界面确认后提交。',selection:null})}}]}));
+  await start(config({products:[product],aiProvider:provider,openaiKey:'fixture',deepseekKey:'fixture'}),{assistantTransport:transport});
+  const messages:Array<{role:'user'|'assistant';content:string}>=[];
+  for(const content of ['帮我拿一筒羽毛球。','帮我拿一桶羽毛球。','帮我拿一筒羽毛球。']){
+    messages.push({role:'user',content});
+    const response=await post('/api/booth/chat',{messages});const advice=await response.json();
+    expect(response.status).toBe(200);
+    expect(advice.selection).toEqual([{productId:'shuttlecock_tube',count:1}]);
+    messages.push({role:'assistant',content:advice.reply});
+  }
+  expect(app!.service.snapshot().tasks).toHaveLength(0);
+});
+it('明确请求补全不猜测问句、否定、多选或数量，并保留库存限制',async()=>{
+  const source=config();const product={...source.products[0]!,id:'shuttlecock_tube',name:'羽毛球',maxCount:2,initialStock:0};
+  await start(config({products:[product]}),{assistant:{advise:async()=>({reply:'请核对需求',selection:null,taskStatusQuery:false})}});
+  for(const content of ['有没有一筒羽毛球？','不要给我一筒羽毛球','帮我拿羽毛球','帮我拿一筒羽毛球还是一瓶水','帮我拿三筒羽毛球','帮我拿一筒羽毛球？']){
+    const advice=await(await post('/api/booth/chat',{messages:[{role:'user',content}]})).json();expect(advice.selection,content).toBeNull();
+  }
+  const outOfStock=await(await post('/api/booth/chat',{messages:[{role:'user',content:'帮我拿一筒羽毛球。'}]})).json();
+  expect(outOfStock.selection).toBeNull();expect(outOfStock.reply).toContain('已取完');
+  expect(app!.service.snapshot().tasks).toHaveLength(0);
 });
