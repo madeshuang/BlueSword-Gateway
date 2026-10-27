@@ -23,3 +23,6 @@ coverage/
 !/docs/本机人工联调指南.md
 !/docs/booth-inventory.md
 !/docs/task-id-proposal.md
+
+# Named local credential files
+*.env
