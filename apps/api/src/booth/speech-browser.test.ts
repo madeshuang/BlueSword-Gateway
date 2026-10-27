@@ -107,6 +107,7 @@ it.each(["http", "simulator"] as const)(
     );
     const base = "http://127.0.0.1:" + (await app.listen(0));
     browser = await chromium.launch({
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? {executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH} : {}),
       headless: true,
       args: [
         "--use-fake-ui-for-media-stream",
@@ -269,6 +270,7 @@ it("未检测到讲话自动退出，麦克风权限拒绝不清空已有草稿"
   );
   const base = "http://127.0.0.1:" + (await app.listen(0));
   browser = await chromium.launch({
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? {executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH} : {}),
     headless: true,
     args: [
       "--use-fake-ui-for-media-stream",
@@ -379,6 +381,7 @@ it("自动停止资源缺失时可手动停止，连续录音达到60秒仍能�
   );
   const base = "http://127.0.0.1:" + (await app.listen(0));
   browser = await chromium.launch({
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? {executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH} : {}),
     headless: true,
     args: [
       "--use-fake-ui-for-media-stream",
