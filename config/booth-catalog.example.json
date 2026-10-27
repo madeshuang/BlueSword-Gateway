@@ -2,7 +2,7 @@
 [
   {
     "id": "lighter_box",
-    "name": "兰剑智能打火机",
+    "name": "USB防风打火机",
     "category": "兰剑智能礼品",
     "subtitle": "点燃灵感，智启未来",
     "description": "一份精致的兰剑智能纪念礼品，让科技的温度伴随日常。",
@@ -14,7 +14,7 @@
   },
   {
     "id": "playing_card_box",
-    "name": "兰剑智能扑克牌",
+    "name": "可水洗掼蛋扑克牌",
     "category": "兰剑智能礼品",
     "subtitle": "智慧博弈，乐趣无限",
     "description": "工作之外，也要享受轻松时光。领取一副兰剑智能定制扑克牌。",
@@ -26,7 +26,7 @@
   },
   {
     "id": "pen_box",
-    "name": "兰剑智能圆珠笔",
+    "name": "高端签字笔",
     "category": "兰剑智能礼品",
     "subtitle": "记录灵感，书写未来",
     "description": "让每一次创新灵感都有迹可循，带走一支兰剑智能定制圆珠笔。",
@@ -35,18 +35,6 @@
     "initialStock": 3,
     "art": "pen_box",
     "color": "#dcecf1"
-  },
-  {
-    "id": "bottle",
-    "name": "水杯",
-    "category": "兰剑智能礼品",
-    "subtitle": "随时补水，活力满满",
-    "description": "一份兼具实用与心意的小礼品，为你的每一天增添清爽。",
-    "location": "待配置",
-    "maxCount": 3,
-    "initialStock": 3,
-    "art": "bottle",
-    "color": "#dceef0"
   },
   {
     "id": "table_tennis_ball_box",

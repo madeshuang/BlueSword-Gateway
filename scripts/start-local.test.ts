@@ -73,8 +73,8 @@ it.each([false,true])("一键入口隔离练习数据库，按配置加载练习
     expect(await(await fetch(gateway)).text()).toContain('<div id="root">');
     const initial=await(await fetch(gateway+"/api/booth")).json();
     expect(initial.ai).toMatchObject({provider:"DeepSeek",configured:false});
-    expect(initial.products.map((p:{id:string})=>p.id)).toEqual(["lighter_box","playing_card_box","pen_box","bottle","table_tennis_ball_box","shuttlecock_tube","air_pump","aoliao","anmuxi","haoliyou","shupian"]);
-    expect(initial.products[1].name).toBe(customCatalog?"练习用扑克牌":"兰剑智能扑克牌");
+    expect(initial.products.map((p:{id:string})=>p.id)).toEqual(["lighter_box","playing_card_box","pen_box","table_tennis_ball_box","shuttlecock_tube","air_pump","aoliao","anmuxi","haoliyou","shupian"]);
+    expect(initial.products[1].name).toBe(customCatalog?"练习用扑克牌":"可水洗掼蛋扑克牌");
     const items=[{productId:"playing_card_box",count:1},{productId:"pen_box",count:1}];
     const dispatch=post(gateway,"/api/booth/requests",{items,requestId:"launcher-test-001"});
     for(let n=0;n<100;n++){
@@ -147,7 +147,7 @@ it("正式一键入口使用.env的端口、机器人地址和数据库，未配
     expect(existsSync(join(root,".data/gateway-test.sqlite"))).toBe(true);
     expect(existsSync(join(root,".data/booth-manual.sqlite"))).toBe(false);
     const post=(route:string,body:unknown)=>fetch(base+route,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    expect(state.products).toHaveLength(11);
+    expect(state.products).toHaveLength(10);
     const dispatched=await post("/api/booth/requests",{productId:"playing_card_box",count:1,requestId:"gateway-launch-001"});
     expect((await dispatched.json()).task.status).toBe("executing");
     expect(received).toEqual([{path:"/api/task/dispatch",body:{items:[{location:"待配置",item:"playing_card_box",count:1}]}}]);
