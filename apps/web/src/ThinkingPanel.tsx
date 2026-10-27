@@ -1,39 +1,32 @@
-import {useEffect,useRef,useState} from "react";
-import {ChevronRight,LoaderCircle} from "lucide-react";
+import {useEffect,useState} from "react";
+import {LoaderCircle} from "lucide-react";
+import blueBrain from "./assets/blue-brain.jpg";
 
 export interface ThinkingMessage {
   role:"thinking";
   id:string;
   content:string;
-  phase:"running"|"done";
+  phase:"running"|"done"|"error";
   kind:"chat"|"task";
   requestId?:string;
 }
 
+/** A lightweight request indicator, not model reasoning or robot progress. */
 export function ThinkingPanel({message}:{message:ThinkingMessage}){
-  const [expanded,setExpanded]=useState(message.phase==="running");
-  const [visible,setVisible]=useState(0);
-  const previousContent=useRef("");
-  const characters=Array.from(message.content);
+  const [visible,setVisible]=useState(false);
+  const running=message.phase==="running";
   useEffect(()=>{
-    if(message.phase!=="running")setExpanded(false);
-  },[message.phase]);
-  useEffect(()=>{
-    const length=Array.from(message.content).length;
-    const appending=message.content.startsWith(previousContent.current);
-    previousContent.current=message.content;
-    if(message.phase!=="running"){setVisible(length);return;}
-    if(!appending)setVisible(0);
-    const timer=setInterval(()=>setVisible(current=>{
-      const next=Math.min(current+1,length);
-      if(next===length)clearInterval(timer);
-      return next;
-    }),35);
-    return()=>clearInterval(timer);
-  },[message.content,message.phase]);
-  const title=message.phase==="running"?"思考中":"思考已结束";
-  return <details className={"thinking-panel phase-"+message.phase} role="group" aria-label="思考过程" open={expanded} onToggle={event=>setExpanded(event.currentTarget.open)}>
-    <summary><span>{message.phase==="running"&&<LoaderCircle size={14} className="spin"/>}{title}<ChevronRight size={16} className="thinking-toggle-icon" aria-hidden="true"/></span></summary>
-    <div className="thinking-copy" aria-live="off">{characters.slice(0,visible).join("").split("\n\n").map((paragraph,index)=><p key={index}>{paragraph}</p>)}</div>
-  </details>;
+    setVisible(false);
+    if(!running)return;
+    const timer=setTimeout(()=>setVisible(true),300);
+    return()=>clearTimeout(timer);
+  },[message.id,running]);
+  if(message.phase==="done" || (running&&!visible))return null;
+  return <article className="assistant-message thinking-message">
+    <div className="assistant-identity"><img src={blueBrain} alt=""/><span>兰剑助手·布鲁</span></div>
+    <div className="chat-waiting" role="status" aria-label="回复状态">
+      {running&&<LoaderCircle size={18} className="spin" aria-hidden="true"/>}
+      <span>{running?"正在回复…":"本次回复未完成，请稍后重试。"}</span>
+    </div>
+  </article>;
 }

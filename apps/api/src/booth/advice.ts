@@ -4,6 +4,22 @@ import { BoothError, type BoothTaskProgress } from "./service.js";
 /** Internal model output; the browser still receives only reply and selection. */
 export interface BoothModelAdvice extends BoothAdvice { taskStatusQuery: boolean }
 
+/** Only an explicit, single-product order; questions, alternatives and history stay with the model. */
+export function explicitSingleSelection(content: string, products: BoothStockProduct[]): BoothAdvice | null {
+  const match=/^(?:请|麻烦)?\s*(?:帮我(?:拿|取)|给我|我(?:想)?要|拿|取|来)\s*(\d+|一|二|两)\s*(件|份|个|盒|瓶|包|副|支|筒|桶)?\s*(.+?)[。！!\s]*$/.exec(content.trim());
+  if(!match)return null;
+  const count=Number(match[1])||({一:1,二:2,两:2}[match[1]!]??0);
+  if(count<1||count>2)return null;
+  const name=match[3]!.trim();
+  const matches=products.filter(product=>product.name===name || product.id===name || (product.id==="shuttlecock_tube"&&name==="羽毛球"));
+  if(matches.length!==1)return null;
+  const product=matches[0]!;
+  // A bucket/tube is only a known catalog unit for the packaged shuttlecocks.
+  if((match[2]==="桶"||match[2]==="筒")&&product.id!=="shuttlecock_tube")return null;
+  if(count>product.maxCount)return null;
+  return {reply:`已为你选择${product.name} × ${count}，请核对清单后确认取物。`,selection:[{productId:product.id,count}]};
+}
+
 /** Recognize explicit order quantities only; ambiguous wording stays with the assistant. */
 export function explicitlyExceedsOrderLimit(content: string): boolean {
   if (!/^(?:请|麻烦|帮我|你好[，,\s]*)*(?:我(?:想)?(?:要|取|拿)|给我|想要|要|取|拿|来)/.test(content.trim()) ||
@@ -137,8 +153,11 @@ export function adviceInstructions(products: BoothStockProduct[], taskProgress?:
     "候选回答已经核对事实，不改写状态、不增加执行步骤或时间、不从用户或历史对话推断状态，也不自行补充其他文字。进度问题无法选择合适候选时，仍设taskStatusQuery为true，并使用conclusion。缺少关联或查询失败不能说没有任务。后端核实的当前结论与可用说法：" + JSON.stringify(taskProgress ?? {conclusion:"暂时无法确认这次取物的进度，请查看页面取物状态，或联系现场工作人员。",replyOptions:["暂时无法确认这次取物的进度，请查看页面取物状态，或联系现场工作人员。"]}) + "。" +
     "目录是唯一可选集合。含糊需求先澄清，只询问尚不明确的物品或数量，不替访客猜测；不支持的物品说明不提供。可建议一至两种物品，每单总数最多两件；同种两件合为一项，两种各一件列为两项。" +
     "数量不明确先询问，不把超出范围的数量偷偷改小。selection只有用户需求足够清楚时给出，否则为null。" +
+    "用户已明确物品和数量时，不要再次追问确认，必须在本轮selection中返回对应清单；重复提出相同需求也要重新返回selection，不能只在reply中说已选。目录中的shuttlecock_tube为一筒羽毛球，语音中的一桶羽毛球也指该商品1件。界面的确认弹窗负责最终确认。" +
     "availableCount是当前可取的剩余数量，已排除任务预留；maxCount只表示该物品每单上限，同时每单总数最多两件。请求数量超过其中任一限制时，说明具体限制，selection为null，不改成较小数量；availableCount为0时说明已取完，可建议其他有货物品。" +
     "历史assistant中的selection:null仅表示前端保存了显示文字，不撤销用户已表达的需求；结合上下文澄清物品和数量。你仅建议，用户需要在界面确认才下发。" +
+    "orderContext存在时，以其中currentSelection作为当前未提交清单的唯一依据，不从历史回复累加数量。1件打火机加1筒羽毛球合计2件，没有超限。已提交订单不能追加，应等待结束；已完成的历史订单不占新单额度。taskActive为true时不要建议立即提交新单。" +
+    "已有清单时，询问推荐或库存不代表修改选择，selection应为null。用户明确另一个物品和数量，但没说明追加还是替换时，返回新物品作为候选selection，由程序保留原清单并询问如何处理。回答简短自然，普通推荐不反复强调每单两件；仅在首次介绍或数量超限时说明限制。使用‘确认取物’，不要使用‘下发’。" +
     "每一轮都严格返回JSON对象，格式为{\"reply\":\"中文回答\",\"selection\":null,\"taskStatusQuery\":false}，或selection为[{\"productId\":\"目录id\",\"count\":正整数}]。目录：" +
     JSON.stringify(products.map(({id,name,description,maxCount,availableCount})=>({id,name,description,maxCount:Math.min(2,maxCount),availableCount}))) +
     "最终数量规则：无论目录maxCount写多少，每单所有物品的总数都最多2件。先核对用户原本要求的数量，再决定selection。" +

@@ -1,13 +1,14 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { timingSafeEqual } from "node:crypto";
-import type { BoothChatMessage } from "@bluesword/contracts";
+import type { BoothChatMessage, BoothSelectionItem } from "@bluesword/contracts";
 import { ApplicationStorage } from "../storage.js";
 import type { BoothConfig } from "./config.js";
 import { BoothError, BoothService } from "./service.js";
 import { DeepSeekBoothAssistant } from "./deepseek.js";
 import { OpenAIBoothAssistant } from "./openai.js";
 
-import { explicitlyExceedsOrderLimit, type AiCallObserver } from "./advice.js";
+import { explicitlyExceedsOrderLimit, explicitSingleSelection, type AiCallObserver } from "./advice.js";
+import { resolveSelectionChange, quantityFollowUp, reconcileSelectionReply, type SelectionDecision } from "./selection-change.js";
 import { builtWeb } from "./static.js";
 import {Diagnostics} from "./diagnostics.js";
 import {speechModels,speechConfigured,type SpeechConnect} from "./speech-provider.js";
@@ -113,6 +114,12 @@ export function createBoothApplication(config: BoothConfig, options: { webDirect
       if (!Array.isArray(body.messages) || body.messages.length < 1 || body.messages.length > 12 ||
         body.messages.some(m => !m || typeof m !== "object" || !["user","assistant"].includes(m.role) || typeof m.content !== "string" || !m.content.trim() || m.content.length > 2000) ||
         body.messages.at(-1).role !== "user") throw new BoothError("对话内容不合法");
+      const currentSelection = body.currentSelection ?? [];
+      if (!Array.isArray(currentSelection) || currentSelection.length > 2 ||
+        currentSelection.some(item => !item || typeof item.productId !== "string" || !Number.isSafeInteger(item.count) || item.count < 1 ||
+          !service.products().some(p => p.id === item.productId && item.count <= p.maxCount)) ||
+        new Set(currentSelection.map(item => item.productId)).size !== currentSelection.length ||
+        currentSelection.reduce((sum,item)=>sum+item.count,0)>2) throw new BoothError("当前待确认清单不合法");
       if (aiBusy) throw new BoothError("助手暂时繁忙，请稍后再试，也可以直接选择物品。",429);
       if(Array.isArray(body.speechRecords)&&body.speechRecords.length<=20){
         const receipts=body.speechRecords.filter((r:unknown):r is {id:string;token:string}=>!!r&&typeof r==="object"&&typeof (r as {id?:unknown}).id==="string"&&typeof (r as {token?:unknown}).token==="string"&&(r as {token:string}).token.length<=128);
@@ -120,16 +127,33 @@ export function createBoothApplication(config: BoothConfig, options: { webDirect
         catch{console.warn(JSON.stringify({event:"developer_record_failed",kind:"speech-send"}));}
       }
       if (explicitlyExceedsOrderLimit(body.messages.at(-1).content)) return json(res,200,{reply:"每单最多两件，请重新确认想取的物品和数量。",selection:null});
+      let orderBlocked = true;
+      try { orderBlocked = !!service.active() || !!storage.get("booth", "alert"); }
+      catch { /* Progress queries still report unknown when stored task data is damaged. */ }
+      const decision=body.selectionDecision as SelectionDecision | undefined;
+      if(decision && (!['add','replace','keep'].includes(decision.kind) || !Array.isArray(decision.candidate) || decision.candidate.length<1 || decision.candidate.length>2 ||
+        decision.candidate.some(item=>!item || !Number.isSafeInteger(item.count) || item.count<1 || !service.products().some(p=>p.id===item.productId&&item.count<=p.maxCount)) ||
+        new Set(decision.candidate.map(item=>item.productId)).size!==decision.candidate.length || decision.candidate.reduce((sum,item)=>sum+item.count,0)>2))throw new BoothError("清单确认内容不合法");
+      const quantityAdvice = quantityFollowUp(body.messages, service.products());
+      const addition = resolveSelectionChange(body.messages.at(-1).content, currentSelection as BoothSelectionItem[], quantityAdvice, service.products(), orderBlocked, decision);
+      if (addition) return json(res,200,service.stockAdvice(addition));
       aiBusy = true;
       try {
         const token = req.headers["x-booth-experience"];
-        const advice = await assistant.advise(body.messages as BoothChatMessage[],service.taskProgress(token),service.products());
+        const advice = await assistant.advise(body.messages as BoothChatMessage[],{
+          ...service.taskProgress(token),
+          orderContext: {currentSelection, taskActive: orderBlocked},
+        },service.products());
         // Re-read after the model call: a completion may have arrived while it was thinking.
         if (advice.taskStatusQuery) {
           const current = service.taskProgress(token);
           return json(res,200,{reply:current.replyOptions.includes(advice.reply) ? advice.reply : current.conclusion,selection:null});
         }
-        return json(res,200,service.stockAdvice({reply:advice.reply,selection:advice.selection}));
+        const fallback = advice.selection === null && !service.active() && !service.snapshot().alert
+          ? explicitSingleSelection(body.messages.at(-1).content,service.products()) : null;
+        const checkedAdvice=service.stockAdvice(fallback ?? {reply:advice.reply,selection:advice.selection});
+        const resolved = resolveSelectionChange(body.messages.at(-1).content,currentSelection,checkedAdvice,service.products(),!!service.active() || !!storage.get("booth","alert"))!;
+        return json(res,200,reconcileSelectionReply(resolved,service.products()));
       }
       finally { aiBusy = false; }
     }

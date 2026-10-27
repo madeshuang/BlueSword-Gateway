@@ -7,8 +7,10 @@ import {SpeechEndpoint,type StopReason} from "./endpoint";
 type Attempt={controller:AbortController;receipt?:SpeechReceipt;mic?:Awaited<ReturnType<typeof prepareMicrophone>>;socket?:WebSocket;timer?:ReturnType<typeof setInterval>;draftId:number;stoppedAt?:number;done:boolean;startedAt:number};
 export interface VoiceControl {cancel(reason?:string):void;takeReceipts():SpeechReceipt[];clearReceipts():void}
 async function post(path:string,body:unknown){const response=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal:AbortSignal.timeout(10000)});const data=await response.json();if(!response.ok)throw new Error(typeof data.data==="string"?data.data:"语音连接失败，请重试");return data;}
-export const VoiceInput=forwardRef<VoiceControl,{draft:SpeechDraft;onText:(text:string)=>void;disabled:boolean}>(function VoiceInput({draft,onText,disabled},ref){
+export const VoiceInput=forwardRef<VoiceControl,{draft:SpeechDraft;onText:(text:string)=>void;onRecognized?:(text:string)=>void;disabled:boolean}>(function VoiceInput({draft,onText,onRecognized,disabled},ref){
   const [configured,setConfigured]=useState(false),[phase,setPhase]=useState("idle"),[message,setMessage]=useState(""),[partial,setPartial]=useState("");
+  const recognitionHandler=useRef(onRecognized);
+  recognitionHandler.current=onRecognized;
   const active=useRef<Attempt|undefined>(undefined),receipts=useRef<SpeechReceipt[]>([]);
   function update(attempt:Attempt,value:Record<string,unknown>){if(attempt.receipt)void post(`/api/booth/speech/attempts/${attempt.receipt.id}`,{token:attempt.receipt.token,...value}).catch(()=>{console.warn("语音运行记录的草稿状态未能保存");});}
   function release(attempt:Attempt){clearInterval(attempt.timer);attempt.controller.abort();void attempt.mic?.cancel();attempt.socket?.close();if(active.current===attempt){active.current=undefined;setPhase("idle");}}
@@ -59,6 +61,7 @@ export const VoiceInput=forwardRef<VoiceControl,{draft:SpeechDraft;onText:(text:
           update(attempt,{applied,...(applied&&elapsed!==undefined?{endToDraftMs:elapsed}:{})});release(attempt);
           if(data.recordSaved===false)console.warn("本次语音运行记录未能保存");
           setMessage(!text.trim()?"没有识别到文字，请重试。":applied?"可以修改文字，确认后发送。":"输入内容已更改或文字过长，请按需复制下方结果。");
+          if(applied)recognitionHandler.current?.(draft.value);
         }
       })().catch(()=>fail(attempt,"语音处理失败"));};
     }catch(error){const denied=error instanceof DOMException&&error.name==="NotAllowedError";fail(attempt,denied?"麦克风权限未允许":error instanceof Error?error.message:"无法启动录音",denied?"microphone-denied":"capture-failed");}

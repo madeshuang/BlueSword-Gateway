@@ -9,7 +9,7 @@ export class BoothError extends Error {
 }
 const blocks = (t: BoothTask) => ["submitting", "executing", "uncertain", "fault"].includes(t.status);
 interface Experience { id: string; taskId: string | null }
-export interface BoothTaskProgress { conclusion: string; replyOptions: string[] }
+export interface BoothTaskProgress { conclusion: string; replyOptions: string[]; orderContext?: {currentSelection: Array<{productId:string;count:number}>;taskActive:boolean} }
 const unknownProgress = "暂时无法确认这次取物的进度，请查看页面取物状态，或联系现场工作人员。";
 export class BoothService {
   private listeners = new Set<() => void>();
