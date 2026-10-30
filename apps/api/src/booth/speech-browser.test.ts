@@ -98,7 +98,8 @@ it.each(["http", "simulator"] as const)(
             aiCalls++;
             return {
               reply: "请确认物品和数量",
-              selection: [{ productId: "water", count: 1 }],
+              selection: null,
+              intent:{kind:"choose",items:[{productId:"water",count:1}]},
               taskStatusQuery: false,
             };
           },
@@ -131,7 +132,7 @@ it.each(["http", "simulator"] as const)(
     const draft = page.getByRole("textbox", { name: "告诉助手你的需求" });
     await expect.poll(() => draft.inputValue()).toBe("两瓶矿泉水");
     expect(aiCalls).toBe(0);
-    await draft.fill("一瓶矿泉水");
+    await draft.fill("帮我安排一瓶矿泉水吧");
     await page.getByRole("button", { name: "发送需求", exact: true }).click();
     await expect.poll(() => aiCalls).toBe(1);
     expect(app.service.snapshot().tasks).toHaveLength(0);
@@ -142,13 +143,13 @@ it.each(["http", "simulator"] as const)(
     ).json();
     expect(records.records[0]).toMatchObject({
       text: "两瓶矿泉水",
-      sentText: "一瓶矿泉水",
+      sentText: "帮我安排一瓶矿泉水吧",
     });
     await page
       .getByRole("dialog", { name: "确认这份取物清单" })
       .getByRole("button", { name: "暂不取物" })
       .click();
-    await page.getByText("请确认物品和数量", { exact: true }).waitFor();
+    await page.getByText("已记下：矿泉水 × 1，共 1 件。", { exact: true }).waitFor();
     const begin = async () => {
       await page
         .getByRole("button", { name: "开始语音输入", exact: true })
@@ -439,7 +440,7 @@ it.each(['http','simulator'] as const)('%s：连续语音识别七轮均弹出�
   const config=readBoothConfig();
   app=createBoothApplication({...config,mode,manualRobot:mode==='simulator',databasePath:':memory:',catalogConfirmed:true,dispatchUrl:'http://127.0.0.1:1/never-dispatch',openaiKey:'fixture',operatorToken:'fixture',products:[{...config.products[0]!,id:'shuttlecock_tube',name:'羽毛球'}],speech:{...config.speech!,enabled:true,provider:'ali',aliKey:'fixture'}},{
     webDirectory:resolve('apps/web/dist'),speechConnect:()=>new WebSocket('ws://127.0.0.1:'+(cloud!.address() as {port:number}).port),
-    assistant:{advise:async()=>{calls++;return {reply:'已选一筒羽毛球，请在界面确认后提交。',selection:null,taskStatusQuery:false};}},
+    assistant:{advise:async()=>{calls++;return {reply:'已选一筒羽毛球，请在界面确认后提交。',selection:null,taskStatusQuery:false,intent:null};}},
   });
   const base='http://127.0.0.1:'+await app.listen(0);
   const executablePath=process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;

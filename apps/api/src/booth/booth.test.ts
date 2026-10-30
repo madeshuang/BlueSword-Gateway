@@ -21,13 +21,13 @@ async function start(c:BoothConfig,options:Parameters<typeof createBoothApplicat
 async function post(path:string,body:unknown={},headers:Record<string,string>={}){return fetch(base+path,{method:"POST",headers:{"Content-Type":"application/json",...headers},body:JSON.stringify(body)});}
 async function recoveryTarget(){const s=await (await fetch(base+"/api/booth")).json();return {expectedTaskId:s.active?.id??null,expectedAlert:s.alert};}
 // Controlled supplier outputs include the new internal intent field; HTTP advice remains unchanged.
-const modelOutput=(value:unknown)=>JSON.stringify(value&&typeof value==="object"?{taskStatusQuery:false,...value}:value);
+const modelOutput=(value:unknown)=>JSON.stringify(value&&typeof value==="object"&&"selection" in value?{taskStatusQuery:false,...value,intent:('selection' in value && Array.isArray(value.selection)?{kind:'choose',items:value.selection}:null),selection:null}:value);
 const command=(requestId="request-one",count=1,productId="water")=>({requestId,count,productId});
 
 it.each(['http','simulator'] as const)('%s承接数量时缺失selection仍能生成候选，不把口头已选当成功',async mode=>{
   const source=config().products[0]!;
   const products=[{...source,id:'cards',name:'扑克牌',initialStock:5,maxCount:2},{...source,id:'lighter',name:'USB防风打火机',initialStock:5,maxCount:2}];
-  await start(config({mode,products}),{assistant:{advise:async()=>({reply:'已选择USB防风打火机1份，请在界面确认取物。',selection:null,taskStatusQuery:false})}});
+  await start(config({mode,products}),{assistant:{advise:async()=>({reply:'你想取哪种物品？',selection:null,taskStatusQuery:false,intent:null})}});
   const ask=(previous:string,input='一份',currentSelection=[{productId:'cards',count:1}])=>post('/api/booth/chat',{currentSelection,messages:[{role:'user',content:'有打火机吗'},{role:'assistant',content:previous},{role:'user',content:input}]}).then(r=>r.json());
   const result=await ask('有的，USB防风打火机目前可取5份，需要几份？');
   expect(result.clarification?.candidate).toEqual([{productId:'lighter',count:1}]);
@@ -47,7 +47,7 @@ it.each(['http','simulator'] as const)('%s承接数量时缺失selection仍能�
 it.each(['http','simulator'] as const)('%s有歧义的新物品先确认追加或替换，决策仍校验数量',async mode=>{
   const source=config().products[0]!;
   const products=[{...source,id:'cards',name:'扑克牌',initialStock:5,maxCount:2},{...source,id:'ball',name:'乒乓球',initialStock:5,maxCount:2}];
-  await start(config({mode,products}),{assistant:{advise:async()=>({reply:'已选乒乓球一件。',selection:[{productId:'ball',count:1}],taskStatusQuery:false})}});
+  await start(config({mode,products}),{assistant:{advise:async()=>({reply:'已选乒乓球一件。',selection:null,taskStatusQuery:false,intent:{kind:'choose',items:[{productId:'ball',count:1}]}})}});
   const currentSelection=[{productId:'cards',count:1}];
   const messages=[{role:'user',content:'乒乓球一件'}];
   const ask=(extra={})=>post('/api/booth/chat',{messages,currentSelection,...extra}).then(r=>r.json());
@@ -69,7 +69,7 @@ it.each(['http','simulator'] as const)('%s追加一件应按当前未提交清�
   const source=config().products[0]!;
   const lighter={...source,id:'lighter',name:'USB防风打火机',maxCount:2,initialStock:5};
   const shuttle={...source,id:'shuttlecock_tube',name:'羽毛球',maxCount:2,initialStock:5};
-  await start(config({mode,products:[lighter,shuttle],dispatchUrl:await fakeRobot()}),{assistant:{advise:async()=>({reply:'再取羽毛球会超过每单最多两件的限制。',selection:null,taskStatusQuery:false})}});
+  await start(config({mode,products:[lighter,shuttle],dispatchUrl:await fakeRobot()}),{assistant:{advise:async()=>({reply:'再取羽毛球会超过每单最多两件的限制。',selection:null,taskStatusQuery:false,intent:null})}});
   const messages=[{role:'user',content:'来一个打火机。'},{role:'assistant',content:'已选打火机一件。'},{role:'user',content:'再来一桶羽毛球。'}];
   const ask=(currentSelection:unknown)=>post('/api/booth/chat',{messages,currentSelection}).then(r=>r.json());
   const two=await ask([{productId:'lighter',count:1}]);
@@ -93,7 +93,7 @@ describe("体验关联取物进度 HTTP 边界",()=>{
   it.each(["openai","deepseek"] as const)("%s回复格式或内容无效时提供重新尝试和手选提示",async provider=>{
     const transport=vi.fn<typeof fetch>();
     await start(config({aiProvider:provider,openaiKey:"fixture",deepseekKey:"fixture"}),{assistantTransport:transport});
-    for(const value of ["not JSON",JSON.stringify({reply:"",selection:null,taskStatusQuery:false})]){
+    for(const value of ["not JSON",JSON.stringify({reply:"",selection:null,taskStatusQuery:false,intent:null})]){
       transport.mockResolvedValueOnce(Response.json(provider==="openai"
         ?{status:"completed",output:[{type:"message",content:[{type:"output_text",text:value}]}]}
         :{choices:[{finish_reason:"stop",message:{content:value}}]}));
@@ -150,8 +150,8 @@ describe("体验关联取物进度 HTTP 边界",()=>{
     const transport=vi.fn<typeof fetch>().mockImplementation(async()=>{
       if(finishDuringReply)await post("/api/task/finished",{});
       return Response.json(provider==="openai"
-        ? {status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({reply,selection:null,taskStatusQuery:true})}]}]}
-        : {choices:[{finish_reason:"stop",message:{content:JSON.stringify({reply,selection:null,taskStatusQuery:true})}}]});
+        ? {status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({reply,selection:null,taskStatusQuery:true,intent:null})}]}]}
+        : {choices:[{finish_reason:"stop",message:{content:JSON.stringify({reply,selection:null,taskStatusQuery:true,intent:null})}}]});
     });
     await start(config({dispatchUrl:await fakeRobot(),aiProvider:provider,openaiKey:"fixture",deepseekKey:"fixture"}),{assistantTransport:transport});
     const experience=await (await post("/api/booth/experiences")).json(),headers={"X-Booth-Experience":experience.token};
@@ -168,8 +168,8 @@ describe("体验关联取物进度 HTTP 边界",()=>{
     let gate=new Promise<void>(r=>release=r);const started=new Promise<void>(r=>arrived=r);
     const robotTransport=vi.fn<typeof fetch>().mockImplementation(async()=>{arrived();await gate;if(receipt===null)throw new Error("受理反馈丢失");return Response.json({success:receipt,data:"received"});});
     const transport=vi.fn<typeof fetch>().mockImplementation(async()=>Response.json(provider==="openai"
-      ? {status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({reply,selection:null,taskStatusQuery:true})}]}]}
-      : {choices:[{finish_reason:"stop",message:{content:JSON.stringify({reply,selection:null,taskStatusQuery:true})}}]}));
+      ? {status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({reply,selection:null,taskStatusQuery:true,intent:null})}]}]}
+      : {choices:[{finish_reason:"stop",message:{content:JSON.stringify({reply,selection:null,taskStatusQuery:true,intent:null})}}]}));
     await start(config({dispatchUrl:"http://127.0.0.1:1/unused",aiProvider:provider,openaiKey:"fixture",deepseekKey:"fixture"}),{transport:robotTransport,assistantTransport:transport});
     const experience=await (await post("/api/booth/experiences")).json(),headers={"X-Booth-Experience":experience.token};
     const query=async()=>await (await post("/api/booth/chat",{messages:[{role:"user",content:"那现在呢？"}]},headers)).json();
@@ -198,8 +198,8 @@ describe("体验关联取物进度 HTTP 边界",()=>{
     const direct="已经取好了，请到交付处领取。",followUp="现在已经取好了，到交付处领取就可以。";
     let reply=direct;
     const transport=vi.fn<typeof fetch>().mockImplementation(async()=>Response.json(provider==="openai"
-      ? {status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({reply,selection:null,taskStatusQuery:true})}]}]}
-      : {choices:[{finish_reason:"stop",message:{content:JSON.stringify({reply,selection:null,taskStatusQuery:true})}}]}));
+      ? {status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({reply,selection:null,taskStatusQuery:true,intent:null})}]}]}
+      : {choices:[{finish_reason:"stop",message:{content:JSON.stringify({reply,selection:null,taskStatusQuery:true,intent:null})}}]}));
     await start(config({dispatchUrl:await fakeRobot(),aiProvider:provider,openaiKey:"fixture",deepseekKey:"fixture"}),{assistantTransport:transport});
     const experience=await (await post("/api/booth/experiences")).json(),headers={"X-Booth-Experience":experience.token};
     await post("/api/booth/requests",command(),headers);await post("/api/task/finished",{});
@@ -211,14 +211,15 @@ describe("体验关联取物进度 HTTP 边界",()=>{
     const body=JSON.parse(transport.mock.calls.at(-1)![1]!.body as string);
     const instructions=provider==="openai"?body.instructions:body.messages[0].content;
     expect(instructions).toContain(direct);expect(instructions).toContain(followUp);
-    const sent=provider==="openai"?body.input:body.messages.slice(1);
+    const transcript=provider==="deepseek"?JSON.parse(body.messages[1].content):null;
+    const sent=provider==="openai"?body.input:[...transcript.history,{role:"user",content:transcript.message}];
     expect(sent.at(-1)).toEqual(context.at(-1));
-    expect(provider==="openai"?sent[1].content:JSON.parse(sent[1].content).reply).toBe(direct);
+    expect(sent[1].content).toBe(direct);
     expect(received).toHaveLength(1);
   });
   const progressOutput=(provider:"openai"|"deepseek",query=true)=>Response.json(provider==="openai"
-    ? {status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({reply:"模型自行猜测的结论",selection:null,taskStatusQuery:query})}]}]}
-    : {choices:[{finish_reason:"stop",message:{content:JSON.stringify({reply:"模型自行猜测的结论",selection:null,taskStatusQuery:query})}}]});
+    ? {status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({reply:"模型自行猜测的结论",selection:null,taskStatusQuery:query,intent:null})}]}]}
+    : {choices:[{finish_reason:"stop",message:{content:JSON.stringify({reply:"模型自行猜测的结论",selection:null,taskStatusQuery:query,intent:null})}}]});
   const ask=async(token?:string)=>(await (await post("/api/booth/chat",{messages:[{role:"user",content:"我的东西取好了吗？"}]},token?{"X-Booth-Experience":token}:{})).json()).reply as string;
   it.each(["openai","deepseek"] as const)("%s等待、执行、完成、异常及人工处理的结论准确，两个会话与重启后仍隔离",async provider=>{
     let release!:()=>void,arrived!:()=>void;
@@ -295,7 +296,7 @@ describe("体验关联取物进度 HTTP 边界",()=>{
     }finally{fixture.close();}
   });
   it.each(["openai","deepseek"] as const)("%s无可靠关联时覆盖模型猜测，不把共享活动任务认作访客任务",async provider=>{
-    const guessed={reply:"你的东西已取好。",selection:[{productId:"water",count:1}],taskStatusQuery:true};
+    const guessed={reply:"你的东西已取好。",selection:null,taskStatusQuery:true,intent:null};
     const transport=vi.fn<typeof fetch>().mockResolvedValue(Response.json(provider==="openai"
       ? {status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify(guessed)}]}]}
       : {choices:[{finish_reason:"stop",message:{content:JSON.stringify(guessed)}}]}));
@@ -326,7 +327,7 @@ describe("体验关联取物进度 HTTP 边界",()=>{
   });
   it.each(["openai","deepseek"] as const)("%s意图字段必须为布尔值，遗漏或多字段不会被当作有效回复",async provider=>{
     const transport=vi.fn<typeof fetch>();await start(config({aiProvider:provider,openaiKey:"fixture",deepseekKey:"fixture"}),{assistantTransport:transport});
-    for(const value of [{reply:"未知意图",selection:null},{reply:"错误意图",selection:null,taskStatusQuery:"true"},{reply:"额外字段",selection:null,taskStatusQuery:true,taskId:"公开任务ID"}]){
+    for(const value of [{reply:"未知意图",selection:null},{reply:"错误意图",selection:null,taskStatusQuery:"true"},{reply:"额外字段",selection:null,taskStatusQuery:true,intent:null,taskId:"公开任务ID"}]){
       transport.mockResolvedValueOnce(Response.json(provider==="openai"
         ? {status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify(value)}]}]}
         : {choices:[{finish_reason:"stop",message:{content:JSON.stringify(value)}}]}));
@@ -577,7 +578,7 @@ describe("OpenAI Responses选品接入（可控对端，不冒充真实GPT）",(
   const response=(value:unknown=answer)=>Response.json({status:"completed",output:[{type:"message",content:[{type:"output_text",text:modelOutput(value)}]}]});
   it("使用官方URL/模型/结构化输出，仅给出建议，无机器人调用",async()=>{
     const transport=vi.fn<typeof fetch>().mockResolvedValue(response());
-    const ai=new OpenAIBoothAssistant(config({openaiKey:"test-key"}),transport);expect(await ai.advise([{role:"user",content:"一瓶水"}])).toEqual({...answer,taskStatusQuery:false});
+    const ai=new OpenAIBoothAssistant(config({openaiKey:"test-key"}),transport);expect(await ai.advise([{role:"user",content:"一瓶水"}])).toEqual(JSON.parse(modelOutput(answer)));
     const [url,options]=transport.mock.calls[0]!;expect(url).toBe("https://api.openai.com/v1/responses");
     const body=JSON.parse(options!.body as string);expect(body.model).toBe("gpt-4.1-mini");expect(body.store).toBe(false);
     expect(body.text.format).toMatchObject({type:"json_schema",strict:true});expect(body.input[0].content).toBe("一瓶水");expect(body.tools).toBeUndefined();expect(received).toHaveLength(0);
@@ -589,7 +590,7 @@ describe("OpenAI Responses选品接入（可控对端，不冒充真实GPT）",(
   it("密钥缺失、超时、未知物品、数量越界、不完整输出均显式失败",async()=>{
     await expect(new OpenAIBoothAssistant(config({openaiKey:undefined})).advise([])).rejects.toThrow("暂未连接");
     await expect(new OpenAIBoothAssistant(config({openaiKey:"test"}),vi.fn<typeof fetch>().mockRejectedValue(new Error("timeout"))).advise([])).rejects.toThrow("暂时连不上助手，请稍后再试，也可以直接选择物品。");
-    for(const value of [{...answer,selection:[{productId:"missing",count:1}]},{...answer,selection:[{productId:"water",count:99}]}]){
+    for(const value of [{...answer,selection:[{productId:"missing",count:1}]},{...answer,selection:[{productId:"water",count:0}]}]){
       await expect(new OpenAIBoothAssistant(config({openaiKey:"test"}),vi.fn<typeof fetch>().mockResolvedValue(response(value))).advise([])).rejects.toThrow("这次没能正常回复，可以再试一次，或直接选择物品。");
     }
     await expect(new OpenAIBoothAssistant(config({openaiKey:"test"}),vi.fn<typeof fetch>().mockResolvedValue(Response.json({status:"incomplete"}))).advise([])).rejects.toThrow("这次没能正常回复，可以再试一次，或直接选择物品。");
@@ -611,15 +612,15 @@ describe("双供应商建议 HTTP 边界（可控对端，不冒充真实供应�
     const answer={reply:"请确认两瓶矿泉水。",selection:[{productId:"water",count:2}]};
     const transport=vi.fn<typeof fetch>().mockResolvedValue(Response.json({choices:[{finish_reason:"stop",message:{content:modelOutput(answer)}}]}));
     await start(config({aiProvider:"deepseek",deepseekKey:"deepseek-fixture-secret",openaiKey:undefined}),{assistantTransport:transport});
-    const response=await post("/api/booth/chat",{messages:[{role:"user",content:"两瓶矿泉水"}]});
-    expect(response.status).toBe(200);expect(await response.json()).toEqual(answer);
+    const response=await post("/api/booth/chat",{messages:[{role:"user",content:"想喝点水，帮我选两瓶吧"}]});
+    expect(response.status).toBe(200);expect(await response.json()).toEqual({...answer,reply:`已记下：矿泉水 × ${answer.selection[0]!.count}，共 ${answer.selection[0]!.count} 件。`});
     expect(transport).toHaveBeenCalledTimes(1);
     const [url,options]=transport.mock.calls[0]!;expect(url).toBe("https://api.deepseek.com/chat/completions");
     expect(new Headers(options!.headers).get("Authorization")).toBe("Bearer deepseek-fixture-secret");
     const body=JSON.parse(options!.body as string);expect(body.model).toBe("deepseek-flash");
     expect(body.response_format).toEqual({type:"json_object"});expect(body.thinking).toEqual({type:"disabled"});
     expect(body.messages[0].role).toBe("system");expect(body.messages[0].content).toContain("JSON");
-    expect(body.messages.at(-1)).toEqual({role:"user",content:"两瓶矿泉水"});expect(body.tools).toBeUndefined();
+    expect(JSON.parse(body.messages.at(-1).content)).toEqual({history:[],message:"想喝点水，帮我选两瓶吧"});expect(body.tools).toBeUndefined();
     expect((await (await fetch(base+"/api/booth")).json()).tasks).toEqual([]);expect(received).toHaveLength(0);
   });
 
@@ -631,7 +632,7 @@ describe("双供应商建议 HTTP 边界（可控对端，不冒充真实供应�
       ? Response.json({status:"completed",output:[{type:"message",content:[{type:"output_text",text:modelOutput(value)}]}]})
       : Response.json({choices:[{finish_reason:"stop",message:{content:modelOutput(value)}}]});
     for(const invalid of [{...answer,debug:"不应返回给访客"},{...answer,selection:[{productId:"unknown",count:1}]},
-      {...answer,selection:[{productId:"water",count:99}]},{...answer,selection:[{productId:"water",count:1.5}]},
+      {...answer,selection:[{productId:"water",count:0}]},{...answer,selection:[{productId:"water",count:1.5}]},
       {...answer,selection:[{productId:"water",count:1,extra:"secret"}]},{reply:"漏掉selection"}]){
       transport.mockResolvedValueOnce(output(invalid));
       const response=await post("/api/booth/chat",{messages:[{role:"user",content:"一瓶水"}]});
@@ -654,8 +655,8 @@ describe("双供应商建议 HTTP 边界（可控对端，不冒充真实供应�
     const transport=vi.fn<typeof fetch>().mockResolvedValue(Response.json(payload));
     await start(config({aiProvider:provider,openaiKey:"private-secret",deepseekKey:"private-secret",openaiModel:"requested-model",deepseekModel:"requested-model"}),{assistantTransport:transport});
     const response=await post("/api/booth/chat",{messages:[{role:"user",content:"private-dialogue"}]});
-    expect(response.status).toBe(200);expect(await response.json()).toEqual(advice);
-    const event=JSON.parse(String(info.mock.calls.at(-1)?.[0]));
+    expect(response.status).toBe(200);expect(await response.json()).toEqual({...advice,reply:"已记下：矿泉水 × 1，共 1 件。"});
+    const event=info.mock.calls.map(call=>JSON.parse(String(call[0]))).reverse().find(event=>event.event==="ai_call");
     expect(event).toMatchObject({model:"requested-model",returnedModel:"returned-model-2026",usage:{inputTokens:37,outputTokens:11,totalTokens:48},structureValidated:true,upstreamStatus:200});
     expect(JSON.stringify(event)).not.toMatch(/private-secret|private-answer|private-dialogue/);
     expect((await (await fetch(base+"/api/booth")).json()).tasks).toEqual([]);
@@ -668,10 +669,10 @@ describe("双供应商建议 HTTP 边界（可控对端，不冒充真实供应�
     await start(config({aiProvider:"openai",openaiKey:"fixture"}),{assistantTransport:transport,onAiCall:async()=>{throw new Error("诊断消费者异常");}});
     for(let i=0;i<2;i++){
       const response=await post("/api/booth/chat",{messages:[{role:"user",content:"一瓶水"}]});
-      expect(response.status).toBe(200);expect(await response.json()).toEqual(advice);
+      expect(response.status).toBe(200);expect(await response.json()).toEqual({...advice,reply:"已记下：矿泉水 × 1，共 1 件。"});
       await new Promise(resolve=>setImmediate(resolve));
     }
-    expect(info).toHaveBeenCalledTimes(2);
+    expect(info.mock.calls.filter(call=>JSON.parse(String(call[0])).event==="ai_call")).toHaveLength(2);
     expect((await (await fetch(base+"/api/booth")).json()).tasks).toEqual([]);
   });
 
@@ -720,7 +721,7 @@ describe("双供应商建议 HTTP 边界（可控对端，不冒充真实供应�
       ? Response.json({status:"completed",output:[{type:"message",content:[{type:"output_text",text:modelOutput(output)}]}]})
       : Response.json({choices:[{finish_reason:"stop",message:{content:modelOutput(output)}}]}));
     expect((await post("/api/booth/chat",{messages:[{role:"user",content:"private-dialogue"}]})).status).toBe(200);
-    expect(JSON.parse(String(info.mock.calls.at(-1)?.[0]))).toMatchObject({event:"ai_call",category:null,upstreamStatus:200,outcome:"succeeded"});
+    expect(info.mock.calls.map(call=>JSON.parse(String(call[0]))).reverse().find(event=>event.event==="ai_call")).toMatchObject({event:"ai_call",category:null,upstreamStatus:200,outcome:"succeeded"});
     expect(transport).toHaveBeenCalledTimes(6);
     for(const [url,init] of transport.mock.calls){
       expect(url).toBe(provider==="openai"?"https://api.openai.com/v1/responses":"https://api.deepseek.com/chat/completions");
@@ -752,7 +753,7 @@ describe("双供应商建议 HTTP 边界（可控对端，不冒充真实供应�
     const response=await post("/api/booth/chat",{messages:[{role:"user",content:"一瓶水"}]});
     expect(response.status).toBe(504);
     expect(JSON.parse(String(warn.mock.calls.at(-1)?.[0]))).toMatchObject({category:"timeout",upstreamStatus:200});
-    slow=false;expect(await (await post("/api/booth/chat",{messages:[{role:"user",content:"一瓶水"}]})).json()).toEqual(answer);
+    slow=false;expect(await (await post("/api/booth/chat",{messages:[{role:"user",content:"一瓶水"}]})).json()).toEqual({...answer,reply:`已记下：矿泉水 × ${answer.selection[0]!.count}，共 ${answer.selection[0]!.count} 件。`});
     expect((await (await fetch(base+"/api/booth")).json()).tasks).toEqual([]);
   });
 
@@ -886,7 +887,7 @@ describe("OpenAI 独立端点 HTTP 边界",()=>{
     const answer={reply:"请确认水。",selection:[{productId:"water",count:1}]};
     const transport=vi.fn<typeof fetch>().mockResolvedValue(Response.json({status:"completed",output:[{type:"message",content:[{type:"output_text",text:modelOutput(answer)}]}]}));
     await start(config({aiProvider:"openai",openaiKey:"fixture"}),{assistantTransport:transport});
-    expect(await (await post("/api/booth/chat",{messages:[{role:"user",content:"1瓶水"}]})).json()).toEqual(answer);
+    expect(await (await post("/api/booth/chat",{messages:[{role:"user",content:"1瓶水"}]})).json()).toEqual({...answer,reply:`已记下：矿泉水 × ${answer.selection[0]!.count}，共 ${answer.selection[0]!.count} 件。`});
     expect(transport.mock.calls[0]![0]).toBe("https://verified-relay.example/compatible/v1/responses");
     const body=JSON.parse(transport.mock.calls[0]![1]!.body as string);
     expect(body.model).toBe("gpt-6-luna");expect(body.reasoning).toEqual({effort:"none"});expect(body.text.format.strict).toBe(true);
@@ -928,7 +929,7 @@ it.each(['openai','deepseek'] as const)('%s明确羽毛球请求重复三轮，�
 });
 it('明确请求补全不猜测问句、否定、多选或数量，并保留库存限制',async()=>{
   const source=config();const product={...source.products[0]!,id:'shuttlecock_tube',name:'羽毛球',maxCount:2,initialStock:0};
-  await start(config({products:[product]}),{assistant:{advise:async()=>({reply:'请核对需求',selection:null,taskStatusQuery:false})}});
+  await start(config({products:[product]}),{assistant:{advise:async()=>({reply:'请核对需求',selection:null,taskStatusQuery:false,intent:null})}});
   for(const content of ['有没有一筒羽毛球？','不要给我一筒羽毛球','帮我拿羽毛球','帮我拿一筒羽毛球还是一瓶水','帮我拿三筒羽毛球','帮我拿一筒羽毛球？']){
     const advice=await(await post('/api/booth/chat',{messages:[{role:'user',content}]})).json();expect(advice.selection,content).toBeNull();
   }

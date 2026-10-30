@@ -53,6 +53,7 @@ export function BoothApp() {
   const welcome = meaningful.length === 0 && !c.thinking;
   const [proposalOwner, setProposalOwner] = useState<number | null>(null);
   const anchoredSelection = useRef("");
+  const anchoredProposal = useRef(-1);
   const selectionKey = JSON.stringify(c.selectedItems.map(item => [item.productId, item.count]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))));
   useEffect(() => {
     if (!c.selectedItems.length || c.pending || welcome) {
@@ -60,16 +61,17 @@ export function BoothApp() {
       setProposalOwner(null);
       return;
     }
-    // Move the single editable list only when its items or quantities change.
-    if (anchoredSelection.current === selectionKey) return;
+    // Anchor the single editable list to the latest accepted proposal, including reselection.
+    if (anchoredSelection.current === selectionKey && anchoredProposal.current === c.proposalVersion) return;
     for (let index = meaningful.length - 1; index >= 0; index--) {
       if (meaningful[index]!.role === "assistant") {
         anchoredSelection.current = selectionKey;
+        anchoredProposal.current = c.proposalVersion;
         setProposalOwner(index);
         return;
       }
     }
-  }, [selectionKey, c.selectedItems.length, c.pending, welcome, meaningful]);
+  }, [selectionKey, c.proposalVersion, c.selectedItems.length, c.pending, welcome, meaningful]);
   const visibleDialog = !!notice || c.operator || dialog !== null;
 
   function open(next: Dialog) {

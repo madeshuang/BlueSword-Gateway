@@ -10,11 +10,10 @@ export class DeepSeekBoothAssistant {
     return requestAdvice({ provider: "DeepSeek", model: this.config.deepseekModel, key: this.config.deepseekKey,
       timeoutMs: this.config.deepseekTimeoutMs, url: "https://api.deepseek.com/chat/completions",
       body: { model: this.config.deepseekModel, max_tokens: 600, thinking: { type: "disabled" }, response_format: { type: "json_object" },
-        // The UI retains only display text. Preserve JSON format in assistant history;
-        // past suggestions are not current selections or permission to dispatch.
+        // JSON mode must not imitate historical UI text (or fabricated intent:null
+        // decisions). Keep the transcript as context data with its original roles.
         messages: [{ role: "system", content: adviceInstructions(products,taskProgress) },
-          ...messages.map(message => message.role === "assistant"
-            ? { ...message, content: JSON.stringify({ reply: message.content, selection: null, taskStatusQuery: false }) } : message)] },
+          {role:"user",content:JSON.stringify({history:messages.slice(0,-1),message:messages.at(-1)?.content??''})}] },
     },products,data=>{
       const output = data as { choices?: Array<{ finish_reason?: string; message?: { content?: string } }> };
       if (output.choices?.length !== 1 || output.choices[0]?.finish_reason !== "stop") throw new Error("Incomplete response");

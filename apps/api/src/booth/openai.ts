@@ -8,15 +8,15 @@ export class OpenAIBoothAssistant {
   async advise(messages: BoothChatMessage[], taskProgress?: BoothTaskProgress,
     products: BoothStockProduct[] = this.config.products.map(p=>({...p,availableCount:p.initialStock}))): Promise<BoothModelAdvice> {
     const schema = {
-      type: "object", additionalProperties: false, required: ["reply","selection","taskStatusQuery"],
+      type: "object", additionalProperties: false, required: ["reply","selection","taskStatusQuery","intent"],
       properties: {
         reply: { type: "string" },
         taskStatusQuery: { type: "boolean" },
-        selection: { anyOf: [
-          { type: "null" },
-          { type: "array", minItems: 1, maxItems: 2, items: { type: "object", additionalProperties: false, required: ["productId","count"],
-            properties: { productId: { type: "string", enum: this.config.products.map(p => p.id) }, count: { type: "integer", minimum: 1, maximum: 2 } } } },
-        ] },
+        intent:{anyOf:[{type:'null'},{type:'object',additionalProperties:false,required:['kind','items'],properties:{
+          kind:{type:'string',enum:['choose','add','set','replace','remove','stock','check_add','check_set']},
+          items:{type:'array',minItems:1,maxItems:2,items:{type:'object',additionalProperties:false,required:['productId','count'],properties:{productId:{type:'string',enum:this.config.products.map(p=>p.id)},count:{type:'integer',minimum:1}}}},
+        }}]},
+        selection: { type: 'null' },
       },
     };
     return requestAdvice({ provider: "OpenAI", model: this.config.openaiModel, key: this.config.openaiKey,

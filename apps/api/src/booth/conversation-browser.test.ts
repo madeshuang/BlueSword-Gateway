@@ -13,7 +13,7 @@ afterEach(async () => {
   app = undefined;
 });
 
-async function setup(beforeAdvice?: () => Promise<void>, reply = "推荐这件物品，请核对数量后确认。", mode: "http" | "simulator" = "http", suggestSelection = true, products = readBoothConfig().products) {
+async function setup(beforeAdvice?: () => Promise<void>, reply = "推荐这件物品，请核对数量后确认。", mode: "http" | "simulator" = "http", suggestSelection = true, products = readBoothConfig().products, intent?: import("./conversation-intent.js").ConversationIntent) {
   const config = {
     ...readBoothConfig(),
     products,
@@ -38,7 +38,8 @@ async function setup(beforeAdvice?: () => Promise<void>, reply = "推荐这件�
         await beforeAdvice?.();
         return {
           reply,
-          selection: suggestSelection ? [{ productId: selected.id, count: 1 }] : null,
+          intent: intent ?? (suggestSelection ? {kind:"choose" as const,items:[{productId:selected.id,count:1}]} : null),
+          selection: null,
           taskStatusQuery: false,
         };
       },
@@ -121,6 +122,47 @@ it.each(["http", "simulator"] as const)("%s：对话追加使用页面当前清�
   expect(app!.service.snapshot().active!.items).toEqual([expect.objectContaining({productId:selected.id,count:2})]);
 },15000);
 
+it.each(["http", "simulator"] as const)("%s：补货后省略追加更新唯一清单，旧缺货历史不阻止选取",async mode=>{
+  const source=readBoothConfig().products[0]!;
+  const product={...source,id:'shuttlecock_tube',name:'羽毛球',initialStock:2,maxCount:2};
+  const {page,dispatches}=await setup(undefined,'羽毛球已取完，暂时无法取物。',mode,false,[product]);
+  for(let cycle=0;cycle<2;cycle++) {
+    for(let i=0;i<2;i++) {
+      await app!.service.dispatch([{productId:product.id,count:1}],`browser-refill-${cycle}-${i}`);
+      app!.service.finished();
+    }
+    if(cycle===0)app!.service.resetStock(product.id,'已核对并补满库存');
+  }
+  await page.reload();
+  await page.getByRole('heading',{name:'你好，今天想体验什么？'}).waitFor();
+  const send=async(input:string)=>{
+    await page.locator('textarea').fill(input);
+    await page.getByRole('button',{name:'发送需求',exact:true}).click();
+  };
+  await send('一桶羽毛球');
+  await page.locator('.assistant-bubble').filter({hasText:'已取完'}).waitFor();
+  app!.service.resetStock(product.id,'已核对并补满库存');
+  await send('一桶羽毛球');
+  const dialog=page.getByRole('dialog',{name:'确认这份取物清单'});
+  await dialog.getByText('共 1 件',{exact:true}).waitFor();
+  await dialog.getByRole('button',{name:'暂不取物',exact:true}).click();
+  await send('再来一桶');
+  await dialog.getByText('共 2 件',{exact:true}).waitFor();
+  await dialog.getByRole('button',{name:'暂不取物',exact:true}).click();
+  expect(await page.locator('.selection-proposal').count()).toBe(1);
+  expect(await page.locator('.assistant-message').last().locator('.selection-proposal').innerText()).toContain('× 2');
+  expect(app!.service.products()[0]!.availableCount).toBe(2);
+  expect(dispatches()).toBe(4);
+  await send('再来一桶');
+  await page.locator('.assistant-bubble').last().filter({hasText:'最多两件'}).waitFor();
+  expect(await page.getByRole('dialog').count()).toBe(0);
+  expect(await page.locator('.selection-proposal').innerText()).toContain('× 2');
+  await page.getByRole('button',{name:'核对并确认',exact:true}).click();
+  await dialog.getByRole('button',{name:'确认取物',exact:true}).click();
+  await expect.poll(dispatches).toBe(5);
+  expect(app!.service.products()[0]!.availableCount).toBe(0);
+},20000);
+
 it.each(["http", "simulator"] as const)("%s：新物品不静默替换原清单，支持按钮追加及文字确认替换",async mode=>{
   const {page,selected,dispatches}=await setup(undefined,undefined,mode);
   const original=app!.service.snapshot().products[1]!;
@@ -185,7 +227,7 @@ it.each(["http", "simulator"] as const)("%s：聊天与清单分离，仅清单�
   await page.screenshot({path:`.tmp/ui-preview/separate-selection-${mode}.png`});
 },15000);
 
-it.each(["http", "simulator"] as const)("%s：重复返回相同物品数量不会移动清单", async mode => {
+it.each(["http", "simulator"] as const)("%s：重新明确选择相同数量时移动唯一清单", async mode => {
   const {page}=await setup(undefined,undefined,mode);
   for (let round=0;round<2;round++) {
     await page.locator('textarea').fill('帮我选一件物品');
@@ -194,8 +236,8 @@ it.each(["http", "simulator"] as const)("%s：重复返回相同物品数量不�
     await page.getByRole('button',{name:'暂不取物',exact:true}).click();
   }
   expect(await page.locator('.selection-proposal').count()).toBe(1);
-  expect(await page.locator('.assistant-message').first().locator('.selection-proposal').count()).toBe(1);
-  expect(await page.locator('.assistant-message').last().locator('.selection-proposal').count()).toBe(0);
+  expect(await page.locator('.assistant-message').first().locator('.selection-proposal').count()).toBe(0);
+  expect(await page.locator('.assistant-message').last().locator('.selection-proposal').count()).toBe(1);
 },15000);
 
 it.each(["http", "simulator"] as const)("%s：数量追问承接当前物品，追加后消息清单一致且只保留一张卡", async mode => {
@@ -322,6 +364,8 @@ it("延迟的模型建议不会覆盖手动选择或擅自弹出确认", async (
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
+
+
   const { page, dispatches } = await setup(() => gate);
   await page.locator("textarea").fill("帮我挑一份实用的纪念品，数量一件。");
   await page.getByRole("button",{name:"发送需求",exact:true}).click();
@@ -334,7 +378,7 @@ it("延迟的模型建议不会覆盖手动选择或擅自弹出确认", async (
   await page.getByRole("button", { name: "稍后再选", exact: true }).click();
   release();
   await page
-    .getByText("推荐这件物品，请核对数量后确认。", { exact: true })
+    .getByText("已记下：矿泉水 × 1，共 1 件。", { exact: true })
     .waitFor();
   expect(await page.getByRole("dialog").count()).toBe(0);
   await page.getByRole("button", { name: "核对并确认", exact: true }).click();
@@ -555,8 +599,8 @@ it("桌面字号、消息背景与一行等待在回复前后保持正确", asyn
   expect(colors[0]).not.toBe('rgba(0, 0, 0, 0)');
   expect(colors[0]).not.toBe(colors[1]);
   expect(await page.locator('.assistant-message .assistant-bubble').count()).toBe(1);
-  expect(await page.locator('.assistant-bubble').getByText('推荐这件物品，请核对数量后确认。',{exact:true}).isVisible()).toBe(true);
-  expect(await page.getByRole('region',{name:'待确认取物清单'}).getByText('推荐这件物品，请核对数量后确认。',{exact:true}).count()).toBe(0);
+  expect(await page.locator('.assistant-bubble').getByText('已记下：矿泉水 × 1，共 1 件。',{exact:true}).isVisible()).toBe(true);
+  expect(await page.getByRole('region',{name:'待确认取物清单'}).getByText('已记下：矿泉水 × 1，共 1 件。',{exact:true}).count()).toBe(0);
   expect(await page.getByRole('button',{name:'调整选择',exact:true}).isVisible()).toBe(true);
   expect(await page.locator('.assistant-identity').last().evaluate(el=>getComputedStyle(el.parentElement!).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
   await page.screenshot({path:'.tmp/ui-preview/readable-conversation-desktop.png'});
@@ -587,4 +631,55 @@ it.each(["http", "simulator"] as const)("%s：任务清单模拟中间进度，�
   app!.service.finished();
   await checklist.getByText('已完成 4 / 4',{exact:true}).waitFor();
   expect(await checklist.locator('.checklist-step.done').count()).toBe(4);
+},20000);
+
+
+it.each(["http","simulator"] as const)("%s：模型追加意图由程序合并，只更新唯一卡片且确认前不扣库存",async mode=>{
+  const source=readBoothConfig().products[0]!;
+  const product={...source,id:'shuttlecock_tube',name:'羽毛球',initialStock:3,maxCount:2};
+  const {page,dispatches}=await setup(undefined,'不应展示模型的计算文字',mode,false,[product],{kind:'add',items:[{productId:product.id,count:1}]});
+  const send=async()=>{
+    await page.locator('textarea').fill('帮忙再安排一筒羽毛球吧');
+    await page.getByRole('button',{name:'发送需求',exact:true}).click();
+  };
+  const dialog=page.getByRole('dialog',{name:'确认这份取物清单'});
+  await send();await dialog.getByText('共 1 件',{exact:true}).waitFor();
+  await dialog.getByRole('button',{name:'暂不取物',exact:true}).click();
+  await send();await dialog.getByText('共 2 件',{exact:true}).waitFor();
+  await dialog.getByRole('button',{name:'暂不取物',exact:true}).click();
+  expect(await page.locator('.selection-proposal').count()).toBe(1);
+  expect(await page.locator('.assistant-message').last().locator('.selection-proposal').innerText()).toContain('× 2');
+  expect(await page.getByText('不应展示模型的计算文字',{exact:true}).count()).toBe(0);
+  expect(dispatches()).toBe(0);expect(app!.service.products()[0]!.availableCount).toBe(3);
+},15000);
+
+it.each(['http','simulator'] as const)('%s：截图问句不弹窗，确定一桶后关闭弹窗，唯一卡片在最新回复下',async mode=>{
+  const product={...readBoothConfig().products[0]!,id:'shuttlecock_tube',name:'羽毛球',initialStock:1,maxCount:2};
+  const {page,dispatches}=await setup(undefined,undefined,mode,false,[product]);
+  const send=async(text:string)=>{
+    const before=await page.locator('.assistant-message').count();
+    await page.locator('textarea').fill(text);
+    await page.getByRole('button',{name:'发送需求',exact:true}).click();
+    await expect.poll(()=>page.locator('.assistant-message').count()).toBe(before+1);
+  };
+  await send('来一桶羽毛球。');
+  await page.getByRole('dialog',{name:'确认这份取物清单'}).waitFor();
+  await page.getByRole('button',{name:'关闭弹窗',exact:true}).click();
+  for(const text of ['能再加一桶吗。','我的意思是能来两桶羽毛球吗？']){
+    await send(text);
+    expect(await page.locator('.assistant-message').last().innerText()).toContain('只剩 1');
+    expect(await page.getByRole('dialog').count()).toBe(0);
+    expect(await page.locator('.assistant-message').first().locator('.selection-proposal').count()).toBe(1);
+  }
+  for(const text of ['行，就来一桶羽毛球吧。','那我就来一桶羽毛球。']){
+    await send(text);
+    await page.getByRole('dialog',{name:'确认这份取物清单'}).waitFor();
+    await page.getByRole('button',{name:'关闭弹窗',exact:true}).click();
+    expect(await page.locator('.selection-proposal').count()).toBe(1);
+    expect(await page.locator('.assistant-message').last().locator('.selection-proposal').innerText()).toContain('× 1');
+    expect(await page.locator('.assistant-message').last().innerText()).not.toContain('无法提供');
+  }
+  expect(dispatches()).toBe(0);
+  expect(app!.service.products()[0]!.availableCount).toBe(1);
+  await page.screenshot({path:`.tmp/ui-preview/followup-fixed-${mode}.png`});
 },20000);
