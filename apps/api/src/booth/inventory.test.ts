@@ -41,6 +41,39 @@ const recoveryTarget = async () => {const s=await snapshot();return {expectedTas
 const remaining = async () => (await snapshot()).products.find((p: { id: string }) => p.id === "water").availableCount;
 
 describe("剩余库存 HTTP 边界", () => {
+  it.each(["openai","deepseek"] as const)("%s：连续取完补货后省略追加不受旧缺货回复影响，确认才扣库存",async provider=>{
+    const configuration=await config();
+    const product={...configuration.products[0]!,id:'shuttlecock_tube',name:'羽毛球',initialStock:2,maxCount:2};
+    let modelCalls=0;
+    await start({...configuration,products:[product],aiProvider:provider,openaiKey:'fixture',deepseekKey:'fixture'},{assistantTransport:async()=>{
+      modelCalls++;
+      const output=JSON.stringify({reply:'羽毛球已取完，暂时无法取物。',selection:null,taskStatusQuery:false,intent:null});
+      return Response.json(provider==='openai'?{status:'completed',output:[{type:'message',content:[{type:'output_text',text:output}]}]}:{choices:[{finish_reason:'stop',message:{content:output}}]});
+    }});
+    const stock=()=>app!.service.products()[0]!.availableCount;
+    const ask=(input:string,currentSelection=[{productId:product.id,count:1}])=>post('/api/booth/chat',{currentSelection,messages:[{role:'assistant',content:'羽毛球已取完，请补货。'},{role:'user',content:input}]}).then(r=>r.json());
+    for(let cycle=0;cycle<2;cycle++) {
+      for(let i=0;i<2;i++) {
+        expect((await post('/api/booth/requests',{requestId:`refill-${cycle}-${i}`,items:[{productId:product.id,count:1}]})).status).toBe(200);
+        await post('/api/task/finished',{});
+      }
+      expect(stock()).toBe(0);
+      expect((await ask('一桶羽毛球',[])).reply).toContain('已取完');
+      expect((await post('/api/booth/operator/stock/reset',{productId:product.id,confirmation:'已核对并补满库存'},{'X-Operator-Token':'test-operator'})).status).toBe(200);
+    }
+    for(const input of ['一桶羽毛球','我要一桶羽毛球'])expect((await ask(input,[])).selection).toEqual([{productId:product.id,count:1}]);
+    for(const input of ['再来一桶','再取一桶','改成两桶','两桶羽毛球','我要两桶羽毛球'])expect((await ask(input)).selection).toEqual([{productId:product.id,count:2}]);
+    expect(modelCalls).toBeGreaterThan(0);
+    expect(stock()).toBe(2);expect(received).toHaveLength(4);
+    const request={requestId:'confirm-refill-two',items:[{productId:product.id,count:2}]};
+    expect((await post('/api/booth/requests',request)).status).toBe(200);
+    expect((await post('/api/booth/requests',request)).status).toBe(200);
+    expect(stock()).toBe(0);expect(received).toHaveLength(5);
+    expect((await ask('再来一桶')).reply).toContain('已提交');
+    await post('/api/task/finished',{});
+    expect((await ask('再来一桶')).reply).toContain('已取完');
+    expect(stock()).toBe(0);
+  });
   it("重复请求与重复完成不重复扣减，并发请求不超卖", async () => {
     await start(await config());
     const first = await (await post("/api/booth/requests", order("inventory-repeat", 2))).json();
@@ -159,7 +192,7 @@ describe("剩余库存 HTTP 边界", () => {
     let sent: Record<string,any> = {};
     const transport: typeof fetch = async (_url, init) => {
       sent = JSON.parse(init!.body as string);
-      const output = JSON.stringify({ reply: "请确认两瓶水", selection: [{ productId: "water", count: 2 }], taskStatusQuery: false });
+      const output = JSON.stringify({ reply: "请确认两瓶水", selection: null, intent:{kind:"choose",items:[{productId:"water",count:2}]}, taskStatusQuery: false });
       return Response.json(provider === "openai"
         ? { status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: output }] }] }
         : { choices: [{ finish_reason: "stop", message: { content: output } }] });
@@ -170,7 +203,7 @@ describe("剩余库存 HTTP 边界", () => {
     expect(response.status).toBe(200);
     const advice = await response.json(); expect(advice.selection).toBeNull(); expect(advice.reply).toMatch(/只剩 1/); expect(advice.reply).toContain("2");
     const instructions = provider === "openai" ? sent.instructions : sent.messages[0].content;
-    expect(instructions).toContain('"availableCount":1'); expect(instructions).toContain("不把超出范围的数量偷偷改小");
+    expect(instructions).not.toContain('availableCount'); expect(instructions).toContain("不把超出范围的数量偷偷改小");
     expect(await remaining()).toBe(1); expect(received).toHaveLength(1);
   });
   it.each(["openai","deepseek"] as const)("%s回复等待期间库存变化时重新核对，售罄建议也不能选取", async provider => {
@@ -179,7 +212,7 @@ describe("剩余库存 HTTP 边界", () => {
       if (changeDuringReply) {
         await post("/api/booth/requests", order("inventory-during-ai", 2)); await post("/api/task/finished", {});
       }
-      const output = JSON.stringify({ reply:"请确认取物", selection:[{productId:"water",count:suggestion}], taskStatusQuery:false });
+      const output = JSON.stringify({ reply:"请确认取物", selection:null,intent:{kind:"choose",items:[{productId:"water",count:suggestion}]},taskStatusQuery:false });
       return Response.json(provider === "openai"
         ? {status:"completed",output:[{type:"message",content:[{type:"output_text",text:output}]}]}
         : {choices:[{finish_reason:"stop",message:{content:output}}]});

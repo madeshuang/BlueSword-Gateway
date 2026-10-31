@@ -65,14 +65,16 @@ it("运行记录写入失败不阻止原有文字聊天",async()=>{
   let database:DatabaseSync|undefined,aiCalls=0;
   try{
     app=createBoothApplication({...readBoothConfig(),databasePath:path,speech:{enabled:true,provider:"ali",aliKey:"fixture",aliWorkspace:undefined,tencentAppId:undefined,tencentSecretId:undefined,tencentSecretKey:undefined}},
-      {assistant:{async advise(){aiCalls++;return {reply:"请核对物品和数量",selection:null,taskStatusQuery:false};}}});
+      {assistant:{async advise(){aiCalls++;return {reply:"请核对物品和数量",selection:null,taskStatusQuery:false,intent:null};}}});
     const base="http://127.0.0.1:"+await app.listen(0);
     const receipt=await(await fetch(base+"/api/booth/speech/attempts",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"})).json();
     database=new DatabaseSync(path);
     // 在真实存储边界模拟磁盘写入失败，不替换记录实现。
     database.prepare("UPDATE booth_diagnostics SET value=json_set(value,'$.status','success','$.text','两瓶矿泉水') WHERE id=?").run(receipt.id);
     database.exec("CREATE TRIGGER fail_diagnostics BEFORE INSERT ON booth_diagnostics BEGIN SELECT RAISE(FAIL,'fixture disk full'); END");
-    const response=await fetch(base+"/api/booth/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({messages:[{role:"user",content:"一瓶矿泉水"}],speechRecords:[receipt]})});
+    // Use ordinary conversation so this still exercises the model after explicit
+    // quantity-only product choices gained deterministic selection handling.
+    const response=await fetch(base+"/api/booth/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({messages:[{role:"user",content:"有什么推荐？"}],speechRecords:[receipt]})});
     expect(response.status).toBe(200);expect(aiCalls).toBe(1);expect((await response.json()).reply).toBe("请核对物品和数量");
   }finally{database?.close();await app?.close();app=undefined;rmSync(directory,{recursive:true,force:true});}
 });

@@ -27,7 +27,7 @@ it("验证命令选择positive时仅发送原正向样本一次，报告结构�
     requests.push({path:req.url??"",body:JSON.parse(text)});
     res.writeHead(200,{"Content-Type":"application/json"});
     res.end(JSON.stringify({status:"completed",model:"returned-fixture-model",usage:{input_tokens:37,output_tokens:11,total_tokens:48},
-      output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({reply:"fixture private reply",taskStatusQuery:false,selection:[{count:1,productId:"water"}]})}]}]}));
+      output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({reply:"fixture private reply",taskStatusQuery:false,selection:null,intent:{kind:"choose",items:[{count:1,productId:"water"}]}})}]}]}));
   });
   await new Promise<void>(resolve=>upstream!.listen(0,"127.0.0.1",resolve));
   const base="http://127.0.0.1:"+(upstream.address() as {port:number}).port;
@@ -47,7 +47,7 @@ it("合法的单物品目录仍能执行原positive验证，不要求额外物�
   const directory=mkdtempSync(resolve('.tmp/verify-single-'));
   try{
     const catalog=join(directory,'catalog.json');writeFileSync(catalog,JSON.stringify(JSON.parse(readFileSync('scripts/fixtures/booth-catalog.json','utf8')).slice(0,1)));
-    upstream=createServer((_req,res)=>res.end(JSON.stringify({status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({reply:'请确认',selection:[{productId:'water',count:1}],taskStatusQuery:false})}]}]})));
+    upstream=createServer((_req,res)=>res.end(JSON.stringify({status:'completed',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({reply:'请确认',selection:null,taskStatusQuery:false,intent:{kind:'choose',items:[{productId:'water',count:1}]}})}]}]})));
     await new Promise<void>(r=>upstream!.listen(0,'127.0.0.1',r));
     const result=await run(['--provider','openai','--sample','positive'],'http://127.0.0.1:'+(upstream.address() as {port:number}).port,catalog);
     expect(result.exitCode).toBe(0);
@@ -60,7 +60,7 @@ it("integration只运行多物品、超量、缺货与含糊需求四个样本�
     let text="";for await(const chunk of req)text+=chunk;
     const request=JSON.parse(text);const content=request.input[0].content;messages.push(content);
     const selection=content.includes("各1份")?[{productId:"water",count:1},{productId:"snack",count:1}]:null;
-    res.end(JSON.stringify({status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({reply:"请核对数量。",selection,taskStatusQuery:false})}]}]}));
+    res.end(JSON.stringify({status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({reply:"请核对数量。",selection:null,taskStatusQuery:false,intent:selection?{kind:"choose",items:selection}:null})}]}]}));
   });await new Promise<void>(resolve=>upstream!.listen(0,"127.0.0.1",resolve));
   const result=await run(["--provider","openai","--sample","integration"],"http://127.0.0.1:"+(upstream.address() as {port:number}).port);
   expect(result.exitCode).toBe(0);expect(messages).toHaveLength(3);

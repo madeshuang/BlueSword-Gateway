@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import {applyIntent,explicitIntent,intentMatchesQuantity} from './conversation-intent.js';
 import { timingSafeEqual } from "node:crypto";
 import type { BoothChatMessage, BoothSelectionItem } from "@bluesword/contracts";
 import { ApplicationStorage } from "../storage.js";
@@ -7,8 +8,8 @@ import { BoothError, BoothService } from "./service.js";
 import { DeepSeekBoothAssistant } from "./deepseek.js";
 import { OpenAIBoothAssistant } from "./openai.js";
 
-import { explicitlyExceedsOrderLimit, explicitSingleSelection, type AiCallObserver } from "./advice.js";
-import { resolveSelectionChange, quantityFollowUp, reconcileSelectionReply, type SelectionDecision } from "./selection-change.js";
+import { explicitlyExceedsOrderLimit, type AiCallObserver } from "./advice.js";
+import { resolveSelectionChange, quantityFollowUp, explicitSingleSelection, type SelectionDecision } from "./selection-change.js";
 import { builtWeb } from "./static.js";
 import {Diagnostics} from "./diagnostics.js";
 import {speechModels,speechConfigured,type SpeechConnect} from "./speech-provider.js";
@@ -135,6 +136,8 @@ export function createBoothApplication(config: BoothConfig, options: { webDirect
         decision.candidate.some(item=>!item || !Number.isSafeInteger(item.count) || item.count<1 || !service.products().some(p=>p.id===item.productId&&item.count<=p.maxCount)) ||
         new Set(decision.candidate.map(item=>item.productId)).size!==decision.candidate.length || decision.candidate.reduce((sum,item)=>sum+item.count,0)>2))throw new BoothError("清单确认内容不合法");
       const quantityAdvice = quantityFollowUp(body.messages, service.products());
+      const directIntent=decision?null:explicitIntent(body.messages,currentSelection,service.products());
+      if(directIntent)return json(res,200,applyIntent(directIntent,currentSelection,service.products(),orderBlocked));
       const addition = resolveSelectionChange(body.messages.at(-1).content, currentSelection as BoothSelectionItem[], quantityAdvice, service.products(), orderBlocked, decision);
       if (addition) return json(res,200,service.stockAdvice(addition));
       aiBusy = true;
@@ -149,11 +152,16 @@ export function createBoothApplication(config: BoothConfig, options: { webDirect
           const current = service.taskProgress(token);
           return json(res,200,{reply:current.replyOptions.includes(advice.reply) ? advice.reply : current.conclusion,selection:null});
         }
+        if(advice.intent){
+          if(!intentMatchesQuantity(advice.intent,body.messages.at(-1).content))return json(res,200,{reply:'这次数量没能确认，原清单已保留。请再说一下要取几件。',selection:null});
+          const result=applyIntent(advice.intent,currentSelection,service.products(),!!service.active()||!!service.snapshot().alert);
+          console.info(JSON.stringify({event:'conversation_decision',intent:advice.intent,currentSelection,stock:service.products().map(p=>({id:p.id,availableCount:p.availableCount})),selection:result.selection}));
+          return json(res,200,result);
+        }
         const fallback = advice.selection === null && !service.active() && !service.snapshot().alert
           ? explicitSingleSelection(body.messages.at(-1).content,service.products()) : null;
-        const checkedAdvice=service.stockAdvice(fallback ?? {reply:advice.reply,selection:advice.selection});
-        const resolved = resolveSelectionChange(body.messages.at(-1).content,currentSelection,checkedAdvice,service.products(),!!service.active() || !!storage.get("booth","alert"))!;
-        return json(res,200,reconcileSelectionReply(resolved,service.products()));
+        if(fallback)return json(res,200,resolveSelectionChange(body.messages.at(-1).content,currentSelection,service.stockAdvice(fallback),service.products(),!!service.active()||!!service.snapshot().alert));
+        return json(res,200,{reply:advice.reply,selection:null});
       }
       finally { aiBusy = false; }
     }

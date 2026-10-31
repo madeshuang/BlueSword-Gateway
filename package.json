@@ -14,7 +14,7 @@
     "dev:robot": "node --import tsx scripts/robot-simulator.ts",
     "build": "pnpm typecheck && pnpm --filter @bluesword/web build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run apps/api/src/booth/booth.test.ts apps/api/src/booth/selection-change.test.ts apps/api/src/booth/integration.test.ts apps/api/src/booth/inventory.test.ts scripts/verify-ai.test.ts apps/api/src/booth/delivery.test.ts scripts/robot-manual.test.ts scripts/start-local.test.ts apps/api/src/booth/speech-provider.test.ts apps/api/src/booth/speech-http.test.ts apps/api/src/booth/diagnostics.test.ts apps/api/src/booth/wire.test.ts apps/web/src/speech apps/web/src/conversation/selection.test.ts",
+    "test": "vitest run apps/api/src/booth/conversation-intent.test.ts apps/api/src/booth/booth.test.ts apps/api/src/booth/selection-change.test.ts apps/api/src/booth/integration.test.ts apps/api/src/booth/inventory.test.ts scripts/verify-ai.test.ts apps/api/src/booth/delivery.test.ts scripts/robot-manual.test.ts scripts/start-local.test.ts apps/api/src/booth/speech-provider.test.ts apps/api/src/booth/speech-http.test.ts apps/api/src/booth/diagnostics.test.ts apps/api/src/booth/wire.test.ts apps/web/src/speech apps/web/src/conversation/selection.test.ts",
     "test:speech:browser": "pnpm build && vitest run apps/api/src/booth/speech-browser.test.ts",
     "test:inventory": "vitest run apps/api/src/booth/inventory.test.ts && pnpm test:conversation:browser",
     "test:interfaces": "vitest run apps/api/src/booth/booth.test.ts -t 正式三接口与任务事实",

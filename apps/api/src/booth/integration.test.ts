@@ -60,16 +60,16 @@ it.each(["openai","deepseek"] as const)("%s 给两项建议但不发单，超量
   const assistantTransport:typeof fetch=async (_url,init)=>{
     const request=JSON.parse(String(init?.body));
     const instructions=request.instructions??request.messages[0].content;
-    expect(instructions).toContain("每单总数最多两件");
+    expect(instructions).toContain("不把超出范围的数量偷偷改小");
     expect(instructions).not.toContain('"maxCount":3');
-    const advice={reply:"请核对所选物品。",selection,taskStatusQuery:false};
+    const advice={reply:"请核对所选物品。",selection:null,intent:{kind:"choose",items:selection},taskStatusQuery:false};
     return Response.json(aiProvider==="openai"?{status:"completed",output:[{type:"message",content:[{type:"output_text",text:JSON.stringify(advice)}]}]}:{choices:[{finish_reason:"stop",message:{content:JSON.stringify(advice)}}]});
   };
   await start({...config,aiProvider,openaiKey:"local-fixture",deepseekKey:"local-fixture"},{assistantTransport});
   const chat=()=>post("/api/booth/chat",{messages:[{role:"user",content:"扑克牌和圆珠笔各一件"}]});
   const result=await chat();expect(result.status).toBe(200);expect((await result.json()).selection).toEqual(selection);
   expect(received).toHaveLength(0);expect((await snapshot()).tasks).toHaveLength(0);
-  selection=[{productId:"playing_card_box",count:3}];expect((await chat()).status).toBe(502);
+  selection=[{productId:"playing_card_box",count:3}];expect((await (await chat()).json()).selection).toBeNull();
   selection=[{productId:"outside",count:1}];expect((await chat()).status).toBe(502);
 });
 
@@ -157,14 +157,16 @@ it.each(["finished","error"])("等待结果时补货，重启后收到%s通知�
 
 it("明确要求三件或两加一时，模型即使建议一件也不能进入确认区", async () => {
   const config=await setup(3);await app!.close();
-  await start(config,{assistant:{async advise(){return {reply:"可以取三件",selection:[{productId:"playing_card_box",count:1}],taskStatusQuery:false};}}});
+  let modelCalls=0;
+  await start(config,{assistant:{async advise(){modelCalls++;return {reply:"交由模型理解上下文",selection:null,intent:null,taskStatusQuery:false};}}});
   for(const content of ["我要3份扑克牌。","请给我三件扑克牌","取两份扑克牌和一支圆珠笔","我要两种物品各两件","我要三种物品各一件","我要2种物品各2件","我要10种各1件"]){
     const response=await post("/api/booth/chat",{messages:[{role:"user",content}]});expect(response.status).toBe(200);
     expect(await response.json()).toEqual({reply:"每单最多两件，请重新确认想取的物品和数量。",selection:null});
   }
+  expect(modelCalls).toBe(0);
   for(const content of ["我昨天取了三件，今天只取一件扑克牌","我要一副扑克牌，不是三副","我要一副扑克牌和一支圆珠笔，共两件","我要两件：一副扑克牌和一支圆珠笔","我要两副扑克牌，2副就够了","我要一副扑克牌或者两支圆珠笔","我要的3件物品取好了吗？"]){
     const response=await post("/api/booth/chat",{messages:[{role:"user",content}]});
-    expect((await response.json()).selection).toEqual([{productId:"playing_card_box",count:1}]);
+    expect((await response.json()).reply).toBe("交由模型理解上下文");
   }
   expect(received).toHaveLength(0);
 });
