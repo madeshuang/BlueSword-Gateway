@@ -4,6 +4,7 @@ import type { BackendMode, Detection, Task } from '../types'
 import { gdkLabels } from '../gdkNames'
 import { IconCheck } from './Icons'
 import { OperatorHelp } from './OperatorHelp'
+import { lastProgressAt, taskFeedback } from '../taskFeedback'
 
 /** 无真实相机时的示意画面：简化的货架线稿，坐标与 mock 检测框一致 */
 function SimulatedFeed({ detections }: { detections: Detection[] }) {
@@ -76,7 +77,7 @@ function Box({ d, i }: { d: Detection; i: number }) {
 }
 
 /** 执行过程：步骤随机器人实际进展逐条出现（不预先列出整张清单），并标注距任务开始的时间 */
-function Timeline({ task }: { task: Task }) {
+function Timeline({ task, remote }: { task: Task; remote: boolean }) {
   const container = useRef<HTMLDivElement>(null)
   const list = useRef<HTMLOListElement>(null)
   const follow = useRef(true)
@@ -95,6 +96,15 @@ function Timeline({ task }: { task: Task }) {
   const started = task.steps.filter((s) => s.status !== 'pending')
   const t0 = task.created_at ?? started[0]?.startedAt
   const running = task.status === 'running' || task.status === undefined
+  const [now, setNow] = useState(() => Date.now() / 1000)
+  useEffect(() => {
+    if (!running || !remote) return
+    const timer = setInterval(() => setNow(Date.now() / 1000), 1000)
+    return () => clearInterval(timer)
+  }, [running, remote, task.id])
+  const feedback = taskFeedback(task, now, remote ? config.progressWarningSeconds : Infinity)
+  const lastProgress = started.at(-1)
+  const reportedAt = lastProgressAt(task)
   const waiting = running && !started.some((s) => s.status === 'active')
   return (
     <div className="task" ref={container} onScroll={e => {
@@ -109,7 +119,7 @@ function Timeline({ task }: { task: Task }) {
       <ol className="steps" ref={list}>
         {started.map((s) => (
           <li key={s.id} className={s.status}>
-            <span className="step-icon">{s.status === 'done' ? <IconCheck size={14} /> : <i />}</span>
+            <span className="step-icon">{s.status === 'done' ? <IconCheck size={14} /> : s.status === 'failed' ? '×' : <i />}</span>
             <span className="step-label">
               {s.label}
               {t0 && s.startedAt && <em className="step-time">+{Math.max(0, s.startedAt - t0).toFixed(1)}s</em>}
@@ -120,7 +130,19 @@ function Timeline({ task }: { task: Task }) {
             )}
           </li>
         ))}
-        {waiting && (
+        {feedback && (
+          <li className={`task-feedback ${feedback.tone}`}>
+            <span className="step-icon" aria-hidden="true">{feedback.tone === 'error' ? '×' : feedback.tone === 'resolved' ? <IconCheck size={14} /> : '!'}</span>
+            <div className="feedback-copy">
+              <strong role={feedback.tone === 'error' ? 'alert' : 'status'}>{feedback.title}</strong>
+              <p>{feedback.message}</p>
+              {task.recovery_required && <p>等待现场工作人员处理后恢复接单。</p>}
+              {lastProgress && <small>最后进度：{lastProgress.label}{reportedAt !== undefined && ` · ${new Date(reportedAt * 1000).toLocaleTimeString('zh-CN', { hour12: false })}`}</small>}
+              {task.id && <small className="feedback-task-id">任务编号：{task.id}</small>}
+            </div>
+          </li>
+        )}
+        {waiting && !feedback && (
           <li className="pending waiting">
             <span className="step-icon">
               <i />
@@ -182,7 +204,7 @@ export function VisionPanel(props: {
         </div>
       )}
 
-      {props.task && <Timeline task={props.task} />}
+      {props.task && <Timeline task={props.task} remote={props.backendMode === 'lanjian_http'} />}
       <div className="task-controls">
         {props.task?.status === 'running' && <button onClick={props.onCancel}>{props.backendMode === 'lanjian_http' ? '需要停下' : '停止任务'}</button>}
         {(props.backendMode === 'mock' || props.backendMode === 'gdk_mock') && props.task?.status === 'running'

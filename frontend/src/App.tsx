@@ -150,13 +150,6 @@ export default function App() {
   const confirmBar = state.confirm && confirmVisible ? <ConfirmBar request={state.confirm} onAnswer={answerConfirm} /> : undefined
 
   const voiceActive = voice.mode === 'local' ? !!voice.active : voice.listening
-  const speechSettings = <div className="speech-settings">
-    {voice.status && <span role="status">{voice.status}</span>}
-    <button aria-pressed={voiceActive} onClick={actions.mic}>
-      {voiceActive ? '关闭语音' : '唤醒布鲁'}
-    </button>
-    <button aria-pressed={voice.tts} onClick={() => speech.current?.setTts(!voice.tts)}>播报{voice.tts ? '开' : '关'}</button>
-  </div>
 
   const visionPanel = (
     <VisionPanel
@@ -177,7 +170,6 @@ export default function App() {
 
   if (state.backendMode === 'gdk_mock') return (
     <>
-      {speechSettings}
       <DemoConsole state={state} voiceActive={voiceActive} voiceListening={voice.listening} voiceStatus={voice.status} onSubmit={actions.submit} onMic={actions.mic}
     onCancel={() => bridge.current?.send({ type: 'cancel_task', task_id: state.task?.id })}
     onTake={() => bridge.current?.send({ type: 'mock_take' })}
@@ -199,7 +191,6 @@ export default function App() {
         }}
       />
       <main className="main">
-        {speechSettings}
         {state.view === 'home' ? (
           <div className={`session ${showVision ? 'with-vision' : ''}`}>
             <Home voiceActive={voiceActive} phase={state.phase} voiceEnabled={voice.enabled} voiceListening={voice.listening} voiceStatus={voice.status} onSubmit={actions.submit} onMic={actions.mic} />

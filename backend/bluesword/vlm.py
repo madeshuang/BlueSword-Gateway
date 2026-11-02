@@ -89,6 +89,7 @@ def apply_progress(task: TaskRecord, report: Progress) -> bool:
     attempt = report.detection.attempt if report.detection else 0
     if report.stageIndex < cursor or (previous and attempt <= previous.attempt):
         return False
+    task.last_progress_at = time.time()
     label = LABELS[report.stage]
     if report.pickIndex:
         label = f"第{report.pickIndex}件 · {label}"
@@ -100,7 +101,7 @@ def apply_progress(task: TaskRecord, report: Progress) -> bool:
         stage_index=report.stageIndex,
         pick_index=report.pickIndex,
         attempt=attempt,
-        startedAt=previous.startedAt if previous else time.time(),
+        startedAt=previous.startedAt if previous else task.last_progress_at,
     )
     if previous:
         task.steps[task.steps.index(previous)] = step
