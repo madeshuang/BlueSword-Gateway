@@ -7,6 +7,7 @@ __pycache__/
 .env
 backend/data/
 backend/models/
+config/*.local.json
 output/
 tmp/
 simulation/assets/agibot_g2/robots/

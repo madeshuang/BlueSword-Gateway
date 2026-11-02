@@ -120,16 +120,22 @@ def main() -> int:
     install = commands.add_parser("setup", help="安装锁文件依赖、构建网页并准备配置")
     install.add_argument("--voice", action="store_true", help="同时安装本地持续唤醒依赖与模型")
     launch = commands.add_parser("start", help="使用现有配置前台启动，不安装依赖或构建")
-    launch.add_argument("--host", choices=["127.0.0.1", "0.0.0.0"], default="127.0.0.1")
-    launch.add_argument("--port", type=int, default=8000)
+    launch.add_argument("--host", choices=["127.0.0.1", "0.0.0.0"], help="覆盖配置向导保存的监听地址")
+    launch.add_argument("--port", type=int, help="覆盖配置向导保存的端口")
     args = parser.parse_args()
-    if args.command == "start" and not 1 <= args.port <= 65535:
+    if args.command == "start" and args.port is not None and not 1 <= args.port <= 65535:
         parser.error("--port 必须在 1 到 65535 之间")
     try:
         if args.command == "setup":
             setup(ROOT, voice=args.voice)
         else:
-            start(ROOT, args.host, args.port)
+            from configure import start_defaults
+
+            try:
+                host, port = start_defaults(ROOT)
+            except (OSError, ValueError, TypeError):
+                raise SetupError("现场启动配置无效，请重新运行 scripts/configure.py。") from None
+            start(ROOT, args.host or host, args.port if args.port is not None else port)
     except SetupError as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 1

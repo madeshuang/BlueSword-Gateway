@@ -10,6 +10,52 @@ React 前端 + Python/FastAPI 后端，负责语音对话、整单确认、任�
 
 Ubuntu 和 Windows 均支持原生安装、内部模拟和真实机器人联调。Windows 使用 PowerShell，见下方“Windows 原生安装与启动”；标为 `bash` 的命令用于 Ubuntu，标为 `powershell` 的命令用于 Windows。
 
+### 交给现场负责人：配置向导
+
+在**连接麦克风、运行网页和 Agent 的网关电脑**上，从 main 仓库根目录执行。机器人控制器只需运行机器人团队自己的 VLM v1.2 服务，填写后面的 `vlm.url` 和机器人内部格位，不需要在控制器重复安装网页或填写模型 Key。
+
+先准备 Git、Node.js/npm 和 uv，再按系统依次执行：
+
+```bash
+# Ubuntu / macOS
+bash scripts/setup.sh --voice
+bash scripts/configure.sh
+bash scripts/configure.sh --check
+bash scripts/start.sh
+```
+
+```powershell
+# Windows PowerShell
+.\scripts\setup.cmd --voice
+.\scripts\configure.cmd
+.\scripts\configure.cmd --check
+.\scripts\start.cmd
+```
+
+也可直接用 Python 3.12 运行 `python scripts/configure.py`。配置向导不启动服务、不连接机器人、不下发取物任务；`--check` 只读检查本机文件、配置和依赖。
+
+| 需要准备 | 谁提供 / 如何填写 |
+| --- | --- |
+| 机器人发单地址 | 机器人负责人提供完整地址，例如 `http://192.168.1.20:8080/api/task/dispatch`，须支持 VLM HTTP v1.2 |
+| 网关 IP 和端口 | 运行本仓库的电脑实际局域网 IPv4；端口默认 8000。不能把机器人 IP 填到网关这一栏 |
+| DeepSeek API Key | 网关用于理解请求与对话；输入不回显。可暂留空，但会退回规则回复 |
+| 阿里百炼 API Key | 北京地域、可调用当前 ASR 模型的 Key；专属工作空间 ID 按账号填写，无则留空。缺 Key 无法完成语音识别 |
+| 工作人员口令 | 用于 `/operator` 工作台。首次留空会自动生成，保存在本机 `backend/.env`，不打印到交接单 |
+| 麦克风 | 接在网关电脑上。向导显示设备列表，选输入设备编号；`-` 使用系统默认。首次启动按操作系统要求允许麦克风权限 |
+| 物品 JSON | 负责人确认 `robotItem` 是机器人真实支持的名称/编码，并配置机器人内部格位；英语叫法填写 `nameEn`、`aliasesEn` |
+
+向导默认设置**本地 sherpa 双语唤醒、VLM v1.2 整单取送**；播报沿用版本默认关闭。首次会复制一份 `config/booth-catalog.local.json`，不会修改仓库中的商品示例；已有目录不会覆盖。初始映射仍是示例编码，必须由机器人负责人核对，不代表机器人已经支持这些物品。
+
+文件用途：
+
+- `backend/.env`：本机 Key、机器人地址、口令、语音和目录路径。重跑向导时密钥输入留空即保留；原文件先备份到 `backend/.env.backup-*`，其他配置项保留。
+- `config/site.local.json`：启动地址、端口和网关 IP。现场模式下启动脚本自动监听 `0.0.0.0`，模拟模式监听本机；可用 `start.sh/start.cmd --host ... --port ...` 临时覆盖。
+- `output/site-setup.txt`：可交给机器人负责人的配置单，包含 `vlm.url`、回调地址和物品编码映射，不含 API Key 或工作人员口令。
+
+上述本机配置、备份和交接单均已加入忽略规则。更换电脑后重新运行向导，避免沿用旧电脑的绝对路径、IP 和声卡编号。进程环境变量仍优先于 `.env`；`--check` 会提示存在覆盖的变量名，不显示密钥。已有网页 API token 会保留，需沿用 [网页访问控制配置](#配置与代码入口) 中的前端配置。
+
+机器人负责人拿到交接单后，将 `vlm.url` 配为其中的 **`网关IP:端口`**，不追加回调路径，并按机器人自身方式重载配置。双方先按交接单检查 `/api/health` 和 `/health` 双向连通，再在网页确认一笔单件取物，核对 `progress`、识别照片以及 `finished/error`。`--check` 不验证 Key 有效性、系统麦克风权限或机器人网络；这些需要现场确认。协议字段与完整联调顺序见 [接口文档](docs/接口文档.md)。
+
 ### Ubuntu 安装与启动
 
 先按 [uv 官方说明](https://docs.astral.sh/uv/getting-started/installation/) 安装 uv，并确认普通终端可运行 `node`、`npm` 和 `uv`。首次安装可选择分步执行或使用快捷脚本，执行其中一种即可。已有环境按后文“已有环境与版本更新”处理。

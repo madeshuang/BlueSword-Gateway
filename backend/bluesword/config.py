@@ -85,7 +85,7 @@ class Settings(BaseModel):
     tts_model: str = "qwen3-tts-flash"
     tts_voice: str = "Cherry"
     speech_model: str = "qwen-audio-3.1-asr-flash-message"
-    # local: backend owns the microphone, KWS and speaker; browser is a shared display.
+    # local: backend owns audio/KWS; each browser connection has its own Agent session.
     speech_mode: Literal["browser", "local"] = "browser"
     wake_model_dir: str = "models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20"
     wake_threshold: float = Field(default=0.25, gt=0, le=1)
