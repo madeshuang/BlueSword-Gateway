@@ -1,0 +1,440 @@
+"""DeepSeek agent: streams reasoning + reply, orchestrates skills via tool calls.
+
+The model only selects allowlisted skills/items. Physical execution, safety checks and
+completion feedback stay in TaskManager/FetchWorkflow; tool results report what the
+robot actually did, and the model must not claim success otherwise.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+import time
+import uuid
+from collections.abc import Awaitable, Callable
+from pathlib import Path
+from typing import Any
+
+from openai import AsyncOpenAI
+
+from .config import Settings
+from .domain import RobotError, TaskRecord
+from .service import TaskManager
+from .skills import SKILLS
+
+logger = logging.getLogger(__name__)
+
+PROMPT_PATH = Path(__file__).with_name("prompts") / "system.md"
+MAX_ROUNDS = 6
+
+# 嘴上说了要去拿（或请观众点允许），却没有真正调用取货
+PROMISE = re.compile(r"点一下允许|点允许|这就去|马上去|我去(帮你|给你)?拿|去(帮你|给你)拿|这就给你拿|马上出发")
+def dangling_promise(content: str, items: dict) -> bool:
+    """回复里有一句“我这就去拿某样东西”式的承诺（点名了具体物品、且不是问句），但这一轮没有真的去取货。"""
+    names = {item.name for item in items.values()} | {a for item in items.values() for a in item.aliases}
+    for sentence, end in re.findall(r"([^。！？!?]+)([。！？!?]?)", content or ""):
+        if end in ("？", "?") or "哪" in sentence:
+            continue  # 问观众“要哪样”不是承诺
+        if PROMISE.search(sentence) and any(name in sentence for name in names):
+            return True
+    return False
+
+
+NUDGE = "（你刚才说要去拿，但还没有真正去取货。如果确实要拿，现在就去取货；如果不打算拿，就向观众简单更正一句。）"
+HISTORY_TURNS = 12
+
+Emit = Callable[[dict], None]
+Confirm = Callable[[dict], Awaitable[bool]]
+
+SAFETY_NOTE = "执行期间请与机器人保持一米以上距离，随时可以点击“停止任务”。"
+
+
+def describe_plan(skill: str, item_name: str) -> dict:
+    """Text for the pre-motion confirmation dialog."""
+    if skill == "unload":
+        return {
+            "title": "机器人即将执行",
+            "skill": "卸货",
+            "target": item_name,
+            "message": f"布鲁将带着{item_name}回到交付处，递到你手上。",
+            "steps": ["返回交付处", f"伸手递出{item_name}", "确认你接稳后松开夹爪"],
+            "note": SAFETY_NOTE,
+        }
+    return {
+        "title": "机器人即将执行",
+        "skill": "取货 → 卸货",
+        "target": item_name,
+        "message": f"布鲁将前往货架拿取{item_name}，再送到交付处交给你。",
+        "steps": ["前往货架", f"识别并抓取{item_name}", "返回交付处，递到你手上"],
+        "note": SAFETY_NOTE,
+    }
+
+
+def build_tools(manager: TaskManager) -> list[dict]:
+    item_ids = list(manager.items)
+    item_desc = "；".join(f"{i.id}={i.name}" for i in manager.items.values())
+    pick, unload = SKILLS["pick"], SKILLS["unload"]
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "pick_item",
+                "description": f"技能【{pick.title}】：{pick.description}。可选物品：{item_desc}。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"item_id": {"type": "string", "enum": item_ids}},
+                    "required": ["item_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "unload_item",
+                "description": f"技能【{unload.title}】：{unload.description}。只能在取货成功、手里有物品时调用。",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "look_shelf",
+                "description": "用头部相机看一眼当前画面，返回识别到的物品。用于回答“你看到了什么”。不移动底盘。",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_robot_status",
+                "description": "技能【查询状态】：查看机器人是否在线、是否正在执行任务、手里有没有东西、是否需要工作人员复位。",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "check_inventory",
+                "description": "技能【查询库存】：查看展台货架上某一类东西还剩几件，数量为 0 的已经拿完了、不能再取。"
+                f"类别有：{'、'.join(manager.categories)}；按观众需求所属的类别查，拿不准就查“全部”。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"category": {"type": "string", "enum": [*manager.categories, "全部"]}},
+                    "required": ["category"],
+                },
+            },
+        },
+    ]
+
+
+TOOL_NAMES = {
+    "pick_item": "取货",
+    "unload_item": "卸货",
+    "look_shelf": "看货架",
+    "get_robot_status": "查询状态",
+    "check_inventory": "查询库存",
+    "item_id": "物品",
+}
+
+
+def glossary(items: dict) -> dict[str, str]:
+    """内部代号 → 中文，供前端在大屏显示思考链时翻译（只影响显示，原文保留）。"""
+    terms = dict(TOOL_NAMES)
+    for item in items.values():
+        terms[item.id] = item.name
+        base = item.id.rstrip("0123456789")
+        if base != item.id:
+            terms.setdefault(base, item.name)  # yogurt1 / yogurt2 → 也认 yogurt
+    return terms
+
+
+def shelf_position(box: tuple[float, float, float, float]) -> str:
+    """Describe the configured display slot from its normalized box (x, y, w, h) in the head camera view."""
+    x, y, w, h = box
+    cy, cx = y + h / 2, x + w / 2
+    layer = "上层" if cy < 0.36 else "中层" if cy < 0.66 else "下层"
+    side = "左侧" if cx < 0.36 else "中间" if cx < 0.6 else "右侧"
+    return layer + side
+
+
+def system_prompt(manager: TaskManager, health: dict | None = None) -> str:
+    lines, seen = [], set()
+    for item in manager.items.values():
+        if item.name in seen:
+            continue  # 同名多件（如两瓶安慕希）合并描述
+        same = [i for i in manager.items.values() if i.name == item.name]
+        seen.add(item.name)
+        spots = "、".join(shelf_position(i.box) for i in same)
+        alias = "、".join(a for a in item.aliases if a != item.name)
+        count = f"，共 {len(same)} 件" if len(same) > 1 else ""
+        lines.append(f"- {item.name}（{item.category}）：{spots}{count}" + (f"；观众也可能叫它{alias}" if alias else ""))
+    held = manager.items[manager.held_item_id].name if manager.held_item_id else None
+    health = health or {}
+    state = [
+        "- 机器人：" + ("在线" if health.get("online", True) else "离线，无法行动"),
+        "- 手里：" + (f"拿着{held}，还没有递给观众" if held else "空着"),
+        "- 任务：" + ("正在执行中" if manager.busy else "空闲"),
+    ]
+    if manager.store.recovery_required:
+        state.append("- 注意：上一次任务异常中止，需要工作人员检查复位，在复位前不能取物")
+    return (
+        PROMPT_PATH.read_text(encoding="utf-8")
+        .replace("{{ITEMS}}", "\n".join(lines))
+        .replace("{{STATE}}", "\n".join(state))
+    )
+
+
+def summarize(task: TaskRecord) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "ok": task.status == "completed",
+        "status": task.status,
+        "item": task.item_id,
+        "holding": task.holding,
+        # 机器人一路的回报（停靠误差、识别置信度、是否横移重新定位……），写成一句话，
+        # 并附上复盘提示：实测这能让思考链引用真实执行数据，而不是只写“取货成功”
+        "机器人回报": "；".join(
+            f"{s.label}{ {'done': '', 'failed': '失败', 'active': '中断'}.get(s.status, '')}" + (f"：{s.detail}" if s.detail else "")
+            for s in task.steps
+            if s.status != "pending" and s.id != "plan"
+        ),
+        "复盘": "继续之前，先在心里用一两句话复盘这次回报：哪里顺利、哪里有波折，再决定下一步。",
+    }
+    if task.error:
+        result["error"] = task.error.get("message")
+        result["recovery_required"] = True
+    return result
+
+
+class AgentSession:
+    """One conversation (one WebSocket). Not thread-safe; one turn at a time."""
+
+    def __init__(self, client: AsyncOpenAI, settings: Settings, manager: TaskManager, owner: str):
+        self.client, self.settings, self.manager, self.owner = client, settings, manager, owner
+        self.history: list[dict] = []
+        self.tools = build_tools(manager)
+
+    def reset(self) -> None:
+        self.history.clear()
+
+    async def _tool(self, name: str, args: dict) -> dict:
+        manager = self.manager
+        if name == "pick_item":
+            item_id = args.get("item_id")
+            if item_id not in manager.items:
+                return {"ok": False, "error": "物品不在货架清单中"}
+            task = await manager.run_skill("pick", item_id, self.owner)
+            return summarize(task)
+        if name == "unload_item":
+            held = manager.held_item_id
+            if not held:
+                return {"ok": False, "error": "手里没有物品，需要先取货"}
+            task = await manager.run_skill("unload", held, self.owner)
+            return summarize(task)
+        if name == "look_shelf":
+            detections = await manager.inspect(self.owner)
+            result: dict[str, Any] = {"visible": [d.label for d in detections]}
+            if not detections:
+                result["note"] = "相机当前没有识别到货架物品，可能此刻没有面向货架"
+            return result
+        if name == "get_robot_status":
+            health = await manager.bundle.robot.health()
+            held = manager.held_item_id
+            return {
+                "online": bool(health.get("online")),
+                "busy": manager.busy,
+                "holding": manager.items[held].name if held else None,
+                "recovery_required": manager.store.recovery_required,
+            }
+        if name == "check_inventory":
+            category = args.get("category")
+            category = category if category in manager.categories else None
+            return {"category": category or "全部", "stock": manager.inventory(category)}
+        return {"ok": False, "error": f"未知工具 {name}"}
+
+    def _opening_line(self, calls: list[dict]) -> str:
+        """模型没开口就直接调用会让机器人动的技能时，补一句固定的开场白，保证观众先听到要做什么再看到确认。
+
+        只补“对观众说的话”，不改动思考链。
+        """
+        for call in calls:
+            try:
+                args = json.loads(call["arguments"] or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            if call["name"] == "pick_item" and args.get("item_id") in self.manager.items:
+                return f"好嘞，我去帮你拿{self.manager.items[args['item_id']].name}，请在屏幕上点一下允许。"
+            if call["name"] == "unload_item" and self.manager.held_item_id:
+                return f"{self.manager.items[self.manager.held_item_id].name}拿到了，我这就给你送过来。"
+        return ""
+
+    async def _stream_round(
+        self, messages: list[dict], emit: Emit, effort: str | None = None
+    ) -> tuple[str, str, list[dict], str]:
+        msg_id = uuid.uuid4().hex
+        emit({"type": "assistant_start", "id": msg_id})
+        reasoning, content, calls = "", "", {}
+        started, reasoning_ended = time.monotonic(), False
+        stream = await self.client.chat.completions.create(
+            model=self.settings.llm_model,
+            messages=messages,
+            tools=self.tools,
+            stream=True,
+            timeout=self.settings.llm_timeout,
+            extra_body={"reasoning_effort": effort or self.settings.llm_reasoning_effort},
+        )
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            r = getattr(delta, "reasoning_content", None)
+            if r:
+                reasoning += r
+                emit({"type": "reasoning_delta", "id": msg_id, "text": r})
+            if delta.content:
+                if not reasoning_ended:
+                    reasoning_ended = True
+                    emit({"type": "reasoning_end", "id": msg_id, "ms": int((time.monotonic() - started) * 1000)})
+                    emit({"type": "phase", "phase": "speaking"})
+                content += delta.content
+                emit({"type": "assistant_delta", "id": msg_id, "text": delta.content})
+            for tc in delta.tool_calls or []:
+                entry = calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                entry["id"] = tc.id or entry["id"]
+                if tc.function:
+                    entry["name"] = tc.function.name or entry["name"]
+                    entry["arguments"] += tc.function.arguments or ""
+        if not reasoning_ended and reasoning:
+            emit({"type": "reasoning_end", "id": msg_id, "ms": int((time.monotonic() - started) * 1000)})
+        return msg_id, reasoning, list(calls.values()), content
+
+    async def turn(self, text: str, emit: Emit, confirm: Confirm) -> None:
+        """One user turn. Every robot-moving skill waits for confirm(plan) to return True."""
+        approved_items: set[str] = set()  # 本轮已获允许的物品：取货时的确认同时覆盖紧接着的卸货
+        nudged = moved = False
+        self.history.append({"role": "user", "content": text})
+        turn_start = len(self.history) - 1
+        emit({"type": "phase", "phase": "thinking"})
+        try:
+            for _ in range(MAX_ROUNDS):
+                try:
+                    health = await self.manager.bundle.robot.health()
+                except Exception:
+                    health = {}
+                messages = [{"role": "system", "content": system_prompt(self.manager, health)}]
+                # 以下划线开头的是内部标记，不发给模型接口
+                messages += [{k: v for k, v in m.items() if not k.startswith("_")} for m in self.history]
+                # 拿到技能结果后的那一轮用更高的思考强度复盘机器人回报；决策轮保持默认强度
+                after_skill = self.history[-1]["role"] == "tool"
+                effort = self.settings.llm_review_effort if after_skill else None
+                msg_id, reasoning, calls, content = await self._stream_round(messages, emit, effort)
+                if not content.strip():
+                    content = self._opening_line(calls)
+                    if content:
+                        emit({"type": "phase", "phase": "speaking"})
+                        emit({"type": "assistant_delta", "id": msg_id, "text": content})
+                assistant: dict[str, Any] = {"role": "assistant", "content": content or None}
+                if reasoning or calls:
+                    # 思考模式下，带工具调用的消息必须回传 reasoning_content（哪怕为空），否则接口返回 400
+                    assistant["reasoning_content"] = reasoning
+                if calls:
+                    assistant["tool_calls"] = [
+                        {"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": c["arguments"]}}
+                        for c in calls
+                    ]
+                self.history.append(assistant)
+                if not calls:
+                    emit({"type": "assistant_end", "id": msg_id})
+                    if not nudged and not moved and dangling_promise(content, self.manager.items):
+                        # 只说不做：在后台提醒一次（不显示给观众，本轮结束后从历史中移除）
+                        nudged = True
+                        self.history.append({"role": "user", "content": NUDGE, "_nudge": True})
+                        continue
+                    break
+                for call in calls:
+                    try:
+                        args = json.loads(call["arguments"] or "{}")
+                    except json.JSONDecodeError:
+                        args = {}
+                    name = call["name"]
+                    skill_name = {"pick_item": "pick", "unload_item": "unload"}.get(name)
+                    gdk = SKILLS[skill_name].gdk() if skill_name else []
+                    label = {"pick_item": "取货", "unload_item": "卸货", "look_shelf": "环视货架",
+                             "get_robot_status": "查询状态", "check_inventory": "查询库存"}.get(name, name)
+                    item = self.manager.items.get(args.get("item_id", "")) if name == "pick_item" else None
+                    if name == "unload_item" and self.manager.held_item_id:
+                        item = self.manager.items.get(self.manager.held_item_id)
+                    target = item.name if item else ""
+                    if name == "check_inventory":
+                        target = args.get("category") or "全部"
+                    base = {"type": "skill", "id": msg_id, "call_id": call["id"], "name": name,
+                            "title": label, "target": target, "gdk": gdk}
+                    moves_robot = name in ("pick_item", "unload_item") and item is not None
+                    moved = moved or moves_robot
+                    declined = False
+                    if moves_robot and not (name == "unload_item" and item.id in approved_items):
+                        emit({**base, "status": "pending", "detail": "等待观众确认"})
+                        plan = describe_plan("unload" if name == "unload_item" else "fetch", item.name)
+                        declined = not await confirm(plan)
+                        if not declined:
+                            approved_items.add(item.id)
+                    if declined:
+                        result = {"ok": False, "declined": True, "error": "观众没有允许执行，本次已取消，机器人没有动"}
+                        emit({**base, "status": "cancelled", "detail": "未获允许"})
+                    else:
+                        emit({**base, "status": "running"})
+                        try:
+                            result = await self._tool(name, args)
+                        except RobotError as exc:
+                            result = {"ok": False, "error": str(exc)}
+                        ok = result.get("ok", True)
+                        detail = result.get("error") or ("完成" if ok else result.get("status", "失败"))
+                        if name == "look_shelf":
+                            detail = "、".join(result.get("visible", [])) or "没有识别到物品"
+                        elif name == "check_inventory":
+                            detail = ""  # 库存用卡片显示（见 stock 字段）
+                        elif name == "get_robot_status":
+                            detail = "，".join(
+                                [
+                                    "在线" if result["online"] else "离线",
+                                    "正在执行任务" if result["busy"] else "空闲",
+                                    f"手里拿着{result['holding']}" if result["holding"] else "手里空着",
+                                ]
+                                + (["需要工作人员复位"] if result["recovery_required"] else [])
+                            )
+                        extra = {"stock": [{"name": k, "count": v} for k, v in result["stock"].items()]} \
+                            if name == "check_inventory" else {}
+                        emit({**base, "status": "done" if ok else "failed", "detail": detail, **extra})
+                    self.history.append(
+                        {"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result, ensure_ascii=False)}
+                    )
+                emit({"type": "assistant_end", "id": msg_id})
+                emit({"type": "phase", "phase": "thinking"})
+        finally:
+            # 思考链只在本轮工具循环中回传；之后的对话不再携带，节省上下文
+            self.history[turn_start:] = [m for m in self.history[turn_start:] if not m.get("_nudge")]
+            for message in self.history[turn_start:]:
+                message.pop("reasoning_content", None)
+            user_turns = [i for i, m in enumerate(self.history) if m["role"] == "user"]
+            if len(user_turns) > HISTORY_TURNS:
+                del self.history[: user_turns[-HISTORY_TURNS]]
+            emit({"type": "phase", "phase": "listening"})
+
+
+class Agent:
+    def __init__(self, settings: Settings, manager: TaskManager):
+        self.settings, self.manager = settings, manager
+        self.client = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url, max_retries=1)
+
+    def session(self, owner: str) -> AgentSession:
+        return AgentSession(self.client, self.settings, self.manager, owner)
+
+    async def close(self) -> None:
+        await self.client.close()
+
+
+def create_agent(settings: Settings, manager: TaskManager) -> Agent | None:
+    if not settings.llm_api_key:
+        return None
+    return Agent(settings, manager)
+

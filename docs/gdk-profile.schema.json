@@ -1,0 +1,339 @@
+{
+  "$defs": {
+    "Grasp": {
+      "additionalProperties": false,
+      "properties": {
+        "offset_base_m": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Offset Base M",
+          "type": "array"
+        },
+        "quaternion": {
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Quaternion",
+          "type": "array"
+        }
+      },
+      "required": [
+        "offset_base_m",
+        "quaternion"
+      ],
+      "title": "Grasp",
+      "type": "object"
+    },
+    "Gripper": {
+      "additionalProperties": false,
+      "properties": {
+        "state_index": {
+          "minimum": 0,
+          "title": "State Index",
+          "type": "integer"
+        },
+        "open_position": {
+          "title": "Open Position",
+          "type": "number"
+        },
+        "closed_position": {
+          "title": "Closed Position",
+          "type": "number"
+        },
+        "contact_position": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Contact Position",
+          "type": "array"
+        },
+        "min_contact_effort": {
+          "exclusiveMinimum": 0,
+          "title": "Min Contact Effort",
+          "type": "number"
+        },
+        "position_tolerance": {
+          "exclusiveMinimum": 0,
+          "title": "Position Tolerance",
+          "type": "number"
+        },
+        "velocity_tolerance": {
+          "exclusiveMinimum": 0,
+          "title": "Velocity Tolerance",
+          "type": "number"
+        }
+      },
+      "required": [
+        "state_index",
+        "open_position",
+        "closed_position",
+        "contact_position",
+        "min_contact_effort",
+        "position_tolerance",
+        "velocity_tolerance"
+      ],
+      "title": "Gripper",
+      "type": "object"
+    },
+    "Pose": {
+      "additionalProperties": false,
+      "properties": {
+        "position": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Position",
+          "type": "array"
+        },
+        "quaternion": {
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Quaternion",
+          "type": "array"
+        }
+      },
+      "required": [
+        "position",
+        "quaternion"
+      ],
+      "title": "Pose",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "calibrated": {
+      "default": false,
+      "title": "Calibrated",
+      "type": "boolean"
+    },
+    "sdk_version": {
+      "const": "2.2.3",
+      "default": "2.2.3",
+      "title": "Sdk Version",
+      "type": "string"
+    },
+    "map_id": {
+      "title": "Map Id",
+      "type": "integer"
+    },
+    "navigation_frame": {
+      "enum": [
+        "map",
+        "base_link"
+      ],
+      "title": "Navigation Frame",
+      "type": "string"
+    },
+    "arm": {
+      "enum": [
+        "left",
+        "right"
+      ],
+      "title": "Arm",
+      "type": "string"
+    },
+    "end_effector_frame": {
+      "minLength": 1,
+      "title": "End Effector Frame",
+      "type": "string"
+    },
+    "optical_frame": {
+      "minLength": 1,
+      "title": "Optical Frame",
+      "type": "string"
+    },
+    "depth_optical_frame": {
+      "default": "",
+      "title": "Depth Optical Frame",
+      "type": "string"
+    },
+    "camera_registered_rectified": {
+      "title": "Camera Registered Rectified",
+      "type": "boolean"
+    },
+    "depth_unit_m": {
+      "exclusiveMinimum": 0,
+      "title": "Depth Unit M",
+      "type": "number"
+    },
+    "timestamp_offset_ns": {
+      "title": "Timestamp Offset Ns",
+      "type": "integer"
+    },
+    "gripper": {
+      "$ref": "#/$defs/Gripper"
+    },
+    "poses": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Pose"
+      },
+      "title": "Poses",
+      "type": "object"
+    },
+    "grasps": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Grasp"
+      },
+      "title": "Grasps",
+      "type": "object"
+    },
+    "observations": {
+      "additionalProperties": {
+        "additionalProperties": {
+          "type": "number"
+        },
+        "type": "object"
+      },
+      "title": "Observations",
+      "type": "object"
+    },
+    "detector_factory": {
+      "default": "",
+      "title": "Detector Factory",
+      "type": "string"
+    },
+    "take_sensor_factory": {
+      "default": "",
+      "title": "Take Sensor Factory",
+      "type": "string"
+    },
+    "startup_delay": {
+      "default": 3,
+      "minimum": 0,
+      "title": "Startup Delay",
+      "type": "number"
+    },
+    "poll_interval": {
+      "default": 0.05,
+      "exclusiveMinimum": 0,
+      "title": "Poll Interval",
+      "type": "number"
+    },
+    "feedback_max_age": {
+      "default": 0.5,
+      "exclusiveMinimum": 0,
+      "title": "Feedback Max Age",
+      "type": "number"
+    },
+    "sdk_call_timeout": {
+      "default": 2,
+      "exclusiveMinimum": 0,
+      "title": "Sdk Call Timeout",
+      "type": "number"
+    },
+    "action_timeout": {
+      "default": 15,
+      "exclusiveMinimum": 0,
+      "title": "Action Timeout",
+      "type": "number"
+    },
+    "command_lifetime": {
+      "default": 3,
+      "exclusiveMinimum": 0,
+      "title": "Command Lifetime",
+      "type": "number"
+    },
+    "position_tolerance": {
+      "default": 0.015,
+      "exclusiveMinimum": 0,
+      "title": "Position Tolerance",
+      "type": "number"
+    },
+    "angle_tolerance": {
+      "default": 0.04,
+      "exclusiveMinimum": 0,
+      "title": "Angle Tolerance",
+      "type": "number"
+    },
+    "joint_tolerance": {
+      "default": 0.025,
+      "exclusiveMinimum": 0,
+      "title": "Joint Tolerance",
+      "type": "number"
+    },
+    "velocity_tolerance": {
+      "default": 0.025,
+      "exclusiveMinimum": 0,
+      "title": "Velocity Tolerance",
+      "type": "number"
+    },
+    "settled_samples": {
+      "default": 3,
+      "minimum": 2,
+      "title": "Settled Samples",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "map_id",
+    "navigation_frame",
+    "arm",
+    "end_effector_frame",
+    "optical_frame",
+    "camera_registered_rectified",
+    "depth_unit_m",
+    "timestamp_offset_ns",
+    "gripper",
+    "poses",
+    "grasps",
+    "observations"
+  ],
+  "title": "Profile",
+  "type": "object"
+}
