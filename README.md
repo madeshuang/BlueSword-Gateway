@@ -6,7 +6,9 @@ React 前端 + Python/FastAPI 后端，负责语音对话、整单确认、任�
 
 ## 安装与启动
 
-当前版本使用 **npm + uv**，分别按 `frontend/package-lock.json` 和 `backend/uv.lock` 安装。准备 Node.js 24（当前前端要求 `^20.19.0` 或 `>=22.12.0`）、npm、uv、Python 3.12，以及启动脚本使用的 Bash、curl、lsof。SQLite 无需单独部署；模拟模式无需真实机器人或厂商 SDK。
+当前版本使用 **npm + uv**，分别按 `frontend/package-lock.json` 和 `backend/uv.lock` 安装。准备 Node.js 24（当前前端要求 `^20.19.0` 或 `>=22.12.0`）、npm、uv、Python 3.12；使用 Bash 一键脚本时还需 Bash、curl、lsof。SQLite 无需单独部署；模拟模式无需真实机器人或厂商 SDK。
+
+Windows 可以原生使用 PowerShell，见下方“Windows 原生安装与启动”。WSL2 是运行现有 Bash 一键脚本的可选方式：选择 WSL2 时，需在 WSL 内安装依赖，并核对 Windows 到 WSL 的端口访问；连接真实机器人时还需确保机器人能访问网关回调地址。下方标为 `bash` 的命令用于 Linux／WSL2，不能直接粘贴到 PowerShell。
 
 ### 首次安装
 
@@ -18,7 +20,50 @@ uv python install 3.12
 (cd backend && uv sync --locked --python 3.12 --extra dev)
 ```
 
-需要大模型时，在 `backend/.env` 配置 `DEEPSEEK_API_KEY`，可选 `DEEPSEEK_MODEL=deepseek-flash`，并执行 `chmod 600 backend/.env`。后端依次读取 `backend/.env`、根目录 `.env`，已有环境变量优先；修改后需重启服务。没有模型 Key 时使用规则路由。配置项见 [backend/.env.example](backend/.env.example)，不要提交真实 `.env`。
+### 首次配置
+
+在项目根目录执行；已有文件会保留，请按示例补充配置：
+
+```bash
+if [ ! -f backend/.env ]; then cp backend/.env.example backend/.env; fi
+chmod 600 backend/.env
+```
+
+编辑 `backend/.env`：文字 AI 填 `DEEPSEEK_API_KEY`；语音识别和播报填 `DASHSCOPE_API_KEY`；本地演示保留 `BLUESWORD_ROBOT_MODE=mock`。连接真机时再按下文填写模式、协议、发单地址和工作人员口令。
+
+旧版配置请按新示例逐项核对：旧 `BOOTH_*`、`OPENAI_*`、`TENCENT_*` 配置多数不再读取（工作人员口令 `BOOTH_OPERATOR_TOKEN` 仍兼容），不要直接沿用旧文件作为完整配置。
+
+配置统一填写在 `backend/.env`，已有进程环境变量优先；修改后需重启服务。模型默认 `deepseek-flash`，可用 `DEEPSEEK_MODEL` 调整；没有模型 Key 时使用规则路由。配置项见 [backend/.env.example](backend/.env.example)，不要提交真实 `.env`。
+
+### Windows 原生安装与启动
+
+安装 Windows 版 Git、Node.js 24 和 uv 后，在项目根目录打开 PowerShell。以下命令按顺序执行，任一步报错时先处理错误：
+
+```powershell
+uv python install 3.12
+npm.cmd ci --prefix frontend
+npm.cmd run build --prefix frontend
+uv sync --locked --project backend --python 3.12 --extra dev
+if (-not (Test-Path backend/.env)) { Copy-Item backend/.env.example backend/.env }
+notepad.exe backend/.env
+```
+
+按“首次配置”填写并保存。内部模拟体验时保留 `BLUESWORD_ROBOT_MODE=mock`；从项目根目录启动：
+
+```powershell
+Set-Location backend
+uv run --locked uvicorn bluesword.app:app --host 127.0.0.1 --port 8000 --workers 1
+```
+
+打开 <http://127.0.0.1:8000>，按 `Ctrl+C` 停止。连接真实机器人时，先停止模拟服务，按下方“连接真实机器人”填写 `backend/.env`，在 `backend` 目录运行：
+
+```powershell
+uv run --locked uvicorn bluesword.app:app --host 0.0.0.0 --port 8000 --workers 1
+```
+
+现场需允许机器人通过 Windows 防火墙访问网关 8000 端口，并使用网关电脑实际局域网地址配置回调。PowerShell 临时环境变量语法为 `$env:变量名="值"`，会优先于 `.env`；切换场景前用 `Remove-Item Env:变量名` 清除先前的临时覆盖。关闭启动终端前先按 `Ctrl+C`。
+
+需要使用现有 VLM 双服务或 Blender 一键脚本时，可选择 WSL2 按相应 Bash 步骤运行。
 
 ### 选择启动方式
 
@@ -289,6 +334,21 @@ BLUESWORD_SCENARIO=grasp_failure uv run uvicorn bluesword.app:app --host 127.0.0
 
 | 变量 | 默认值 / 说明 |
 | --- | --- |
+| `DEEPSEEK_API_KEY` / `DEEPSEEK_MODEL` | Key 留空时使用规则路由；模型默认 `deepseek-flash` |
+| `BLUESWORD_LLM_BASE_URL` | `https://api.deepseek.com`；自定义服务须兼容当前 Chat Completions、工具调用和 `reasoning_effort` 请求，不直接沿用旧 Responses 中转配置 |
+| `BLUESWORD_LLM_TIMEOUT` | `90` 秒，模型请求超时；不是整轮多次模型调用的总时限 |
+| `BLUESWORD_LLM_REASONING_EFFORT` / `BLUESWORD_LLM_REVIEW_EFFORT` | 常规思考 `high`，技能结果复盘 `max`；均可选 `low` / `high` / `max` |
+| `DASHSCOPE_API_KEY` / `DASHSCOPE_WORKSPACE_ID` | 阿里百炼北京地域 Key；工作空间可选，用于识别；需开通识别及播报模型，Key 留空仍可打字 |
+| `BLUESWORD_SPEECH_MODEL` | `qwen-audio-3.1-asr-flash-message`，语音识别模型 |
+| `BLUESWORD_TTS_MODEL` / `BLUESWORD_TTS_VOICE` | `qwen3-tts-flash` / `Cherry`，播报模型与音色 |
+| `BLUESWORD_CONFIRM_TIMEOUT` | `60` 秒，等待用户确认；超时取消尚未下发的请求 |
+| `BLUESWORD_ROBOT_TIMEOUT` | `8` 秒，机器人健康查询及接单请求超时 |
+| `BLUESWORD_REMOTE_TASK_TIMEOUT` | `300` 秒，接单后等待最终结果；超时需现场核对，不代表机器人停止，不自动退库存 |
+| `BLUESWORD_ROBOT_PROTOCOL` | 代码默认 `v1`，示例显式设为 `vlm`；现场使用 `vlm` |
+| `BLUESWORD_ROBOT_DISPATCH_URL` | 现场必填，完整发单地址，例如 `http://<机器人IP>:8080/api/task/dispatch` |
+| `BLUESWORD_CATALOG_PATH` | VLM 留空使用项目内示例目录；自定义建议绝对路径，重启生效 |
+| `BLUESWORD_SPLIT_SKILLS` | `false`；现场保持完整取送任务，拆分仅用于已确认支持的演示 |
+| `BLUESWORD_OPERATOR_TOKEN` | 工作人员恢复接单和补货的口令；留空不开放操作，与网页访问 token 分开 |
 | `BLUESWORD_ROBOT_MODE` | `mock`；Blender 联动为 `gdk_mock`；现场 HTTP 对接为 `lanjian_http`；直接 GDK 为 `gdk` |
 | `BLUESWORD_SIMULATION_SPEED` | `1`；仅控制 GDK 模拟联动的动作播放速度 |
 | `BLUESWORD_DRIVER_FACTORY` | 可选；真实模式默认 `bluesword.gdk_v223:create_driver` |
@@ -304,6 +364,20 @@ BLUESWORD_SCENARIO=grasp_failure uv run uvicorn bluesword.app:app --host 127.0.0
 | `BLUESWORD_ALLOWED_ORIGINS` | JSON 数组，默认两个本地 Vite 地址；同源 WS 也允许 |
 
 默认只监听本机。展台内网部署时按实际终端设置监听地址、允许来源和访问 token。
+
+所有上述超时单位均为**秒**。进程环境中的同名变量优先于 `backend/.env`；`BLUESWORD_LLM_API_KEY`、`BLUESWORD_LLM_MODEL`、`BLUESWORD_SPEECH_API_KEY`、`BLUESWORD_SPEECH_WORKSPACE` 如有设置，优先于对应的 `DEEPSEEK_*` / `DASHSCOPE_*` 别名。避免同时配置两套同用途变量。
+
+### 可选：网页访问 token
+
+默认留空。启用时在 `backend/.env` 设置 `BLUESWORD_API_TOKEN`，并在本机 `frontend/.env.local` 设置同一 token 的 WebSocket 地址，例如：
+
+```dotenv
+VITE_AGENT_WS=ws://127.0.0.1:8000/ws?token=<经过URL编码的网页访问token>
+```
+
+地址必须能从使用网页的电脑访问；跨电脑访问请改为网关实际地址，HTTPS 页面使用 `wss://`。然后在项目根目录运行 `npm run build --prefix frontend`、重启后端并刷新页面；开发模式则重启 Vite。`VITE_*` 在构建时写入网页，之后只改后端配置不会更新它。网页从该地址读取 token，用于 WebSocket 和 HTTP API；仅设置后端 token 会导致默认网页无法连接。
+
+此 token 会出现在浏览器及构建产物中，只用于受控部署的网页访问，不要复用供应商 Key 或工作人员口令；不要提交 `frontend/.env.local`。跨源访问时，将页面来源加入 `BLUESWORD_ALLOWED_ORIGINS` 的 JSON 数组。机器人 VLM 回调不使用此 token；本机协议模拟脚本会将网页 token 置空，测试时也应使用不含 token 的本机前端地址。
 
 ## 现场 HTTP 对接与人工核对
 
