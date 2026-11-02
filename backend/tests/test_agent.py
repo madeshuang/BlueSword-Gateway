@@ -217,3 +217,33 @@ async def test_checks_status_and_inventory_before_picking(make_manager):
     assert all(s["name"] not in ("扑克牌", "纸巾") for s in inv["stock"])  # 只查这一类
     tools = [json.loads(m["content"]) for m in client.requests[1]["messages"] if m["role"] == "tool"]
     assert tools[1] == {"category": "零食饮料", "stock": {"奥利奥": 3, "安慕希": 6, "矿泉水": 3, "薯片": 3}}
+
+
+async def test_full_order_confirmed_once_and_cannot_split_or_repeat(make_manager):
+    manager = await make_manager(split_skills=False)
+    args = json.dumps({'items': [{'item_id': 'water', 'count': 1}, {'item_id': 'chips', 'count': 1}]})
+    client = FakeClient([
+        [chunk(call=(0, 'c1', 'fetch_items', args))],
+        [chunk(call=(0, 'c2', 'fetch_items', args))],
+        [chunk(content='给你，拿好哦。')],
+    ])
+    session = AgentSession(client, manager.settings, manager, 'owner')
+    plans = []
+    async def approve(plan):
+        plans.append(plan)
+        assert manager.store.recent() == []
+        return True
+    await session.turn('水和薯片各一件', lambda e: None, approve, 'one-order')
+    assert len(plans) == 1 and plans[0]['target'] == '矿泉水 × 1、薯片 × 1'
+    assert len(manager.store.recent()) == 1
+    assert manager.stock['water'] == 2 and manager.stock['chips'] == 2
+    assert any('不可重复' in m['content'] for m in session.history if m['role'] == 'tool')
+
+
+async def test_full_order_denied_does_not_move_or_reserve(make_manager):
+    manager = await make_manager(split_skills=False)
+    client = FakeClient([[chunk(call=(0, 'c1', 'fetch_items', '{"items":[{"item_id":"water","count":2}]}'))], [chunk(content='好的。')]])
+    session = AgentSession(client, manager.settings, manager, 'owner')
+    async def deny(plan): return False
+    await session.turn('两瓶水', lambda e: None, deny)
+    assert manager.store.recent() == [] and manager.stock['water'] == 3

@@ -1,0 +1,166 @@
+[
+  {
+    "id": "lighter_box",
+    "name": "USB防风打火机",
+    "category": "兰剑智能礼品",
+    "subtitle": "点燃灵感，智启未来",
+    "description": "一份精致的兰剑智能纪念礼品，让科技的温度伴随日常。",
+    "location": "待配置",
+    "maxCount": 3,
+    "initialStock": 3,
+    "art": "lighter_box",
+    "color": "#e3edf0",
+    "robotItem": "lighter_box",
+    "aliases": [
+      "打火机"
+    ]
+  },
+  {
+    "id": "playing_card_box",
+    "name": "可水洗掼蛋扑克牌",
+    "category": "兰剑智能礼品",
+    "subtitle": "智慧博弈，乐趣无限",
+    "description": "工作之外，也要享受轻松时光。领取一副兰剑智能定制扑克牌。",
+    "location": "待配置",
+    "maxCount": 3,
+    "initialStock": 3,
+    "art": "playing_card_box",
+    "color": "#e5e6f1",
+    "robotItem": "playing_card_box",
+    "aliases": [
+      "扑克牌",
+      "扑克"
+    ]
+  },
+  {
+    "id": "pen_box",
+    "name": "高端签字笔",
+    "category": "兰剑智能礼品",
+    "subtitle": "记录灵感，书写未来",
+    "description": "让每一次创新灵感都有迹可循，带走一支兰剑智能定制圆珠笔。",
+    "location": "待配置",
+    "maxCount": 3,
+    "initialStock": 3,
+    "art": "pen_box",
+    "color": "#dcecf1",
+    "robotItem": "pen_box",
+    "aliases": [
+      "签字笔",
+      "圆珠笔"
+    ]
+  },
+  {
+    "id": "table_tennis_ball_box",
+    "name": "乒乓球",
+    "category": "体育器材",
+    "subtitle": "小球转动，活力无限",
+    "description": "享受国球运动的魅力，在每一次挥拍中感受速度与激情。",
+    "location": "待配置",
+    "maxCount": 3,
+    "initialStock": 3,
+    "art": "table_tennis_ball_box",
+    "color": "#f4e8d8",
+    "robotItem": "table_tennis_ball_box",
+    "aliases": [
+      "乒乓球"
+    ]
+  },
+  {
+    "id": "shuttlecock_tube",
+    "name": "羽毛球",
+    "category": "体育器材",
+    "subtitle": "轻盈起飞，释放活力",
+    "description": "让运动融入生活，带上一筒羽毛球，开启充满活力的运动时光。",
+    "location": "待配置",
+    "maxCount": 3,
+    "initialStock": 3,
+    "art": "shuttlecock_tube",
+    "color": "#e3eddf",
+    "robotItem": "shuttlecock_tube",
+    "aliases": [
+      "羽毛球"
+    ]
+  },
+  {
+    "id": "air_pump",
+    "name": "打气筒",
+    "category": "体育器材",
+    "subtitle": "充满能量，即刻出发",
+    "description": "为运动装备补充动力，让每一次运动都能轻松开启。",
+    "location": "待配置",
+    "maxCount": 3,
+    "initialStock": 3,
+    "art": "air_pump",
+    "color": "#e0e9f3",
+    "robotItem": "air_pump",
+    "aliases": [
+      "打气筒"
+    ]
+  },
+  {
+    "id": "aoliao",
+    "name": "奥利奥饼干",
+    "category": "零食饮料",
+    "subtitle": "扭一扭，舔一舔，泡一泡",
+    "description": "经典巧克力夹心饼干，机器人为你送上一份甜蜜的休闲时光。",
+    "location": "待配置",
+    "maxCount": 3,
+    "initialStock": 3,
+    "art": "aoliao",
+    "color": "#e5e5f2",
+    "robotItem": "aoliao",
+    "aliases": [
+      "奥利奥",
+      "饼干"
+    ]
+  },
+  {
+    "id": "anmuxi",
+    "name": "安慕希酸奶",
+    "category": "零食饮料",
+    "subtitle": "浓醇好滋味，活力每一天",
+    "description": "忙碌的展会间隙，来一份香浓酸奶，为精彩体验补充能量。",
+    "location": "待配置",
+    "maxCount": 3,
+    "initialStock": 3,
+    "art": "anmuxi",
+    "color": "#dcecf5",
+    "robotItem": "anmuxi",
+    "aliases": [
+      "安慕希",
+      "酸奶"
+    ]
+  },
+  {
+    "id": "haoliyou",
+    "name": "好丽友派",
+    "category": "零食饮料",
+    "subtitle": "甜蜜一刻，分享快乐",
+    "description": "松软可口的经典美味，让智能机器人为你送上一份甜蜜惊喜。",
+    "location": "待配置",
+    "maxCount": 3,
+    "initialStock": 3,
+    "art": "haoliyou",
+    "color": "#f2e1dc",
+    "robotItem": "haoliyou",
+    "aliases": [
+      "好丽友"
+    ]
+  },
+  {
+    "id": "shupian",
+    "name": "乐事薯片",
+    "category": "零食饮料",
+    "subtitle": "快乐就是这么脆",
+    "description": "酥脆美味，轻松分享。让机器人为你的展会探索增添一份快乐。",
+    "location": "待配置",
+    "maxCount": 3,
+    "initialStock": 3,
+    "art": "shupian",
+    "color": "#f5ead5",
+    "robotItem": "shupian",
+    "aliases": [
+      "薯片"
+    ]
+  }
+]

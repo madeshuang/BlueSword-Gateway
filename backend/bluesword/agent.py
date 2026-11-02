@@ -16,10 +16,12 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+import httpx
 from openai import AsyncOpenAI
+from pydantic import ValidationError
 
 from .config import Settings
-from .domain import RobotError, TaskRecord
+from .domain import RobotError, TaskRecord, TaskRequest
 from .service import TaskManager
 from .skills import SKILLS
 
@@ -47,7 +49,7 @@ HISTORY_TURNS = 12
 Emit = Callable[[dict], None]
 Confirm = Callable[[dict], Awaitable[bool]]
 
-SAFETY_NOTE = "执行期间请与机器人保持一米以上距离，随时可以点击“停止任务”。"
+SAFETY_NOTE = "执行期间请与机器人保持一米以上距离；需要停下时，请现场同事帮忙。"
 
 
 def describe_plan(skill: str, item_name: str) -> dict:
@@ -75,7 +77,7 @@ def build_tools(manager: TaskManager) -> list[dict]:
     item_ids = list(manager.items)
     item_desc = "；".join(f"{i.id}={i.name}" for i in manager.items.values())
     pick, unload = SKILLS["pick"], SKILLS["unload"]
-    return [
+    tools = [
         {
             "type": "function",
             "function": {
@@ -126,9 +128,24 @@ def build_tools(manager: TaskManager) -> list[dict]:
             },
         },
     ]
+    if not manager.settings.split_skills:
+        tools = [tool for tool in tools if tool["function"]["name"] not in ("pick_item", "unload_item")]
+        tools.insert(0, {"type":"function", "function": {
+            "name":"fetch_items", "description":"一次完整取送任务，最多两件；同种两件或两种各一件。先查库存，确认整单后执行。",
+            "parameters":{"type":"object", "additionalProperties":False, "required":["items"], "properties":{
+                "items":{"type":"array", "minItems":1,"maxItems":2,"items":{"type":"object",
+                    "additionalProperties":False,"required":["item_id","count"],"properties":{
+                        "item_id":{"type":"string","enum":item_ids},"count":{"type":"integer","minimum":1,"maximum":2}
+                    }}}
+            }}}})
+    if manager.settings.robot_mode == "lanjian_http":
+        tools = [tool for tool in tools if tool["function"]["name"] != "look_shelf"]
+    return tools
+
 
 
 TOOL_NAMES = {
+    "fetch_items": "取物",
     "pick_item": "取货",
     "unload_item": "卸货",
     "look_shelf": "看货架",
@@ -165,7 +182,7 @@ def system_prompt(manager: TaskManager, health: dict | None = None) -> str:
             continue  # 同名多件（如两瓶安慕希）合并描述
         same = [i for i in manager.items.values() if i.name == item.name]
         seen.add(item.name)
-        spots = "、".join(shelf_position(i.box) for i in same)
+        spots = "、".join(i.location or shelf_position(i.box) for i in same)
         alias = "、".join(a for a in item.aliases if a != item.name)
         count = f"，共 {len(same)} 件" if len(same) > 1 else ""
         lines.append(f"- {item.name}（{item.category}）：{spots}{count}" + (f"；观众也可能叫它{alias}" if alias else ""))
@@ -178,18 +195,39 @@ def system_prompt(manager: TaskManager, health: dict | None = None) -> str:
     ]
     if manager.store.recovery_required:
         state.append("- 注意：上一次任务异常中止，需要工作人员检查复位，在复位前不能取物")
-    return (
+    prompt = (
         PROMPT_PATH.read_text(encoding="utf-8")
         .replace("{{ITEMS}}", "\n".join(lines))
         .replace("{{STATE}}", "\n".join(state))
     )
+    actions = "- 取物（fetch_items）：按完整清单执行取物并送到交付处；一次确认和调用对应一项完整任务。"
+    flow = "观众想要货架上的东西时，用取物技能一次提交完整清单，等整单结果，不要再发卸货。"
+    if manager.settings.split_skills:
+        actions = "- 取货（pick_item）：前往货架取下一件物品，结束时仍持物。\n- 卸货（unload_item）：回交付处递出手里的物品。"
+        flow = "取货和卸货组成完整服务：取货成功后接着卸货，不再重复确认。"
+    if manager.settings.robot_mode != "lanjian_http":
+        actions += "\n- 看货架（look_shelf）：读取当前相机画面中的物品，不移动底盘。"
+    prompt = prompt.replace("{{ACTION_SKILLS}}", actions).replace("{{ORDER_FLOW}}", flow)
+    if not manager.settings.split_skills:
+        prompt += "\n当前使用完整取物：只有 fetch_items 可以执行取送，不可调用 pick_item/unload_item。" \
+            "一单总数最多两件，同种两件或两种各一件。先确认整单，再一次调用；不得分多单绕过数量限制。" \
+            "取物前查状态、查库存；屏幕确认包含整单取送。完成后不要再次调用取物。"
+    if manager.settings.robot_mode == "lanjian_http":
+        prompt += "\n当前不能主动读取相机或持物遥测，只能引用机器人已经回报的进度与照片；没有回报时不要声称看到了或夹稳了。" \
+            "停止按钮只能提示现场协助，不会远程停止机器人。" \
+            "completion_note 非空时必须向观众转述数量尚需核对，不能说整单物品全部送达；也不要自行补发或退库存。"
+    return prompt
+
 
 
 def summarize(task: TaskRecord) -> dict[str, Any]:
     result: dict[str, Any] = {
-        "ok": task.status == "completed",
+        "ok": task.status == "completed" and not task.recovery_required,
+        "recovery_required": task.recovery_required,
+        "completion_note": task.completion_note,
         "status": task.status,
         "item": task.item_id,
+        "items": [line.model_dump() for line in task.items],
         "holding": task.holding,
         # 机器人一路的回报（停靠误差、识别置信度、是否横移重新定位……），写成一句话，
         # 并附上复盘提示：实测这能让思考链引用真实执行数据，而不是只写“取货成功”
@@ -213,12 +251,18 @@ class AgentSession:
         self.client, self.settings, self.manager, self.owner = client, settings, manager, owner
         self.history: list[dict] = []
         self.tools = build_tools(manager)
+        self.order_attempted = False
+        self.request_id = ""
 
     def reset(self) -> None:
         self.history.clear()
 
     async def _tool(self, name: str, args: dict) -> dict:
         manager = self.manager
+        if name == "fetch_items":
+            request = TaskRequest(items=args.get("items", []), request_id=self.request_id)
+            task = await manager.run_order(request.items, self.request_id, self.owner)
+            return summarize(task)
         if name == "pick_item":
             item_id = args.get("item_id")
             if item_id not in manager.items:
@@ -242,7 +286,8 @@ class AgentSession:
             held = manager.held_item_id
             return {
                 "online": bool(health.get("online")),
-                "busy": manager.busy,
+                "telemetry_available": health.get("telemetry_available", True),
+                "busy": manager.busy or bool(health.get("robot_busy")),
                 "holding": manager.items[held].name if held else None,
                 "recovery_required": manager.store.recovery_required,
             }
@@ -262,6 +307,15 @@ class AgentSession:
                 args = json.loads(call["arguments"] or "{}")
             except json.JSONDecodeError:
                 args = {}
+            if not isinstance(args, dict):
+                args = {}
+            if call["name"] == "fetch_items":
+                try:
+                    request = TaskRequest(items=args.get("items", []), request_id="preview")
+                    target = self.manager.order_label(request.items)
+                    return f"好嘞，这单是{target}，请在屏幕上点一下允许。"
+                except (ValidationError, KeyError):
+                    continue
             if call["name"] == "pick_item" and args.get("item_id") in self.manager.items:
                 return f"好嘞，我去帮你拿{self.manager.items[args['item_id']].name}，请在屏幕上点一下允许。"
             if call["name"] == "unload_item" and self.manager.held_item_id:
@@ -308,8 +362,10 @@ class AgentSession:
             emit({"type": "reasoning_end", "id": msg_id, "ms": int((time.monotonic() - started) * 1000)})
         return msg_id, reasoning, list(calls.values()), content
 
-    async def turn(self, text: str, emit: Emit, confirm: Confirm) -> None:
+    async def turn(self, text: str, emit: Emit, confirm: Confirm, request_id: str | None = None) -> None:
         """One user turn. Every robot-moving skill waits for confirm(plan) to return True."""
+        self.request_id = request_id or uuid.uuid4().hex
+        self.order_attempted = False
         approved_items: set[str] = set()  # 本轮已获允许的物品：取货时的确认同时覆盖紧接着的卸货
         nudged = moved = False
         self.history.append({"role": "user", "content": text})
@@ -356,28 +412,53 @@ class AgentSession:
                         args = json.loads(call["arguments"] or "{}")
                     except json.JSONDecodeError:
                         args = {}
+                    if not isinstance(args, dict):
+                        args = {}
                     name = call["name"]
-                    skill_name = {"pick_item": "pick", "unload_item": "unload"}.get(name)
+                    if name not in {tool["function"]["name"] for tool in self.tools}:
+                        self.history.append({"role":"tool", "tool_call_id":call["id"],
+                                             "content":json.dumps({"ok":False,"error":"当前没有这个技能"},ensure_ascii=False)})
+                        continue
+                    order = None
+                    if name == "fetch_items":
+                        try:
+                            order = TaskRequest(items=args.get("items", []), request_id=self.request_id)
+                            self.manager.order_label(order.items)
+                            if self.order_attempted:
+                                raise ValueError("这单已经处理过了，请勿重复取物。")
+                        except (ValidationError, KeyError, ValueError):
+                            self.history.append({"role":"tool","tool_call_id":call["id"],"content":json.dumps({
+                                "ok":False,"error":"请核对本单清单：最多两件，不可重复提交或拆成多单。"},ensure_ascii=False)})
+                            continue
+                        self.order_attempted = True
+                    skill_name = {"fetch_items":"fetch", "pick_item": "pick", "unload_item": "unload"}.get(name)
                     gdk = SKILLS[skill_name].gdk() if skill_name else []
-                    label = {"pick_item": "取货", "unload_item": "卸货", "look_shelf": "环视货架",
+                    label = {"fetch_items":"取物", "pick_item": "取货", "unload_item": "卸货", "look_shelf": "环视货架",
                              "get_robot_status": "查询状态", "check_inventory": "查询库存"}.get(name, name)
                     item = self.manager.items.get(args.get("item_id", "")) if name == "pick_item" else None
                     if name == "unload_item" and self.manager.held_item_id:
                         item = self.manager.items.get(self.manager.held_item_id)
-                    target = item.name if item else ""
+                    target = self.manager.order_label(order.items) if order else item.name if item else ""
                     if name == "check_inventory":
                         target = args.get("category") or "全部"
                     base = {"type": "skill", "id": msg_id, "call_id": call["id"], "name": name,
                             "title": label, "target": target, "gdk": gdk}
-                    moves_robot = name in ("pick_item", "unload_item") and item is not None
+                    moves_robot = order is not None or (name in ("pick_item", "unload_item") and item is not None)
                     moved = moved or moves_robot
                     declined = False
                     if moves_robot and not (name == "unload_item" and item.id in approved_items):
                         emit({**base, "status": "pending", "detail": "等待观众确认"})
-                        plan = describe_plan("unload" if name == "unload_item" else "fetch", item.name)
+                        plan = describe_plan("unload" if name == "unload_item" else "fetch", target)
+                        if order:
+                            plan.update(_items=[line.model_dump() for line in order.items], _skill=base)
                         declined = not await confirm(plan)
+                        if order and not declined:
+                            order = TaskRequest(items=plan["_items"], request_id=self.request_id)
+                            args = {**args, "items": [line.model_dump() for line in order.items]}
+                            base = {**base, "target": self.manager.order_label(order.items)}
                         if not declined:
-                            approved_items.add(item.id)
+                            if item:
+                                approved_items.add(item.id)
                     if declined:
                         result = {"ok": False, "declined": True, "error": "观众没有允许执行，本次已取消，机器人没有动"}
                         emit({**base, "status": "cancelled", "detail": "未获允许"})
@@ -387,8 +468,11 @@ class AgentSession:
                             result = await self._tool(name, args)
                         except RobotError as exc:
                             result = {"ok": False, "error": str(exc)}
+                        if order:
+                            result["confirmed_items"] = args["items"]
+                            result["order_updates"] = plan.get("_updates", [])
                         ok = result.get("ok", True)
-                        detail = result.get("error") or ("完成" if ok else result.get("status", "失败"))
+                        detail = result.get("completion_note") or result.get("error") or ("完成" if ok else result.get("status", "失败"))
                         if name == "look_shelf":
                             detail = "、".join(result.get("visible", [])) or "没有识别到物品"
                         elif name == "check_inventory":
@@ -396,9 +480,9 @@ class AgentSession:
                         elif name == "get_robot_status":
                             detail = "，".join(
                                 [
-                                    "在线" if result["online"] else "离线",
+                                    ("接口已配置" if result["online"] else "接口未配置") if not result["telemetry_available"] else ("在线" if result["online"] else "离线"),
                                     "正在执行任务" if result["busy"] else "空闲",
-                                    f"手里拿着{result['holding']}" if result["holding"] else "手里空着",
+                                    ("持物状态以现场为准" if not result["telemetry_available"] else (f"手里拿着{result['holding']}" if result["holding"] else "手里空着")),
                                 ]
                                 + (["需要工作人员复位"] if result["recovery_required"] else [])
                             )
@@ -424,7 +508,8 @@ class AgentSession:
 class Agent:
     def __init__(self, settings: Settings, manager: TaskManager):
         self.settings, self.manager = settings, manager
-        self.client = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url, max_retries=1)
+        self.client = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url, max_retries=1,
+                                  http_client=httpx.AsyncClient(trust_env=False))
 
     def session(self, owner: str) -> AgentSession:
         return AgentSession(self.client, self.settings, self.manager, owner)

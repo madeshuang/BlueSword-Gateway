@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from .config import Item, Settings
-from .domain import RobotError, TaskRecord
+from .domain import RobotError, TaskLine, TaskRecord
 from .protocol import SKILL_TO_ACTION, STAGE_GDK, STAGE_LABEL, stages_for
 from .skills import SKILLS
 from .storage import TaskStore
@@ -41,7 +41,7 @@ class RemoteRobot:
     """lanjian_http 模式下的机器人端口：只有状态查询，动作全部通过协议下发。"""
 
     mode = "lanjian_http"
-    supports_mock_controls = True  # 允许工作人员在核对后点“复位”解除锁定
+    supports_mock_controls = False
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -50,6 +50,8 @@ class RemoteRobot:
         self.name = f"机器人 · {parts.netloc or '未配置'}"
         self.client = httpx.AsyncClient(trust_env=False)
         self.holding = False
+        self.health_cache: dict = {}
+        self.health_at = 0.0
 
     async def connect(self) -> None:
         if not self.settings.robot_dispatch_url:
@@ -58,14 +60,23 @@ class RemoteRobot:
     async def close(self) -> None:
         await self.client.aclose()
 
-    async def health(self) -> dict:
-        online = False
-        try:  # 协议本身没有健康检查；能连上机器人服务就算在线
-            response = await self.client.get(self.base + "/health", timeout=1)
-            online = response.status_code < 500
-        except Exception:
-            pass
-        return {"online": online, "holding": self.holding, "stopped": False, "mode": self.mode, "name": self.name}
+    async def health(self, refresh: bool = False) -> dict:
+        if self.settings.robot_protocol == "vlm":
+            if refresh or time.monotonic() - self.health_at > 2:
+                online, busy = False, None
+                try:
+                    response = await self.client.get(self.base + "/api/health", timeout=self.settings.robot_timeout)
+                    body = response.json()
+                    online = response.is_success and body.get("success") is True and type(body.get("busy")) is bool
+                    busy = body.get("busy") if online else None
+                except Exception:
+                    pass
+                self.health_cache = {"online": online, "robot_busy": busy}
+                self.health_at = time.monotonic()
+            return {**self.health_cache, "holding": None, "telemetry_available": False,
+                    "stopped": False, "mode": self.mode, "name": self.name}
+        return {"online": bool(self.settings.robot_dispatch_url), "holding": self.holding,
+                "telemetry_available": False, "stopped": False, "mode": self.mode, "name": self.name}
 
     async def stop(self) -> None:
         logger.warning("v1.1 协议没有取消接口：网关只能停止跟踪，机器人侧需现场确认")
@@ -119,16 +130,28 @@ class RemoteWorkflow:
         self.store.save(self.task)
         self.event({"type": "task_step", "id": step_id, "status": status, "detail": step.detail, "gdk": step.gdk})
 
-    async def run(self, task: TaskRecord, item: Item) -> TaskRecord:
+    async def run(self, task: TaskRecord, item: Item, items: dict[str, Item] | None = None) -> TaskRecord:
         self.task = task
         self.snapshot()
         self.event({"type": "phase", "phase": "acting"})
         while not self.inbox.empty():  # 丢弃上一单迟到的回调
             self.inbox.get_nowait()
-        from .agent import shelf_position  # 避免循环导入
-
-        location = "交付处" if task.skill == "unload" else f"货架·{shelf_position(item.box)}"
-        body: dict = {"taskId": task.id, "items": [{"location": location, "item": item.id, "count": 1}]}
+        catalog = items or {item.id: item}
+        lines = task.items or [TaskLine(item_id=item.id)]
+        body: dict = {"items": [{"location": catalog[line.item_id].location,
+                                 "item": (catalog[line.item_id].robot_item or catalog[line.item_id].name) if self.settings.robot_protocol == "vlm" else line.item_id,
+                                 "count": line.count} for line in lines]}
+        if self.settings.robot_protocol == "vlm":
+            # Multiple display slots may refer to the same robot SKU (e.g. two yogurts).
+            combined: dict[str, dict] = {}
+            for line in body["items"]:
+                if line["item"] in combined:
+                    combined[line["item"]]["count"] += line["count"]
+                else:
+                    combined[line["item"]] = dict(line)
+            body["items"] = list(combined.values())
+        if self.settings.robot_protocol in ("progress", "vlm"):
+            body["taskId"] = task.id
         action = SKILL_TO_ACTION[task.skill]
         if action:
             body["action"] = action
@@ -157,7 +180,9 @@ class RemoteWorkflow:
             # 不能确认是否接单：不自动重发，交给工作人员核对（沿用网关 v1.1 的规则）
             raise RobotError("dispatch_uncertain", "没能确认机器人是否接单，请工作人员核对后再试") from exc
         self.log.add("out", "/api/task/dispatch", body, answer)
-        if not answer.get("success"):
+        if not response.is_success or not isinstance(answer, dict) or type(answer.get("success")) is not bool:
+            raise RobotError("dispatch_uncertain", "还没确认是否接单，请现场同事帮忙看一下。")
+        if not answer["success"]:
             raise RobotError("rejected", f"机器人没有接单：{answer.get('data') or '未说明原因'}")
         self.set_step("plan", "done", "机器人已接单")
 
@@ -172,7 +197,7 @@ class RemoteWorkflow:
                 kind, body = await asyncio.wait_for(self.inbox.get(), remaining)
             except TimeoutError:
                 continue
-            if body.get("taskId") not in (None, self.task.id):
+            if (self.settings.robot_protocol in ("progress", "vlm") and body.get("taskId") != self.task.id) or body.get("taskId") not in (None, self.task.id):
                 continue  # 不是这一单的回报
             if kind == "progress":
                 stage, status = body.get("stage"), body.get("status")
@@ -183,7 +208,14 @@ class RemoteWorkflow:
                             id=stage, label=body.get("label") or stage, gdk=STAGE_GDK.get(stage, [])))
                     self.set_step(stage, mapped, body.get("detail") or ("进行中" if mapped == "active" else None))
             elif kind == "finished":
-                self.task.status = "completed"
+                if body.get("result") not in (None, "success"):
+                    continue
+                if self.settings.robot_protocol == "vlm":
+                    from .vlm import completion
+                    completion(self.task)
+                    self.store.set_recovery(self.task.recovery_required)
+                else:
+                    self.task.status = "completed"
                 self.robot.holding = SKILLS[self.task.skill].leaves_holding
                 self.task.holding = self.robot.holding
                 return
@@ -208,11 +240,13 @@ class RemoteWorkflow:
                 self.set_step(step.id, "failed", message)
 
 
-def remote_steps(skill: str, item: Item):
+def remote_steps(skill: str, item: Item, protocol: str = "progress"):
     """lanjian_http 模式下任务清单 = 接单 + 机器人会回报的阶段。"""
     from .domain import TaskStep
 
     steps = [TaskStep(id="plan", label="下发任务", status="pending", detail=f"目标：{item.name}")]
+    if protocol == "vlm":
+        return steps
     for stage in stages_for(SKILLS[skill].steps):
         steps.append(TaskStep(id=stage, label=STAGE_LABEL[stage], gdk=STAGE_GDK[stage]))
     return steps

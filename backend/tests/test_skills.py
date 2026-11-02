@@ -45,11 +45,12 @@ def test_skill_gdk_composition_lists_sdk_calls():
 
 async def test_inventory_decrements_on_delivery_and_blocks_when_empty(make_manager):
     manager = await make_manager()
-    manager.stock["water"] = 1
+    manager.store.db.execute("UPDATE inventory SET count=1 WHERE item_id='water'")
+    manager.store.db.commit()
     assert manager.inventory()["矿泉水"] == 1
     assert manager.inventory()["安慕希"] == 6  # 两个安慕希陈列位按名称合并
     await manager.run_skill("pick", "water")
-    assert manager.inventory()["矿泉水"] == 1  # 取到手里还不算出库
+    assert manager.inventory()["矿泉水"] == 0  # 取货开始就预留，卸货不重复扣减
     await manager.run_skill("unload", "water")
     assert manager.inventory()["矿泉水"] == 0
     with pytest.raises(RobotError) as err:

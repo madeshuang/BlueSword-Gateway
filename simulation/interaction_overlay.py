@@ -22,8 +22,12 @@ STATUS = {"calling": "调用中", "accepted": "请求已接受 · 动作执行�
 class InteractionOverlay:
     def __init__(self, connection):
         self.connection = connection
-        font = Path('/System/Library/Fonts/STHeiti Medium.ttc')
-        self.font = blf.load(str(font)) if font.exists() else 0
+        self.font = 0
+        for path in ('/System/Library/Fonts/STHeiti Medium.ttc',
+                     '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'):
+            if Path(path).exists():
+                self.font = blf.load(path)
+                break
         self.shader = gpu.shader.from_builtin('UNIFORM_COLOR')
         self.handler = bpy.types.SpaceView3D.draw_handler_add(self.draw, (), 'WINDOW', 'POST_PIXEL')
 

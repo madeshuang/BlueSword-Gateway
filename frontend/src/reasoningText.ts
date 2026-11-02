@@ -8,14 +8,16 @@ const CITE_TARGET = '(?:说话风格|风格要求|系统提示|提示词|规则|
 // “按规则，” “按照流程：” “根据说话风格的要求，” → 删除
 const CITATION = new RegExp(`(?:按照|按|根据|依照|遵照|遵循)${CITE_TARGET}(?:的?(?:要求|规定|说明|指引))?(?:来说|来看|来)?[，,：:、]?\\s*`, 'g')
 // 整句都在谈“系统提示/提示词”的元话语 → 删除整句
-const META_SENTENCE = /[^。！？\n]*(?:系统提示|提示词|系统设定|指令里|说明里)[^。！？\n]*[。！？]?/g
+const META_SENTENCE = /[^。！？\n]*(?:系统提示|提示词|系统设定|指令里|说明里|规则(?:说|要求|规定)|风格(?:说|要求)|回复(?:要|必须)|我(?:的)?说话(?:要|必须))[^。！？\n]*[。！？]?/g
 
 function escape(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-export function cleanReasoning(raw: string, glossary: Record<string, string>): string {
-  let text = raw
+export function cleanReasoning(raw: string, glossary: Record<string, string>, live = false): string {
+  // 先收到完整句再清理，避免半句话尚未出现关键词时先泄露到屏幕。
+  const end = live ? Math.max(raw.lastIndexOf('。'), raw.lastIndexOf('！'), raw.lastIndexOf('？'), raw.lastIndexOf('\n')) + 1 : raw.length
+  let text = raw.slice(0, end)
   const keys = Object.keys(glossary).sort((a, b) => b.length - a.length)
   if (keys.length) {
     // 函数调用形式：pick_item(poker) / pick_item(item_id="poker") → 取货（扑克牌）

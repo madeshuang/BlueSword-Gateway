@@ -31,6 +31,7 @@ class FetchWorkflow:
         self.task: TaskRecord | None = None
         # 由大模型编排技能时，台词交给大模型说，工作流不再插入固定话术
         self.narrate = True
+        self.step_prefix = ""
 
     def event(self, value: dict) -> None:
         assert self.task
@@ -73,6 +74,7 @@ class FetchWorkflow:
     @asynccontextmanager
     async def step(self, identifier: str, detail: str = ""):
         assert self.task
+        identifier = self.step_prefix + identifier
         step = next(s for s in self.task.steps if s.id == identifier)
         step.status, step.detail = "active", detail
         self.store.save(self.task)
@@ -229,7 +231,7 @@ class FetchWorkflow:
         await self.motion(self.robot.arm_move("stow"))
         step.detail = "物品已交接，手臂已收回"
 
-    async def run(self, task: TaskRecord, item: Item) -> TaskRecord:
+    async def run(self, task: TaskRecord, item: Item, items: dict[str, Item] | None = None) -> TaskRecord:
         self.task = task
         skill = SKILLS[task.skill]
         impl = {
@@ -252,23 +254,26 @@ class FetchWorkflow:
             health = await self.call(self.robot.health())
             if not health.get("online") or health.get("stopped"):
                 raise RobotError("not_ready", "机器人未就绪，需要先检查状态")
-            if skill.requires_holding:
-                if not health.get("holding") or not await self.call(self.robot.is_holding()):
-                    raise RobotError("not_holding", "机器人手里没有物品，需要先执行取货")
-                task.holding = True
-            else:
-                if health.get("holding"):
-                    raise RobotError("not_ready", "机器人仍在持物，需要先卸货或检查状态")
-                await self.motion(self.robot.prepare(item))
-            ctx: dict = {"item": item}
-            for step_id in skill.steps:
-                if step_id == "plan":
-                    continue
-                async with self.step(step_id, STEP_DEFS[step_id].label) as step:
-                    await impl[step_id](ctx, step)
+            units = [items[line.item_id] for line in task.items for _ in range(line.count)] if items and task.items else [item]
+            for index, unit in enumerate(units, 1):
+                self.step_prefix = f"{index}:" if len(units) > 1 else ""
+                if skill.requires_holding:
+                    if not await self.call(self.robot.is_holding()):
+                        raise RobotError("not_holding", "机器人手里没有物品，需要先执行取货")
+                    task.holding = True
+                else:
+                    if await self.call(self.robot.is_holding()):
+                        raise RobotError("not_ready", "机器人仍在持物，需要先检查状态")
+                    await self.motion(self.robot.prepare(unit))
+                ctx: dict = {"item": unit}
+                for step_id in skill.steps:
+                    if step_id == "plan":
+                        continue
+                    async with self.step(step_id, STEP_DEFS[step_id].label) as step:
+                        await impl[step_id](ctx, step)
             task.status = "completed"
             if self.narrate:
-                self.message(f"{item.name}已交到你手上，取物任务完成。")
+                self.message(f"{task.title.removeprefix('拿取')}已经送到啦。")
         except asyncio.CancelledError:
             await self.abort("cancelled", "cancelled", "任务已取消，已请求停止运动并保持夹爪状态")
         except RobotError as exc:

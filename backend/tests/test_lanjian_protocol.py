@@ -20,13 +20,17 @@ def free_port() -> int:
 
 
 class Server:
-    def __init__(self, settings: Settings, port: int):
-        self.server = uvicorn.Server(uvicorn.Config(create_app(settings), host="127.0.0.1", port=port, log_level="warning"))
+    def __init__(self, settings: Settings | None, port: int, *, app=None):
+        self.server = uvicorn.Server(uvicorn.Config(app or create_app(settings), host="127.0.0.1", port=port, log_level="warning"))
         self.thread = threading.Thread(target=self.server.run, daemon=True)
 
     def __enter__(self):
         self.thread.start()
+        deadline = time.monotonic() + 10
         while not self.server.started:
+            if not self.thread.is_alive() or time.monotonic() > deadline:
+                self.server.should_exit = True
+                raise RuntimeError("Test HTTP server did not start")
             time.sleep(0.02)
         return self
 
@@ -35,12 +39,23 @@ class Server:
         self.thread.join(5)
 
 
+@pytest.fixture(autouse=True)
+def test_locations(monkeypatch):
+    from bluesword.config import load_scene
+    def scene():
+        waypoints, items = load_scene()
+        for item in items.values():
+            item.location = "测试货架"
+        return waypoints, items
+    monkeypatch.setattr("bluesword.service.load_scene", scene)
+
+
 @pytest.fixture
 def pair():
     robot_port, gateway_port = free_port(), free_port()
     robot = Settings(robot_mode="gdk_mock", db_path=":memory:", simulation_speed=30, auto_take=True,
                      gateway_url=f"http://127.0.0.1:{gateway_port}")
-    gateway = Settings(robot_mode="lanjian_http", db_path=":memory:",
+    gateway = Settings(robot_mode="lanjian_http", split_skills=True, robot_protocol="progress", db_path=":memory:",
                        robot_dispatch_url=f"http://127.0.0.1:{robot_port}/api/task/dispatch", remote_task_timeout=60)
     with Server(robot, robot_port), Server(gateway, gateway_port):
         yield gateway_port
@@ -83,7 +98,7 @@ async def test_pick_then_unload_over_protocol_with_stage_reports(pair):
 
 async def test_unreachable_robot_is_uncertain_not_resent():
     port = free_port()
-    gateway = Settings(robot_mode="lanjian_http", db_path=":memory:", robot_timeout=0.5,
+    gateway = Settings(robot_mode="lanjian_http", split_skills=True, robot_protocol="progress", db_path=":memory:", robot_timeout=0.5,
                        robot_dispatch_url=f"http://127.0.0.1:{free_port()}/api/task/dispatch")
     with Server(gateway, port):
         async with httpx.AsyncClient(trust_env=False, base_url=f"http://127.0.0.1:{port}", timeout=10) as client:
@@ -97,3 +112,19 @@ async def test_unreachable_robot_is_uncertain_not_resent():
             assert (await client.get("/health")).json()["recovery_required"] is True
             log = (await client.get("/api/robot/protocol")).json()
             assert len([e for e in log if e["path"] == "/api/task/dispatch"]) == 1  # 不自动重发
+
+
+def test_idle_fault_operator_authorization_and_no_refund(tmp_path):
+    from fastapi.testclient import TestClient
+    settings = Settings(robot_mode='lanjian_http', db_path=str(tmp_path/'operator.sqlite'),
+                        robot_dispatch_url='http://robot.test/api/task/dispatch', operator_token='onsite-only')
+    with TestClient(create_app(settings)) as client:
+        assert client.post('/api/task/error', json={'message': '需要检查'}).json()['success']
+        assert client.get('/health').json()['recovery_required']
+        body = {'task_id': None, 'confirmation': '已核对机器人和物品'}
+        assert client.post('/api/operator/resolve', json=body).status_code == 403
+        assert client.post('/api/inventory/reset').status_code == 403
+        assert client.post('/api/operator/resolve', json=body, headers={'X-Operator-Token':'onsite-only'}).status_code == 200
+        assert not client.get('/health').json()['recovery_required']
+        assert not client.post('/api/task/finished', json={}).json()['success']
+        assert not client.post('/api/task/finished', json={'result':'success'}).json()['success']

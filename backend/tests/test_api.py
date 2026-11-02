@@ -61,7 +61,7 @@ def test_api_input_idempotency_busy_and_audit():
         assert not client.get("/health").json()["recovery_required"]
 
 
-def test_socket_disconnect_cancels_owned_task_and_reconnect_restores_snapshot():
+def test_socket_disconnect_keeps_owned_task_and_reconnect_restores_snapshot():
     with TestClient(create_app(settings(mock_delay=0.02))) as client:
         with client.websocket_connect("/ws") as ws:
             for _ in range(3):
@@ -74,19 +74,17 @@ def test_socket_disconnect_cancels_owned_task_and_reconnect_restores_snapshot():
             while event["type"] != "task":
                 event = ws.receive_json()
             task_id = event["task"]["id"]
-        deadline = time.monotonic() + 1
+        deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
             result = client.get(f"/api/tasks/{task_id}").json()
-            if result["status"] == "cancelled":
+            if result["status"] == "completed":
                 break
             time.sleep(0.005)
-        assert result["status"] == "cancelled"
+        assert result["status"] == "completed"
         with client.websocket_connect("/ws") as ws:
             assert ws.receive_json()["type"] == "device"
-            assert ws.receive_json()["recovery_required"]
-            snapshot = ws.receive_json()
-            assert snapshot["task"]["id"] == task_id
-            assert snapshot["task"]["status"] == "cancelled"
+            assert not ws.receive_json()["recovery_required"]
+            assert ws.receive_json()["type"] == "phase"
 
 
 def test_malformed_ws_does_not_break_connection():
@@ -121,9 +119,9 @@ async def test_gdk_mode_does_not_silently_fall_back_to_mock(monkeypatch):
         ("帮我拿一瓶矿泉水", "fetch", "water"),
         ("我想吃点甜的", "fetch", "oreo"),
         ("不要拿安慕希", "chat", None),
-        ("给我酸奶和矿泉水", "chat", None),
+        ("给我酸奶和矿泉水", "fetch", "yogurt1"),
         ("矿泉水多少钱", "chat", None),
-        ("拿两瓶酸奶", "chat", None),
+        ("拿两瓶酸奶", "fetch", "yogurt1"),
         ("你看到了什么", "look", None),
         ("停止任务", "cancel", None),
     ],
@@ -178,3 +176,32 @@ def test_confirmation_timeout_counts_as_declined():
             _drain_until(ws, "confirm_request")
             assert _drain_until(ws, "confirm_closed")["reason"] == "timeout"
             assert client.get("/api/tasks").json() == []
+
+
+def test_new_conversation_clears_confirmation_but_not_running_order():
+    with TestClient(create_app(settings(mock_delay=0.005))) as client:
+        with client.websocket_connect('/ws') as ws:
+            for _ in range(3):
+                ws.receive_json()
+            ws.send_json({'type': 'text_input', 'text': '两瓶矿泉水', 'request_id': 'reset-before'})
+            _drain_until(ws, 'confirm_request')
+            ws.send_json({'type': 'reset'})
+            _drain_until(ws, 'session_end')
+            assert client.get('/api/tasks').json() == []
+            ws.send_json({'type': 'text_input', 'text': '两瓶矿泉水', 'request_id': 'reset-after'})
+            confirm = _drain_until(ws, 'confirm_request')
+            assert '× 2' in confirm['target']
+            ws.send_json({'type': 'confirm_response', 'id': confirm['id'], 'approved': True})
+            task = _drain_until(ws, 'task')['task']
+            ws.send_json({'type': 'reset'})
+            _drain_until(ws, 'session_end')
+            restored = _drain_until(ws, 'task')['task']
+            assert restored['id'] == task['id'] and restored['status'] == 'running'
+            for _ in range(400):
+                event = ws.receive_json()
+                assert event['type'] not in ('assistant_start', 'assistant_delta', 'assistant_end')
+                if event['type'] == 'task' and event['task']['status'] == 'completed':
+                    break
+            else:
+                pytest.fail('order did not finish after reset')
+            assert client.get('/api/inventory').json()['矿泉水'] == 1

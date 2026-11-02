@@ -11,7 +11,7 @@ function greeting() {
   return '晚上好'
 }
 
-export function Home(props: { phase: Phase; onSubmit: (t: string) => void; onMic: () => void }) {
+export function Home(props: { phase: Phase; voiceEnabled: boolean; onSubmit: (t: string) => void; onMic: () => void }) {
   return (
     <section className="home">
       <h1 className="home-title">
@@ -23,6 +23,9 @@ export function Home(props: { phase: Phase; onSubmit: (t: string) => void; onMic
       </h1>
 
       <Composer big phase={props.phase} partial="" onSubmit={props.onSubmit} onMic={props.onMic} />
+      <div className="home-voice-hint">
+        {props.voiceEnabled ? '麦克风已开启，说完稍等一下就好' : '先点麦克风开启语音，就能叫我啦'}
+      </div>
 
       <div className="chips">
         {config.suggestions.map((s) => (

@@ -72,5 +72,39 @@ class TaskStore:
         self.db.execute("INSERT OR REPLACE INTO state VALUES ('recovery',?)", (str(int(required)),))
         self.db.commit()
 
+    def init_inventory(self, items) -> None:
+        with self.db:
+            self.db.execute("CREATE TABLE IF NOT EXISTS inventory (item_id TEXT PRIMARY KEY, count INTEGER NOT NULL, generation INTEGER NOT NULL DEFAULT 0)")
+            self.db.execute("CREATE TABLE IF NOT EXISTS reservations (task_id TEXT, item_id TEXT, count INTEGER, generation INTEGER, PRIMARY KEY(task_id,item_id))")
+            for item in items.values():
+                self.db.execute("INSERT OR IGNORE INTO inventory(item_id,count) VALUES (?,?)", (item.id, item.stock))
+
+    def inventory(self) -> dict[str, int]:
+        return dict(self.db.execute("SELECT item_id,count FROM inventory"))
+
+    def create_task(self, task: TaskRecord, reserve: bool) -> None:
+        from .domain import RobotError
+        with self.db:
+            if reserve:
+                for line in task.items:
+                    row = self.db.execute("SELECT count,generation FROM inventory WHERE item_id=?", (line.item_id,)).fetchone()
+                    if not row or row[0] < line.count:
+                        raise RobotError("out_of_stock", "这件物品数量不够了，换个选择吧。")
+                    self.db.execute("UPDATE inventory SET count=count-? WHERE item_id=?", (line.count,line.item_id))
+                    self.db.execute("INSERT INTO reservations VALUES (?,?,?,?)", (task.id,line.item_id,line.count,row[1]))
+            self.db.execute("INSERT INTO tasks VALUES (?,?,?)", (task.id,task.request_id,task.model_dump_json()))
+
+    def settle_stock(self, task_id: str, refund: bool = False) -> None:
+        with self.db:
+            if refund:
+                for item, count, generation in self.db.execute("SELECT item_id,count,generation FROM reservations WHERE task_id=?", (task_id,)).fetchall():
+                    self.db.execute("UPDATE inventory SET count=count+? WHERE item_id=? AND generation=?", (count,item,generation))
+            self.db.execute("DELETE FROM reservations WHERE task_id=?", (task_id,))
+
+    def restock(self, items) -> None:
+        with self.db:
+            for item in items:
+                self.db.execute("UPDATE inventory SET count=?,generation=generation+1 WHERE item_id=?", (item.stock,item.id))
+
     def close(self) -> None:
         self.db.close()

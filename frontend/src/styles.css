@@ -1425,3 +1425,14 @@ button {
 .stock + .skill {
   margin-top: 1rem;
 }
+
+/* 语音和现场操作沿用已有弱化文字，不覆盖主对话。 */
+.speech-settings { position: absolute; top: 12px; right: 18px; z-index: 2; display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
+.speech-settings button, .operator-help summary { cursor: pointer; color: inherit; background: transparent; border: 0; font: inherit; }
+.speech-settings button[aria-pressed="true"] { color: var(--accent); }
+.home-voice-hint { margin-top: 10px; color: var(--muted); font-size: 12px; }
+.operator-help { font-size: 12px; max-width: 100%; }
+.operator-help[open] { display: flex; flex-direction: column; }
+.operator-help label { display: block; margin: 8px 0; }
+.operator-help input[type="password"] { width: 130px; color: inherit; background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; }
+.operator-help span { display: block; margin-top: 6px; }

@@ -86,8 +86,9 @@ async def test_failure_never_reports_success_or_releases_held_object(make_manage
         "nav_timeout",
     }:
         assert not any(c.name == "arm_move" for c in manager.bundle.robot.commands)
-    with pytest.raises(RobotError, match="复位"):
+    with pytest.raises(RobotError) as blocked:
         await manager.start(TaskRequest(item_id="water", request_id="after-failure"))
+    assert blocked.value.code == "recovery_required"
 
 
 async def test_manual_take_does_not_release_before_signal(make_manager):

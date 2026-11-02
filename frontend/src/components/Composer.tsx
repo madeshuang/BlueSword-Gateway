@@ -32,7 +32,7 @@ export function Composer(props: {
 
   return (
     <div className={`composer ${props.big ? 'big' : ''} ${listening ? 'listening' : ''}`}>
-      <button className="mic" onClick={props.onMic} disabled={busy} aria-label="语音">
+      <button className="mic" onClick={props.onMic} disabled={busy} aria-label="语音" title={`点击说话；待机时也可以说“${config.wakePhrase}”`}>
         <IconMic size={props.big ? 24 : 22} />
         <span className="mic-ring" />
       </button>

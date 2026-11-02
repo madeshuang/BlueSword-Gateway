@@ -54,7 +54,7 @@ export function ConfirmBar({
         </div>
         <div className="confirm-bar-sub">
           {request.steps?.join(' → ')}
-          <span className="confirm-bar-time"> · 说“可以”也行 · {left}s</span>
+          <span className="confirm-bar-time"> · 可以继续说“再来…”调整 · 说“可以”确认 · {left}s</span>
         </div>
       </div>
       <div className="confirm-bar-actions">

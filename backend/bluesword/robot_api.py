@@ -17,7 +17,7 @@ import httpx
 from fastapi import FastAPI, Request
 
 from .config import Settings
-from .domain import RobotError, TaskRequest
+from .domain import RobotError, TaskLine, TaskRequest
 from .protocol import ACTION_TO_SKILL, STAGE_LABEL, STAGE_OF_STEP, reply, stages_for
 from .skills import SKILLS
 
@@ -98,16 +98,16 @@ def mount_robot_api(app: FastAPI, settings: Settings) -> None:
             action = body.get("action")
             if action not in ACTION_TO_SKILL:
                 return reply(False, f"不支持的 action：{action}")
-            if not isinstance(items, list) or len(items) != 1 or items[0].get("count", 1) != 1:
-                return reply(False, "模拟机器人一次只取一件物品")
-            item_id = items[0]["item"]
+            lines = [TaskLine(item_id=line["item"], count=line.get("count", 1)) for line in items]
+            order = TaskRequest(items=lines, request_id="validate", skill=ACTION_TO_SKILL[action])
+            item_id = order.item_id
         except Exception:
             return reply(False, "报文不合法")
         task_id = str(body.get("taskId") or uuid.uuid4().hex)
         skill = ACTION_TO_SKILL[action]
         queue = manager.bus.subscribe()  # 先订阅，避免漏掉第一条步骤事件
         try:
-            task = await manager.start(TaskRequest(item_id=item_id, request_id=task_id, skill=skill), narrate=False)
+            task = await manager.start(TaskRequest(items=order.items, request_id=task_id, skill=skill), narrate=False)
         except RobotError as exc:
             manager.bus.unsubscribe(queue)
             return reply(False, str(exc))

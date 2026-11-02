@@ -83,9 +83,10 @@ export interface TaskStep {
 export interface Task {
   id?: string
   created_at?: number
-  status?: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
+  status?: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'resolved'
   recovery_required?: boolean
   error?: { code: string; message: string } | null
+  completion_note?: string | null
   title: string
   steps: TaskStep[]
 }
@@ -102,7 +103,7 @@ export type ServerEvent =
   | { type: 'reasoning_end'; id: string; ms: number }
   | ({ type: 'skill'; id: string } & SkillCall)
   | ({ type: 'confirm_request' } & ConfirmRequest)
-  | { type: 'confirm_closed'; id: string; reason: 'approved' | 'declined' | 'timeout' | 'cancelled' }
+  | { type: 'confirm_closed'; id: string; reason: 'approved' | 'declined' | 'timeout' | 'cancelled' | 'updated' }
   | { type: 'vision'; detections?: Detection[]; caption?: string; scanning?: boolean }
   | { type: 'camera'; src: string | null }
   | { type: 'task'; task: Task | null }

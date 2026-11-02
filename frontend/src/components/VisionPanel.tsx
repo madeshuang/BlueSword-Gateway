@@ -4,6 +4,7 @@ import { SCENE } from '../mock'
 import type { BackendMode, Detection, ProtocolEntry, Task } from '../types'
 import { gdkLabels } from '../gdkNames'
 import { IconCheck } from './Icons'
+import { OperatorHelp } from './OperatorHelp'
 
 /** 无真实相机时的示意画面：简化的货架线稿，坐标与 mock 检测框一致 */
 function SimulatedFeed({ detections }: { detections: Detection[] }) {
@@ -77,6 +78,8 @@ function Box({ d, i }: { d: Detection; i: number }) {
 
 /** 执行记录：步骤随机器人实际进展逐条出现（不预先列出整张清单），并标注距任务开始的时间 */
 function Timeline({ task }: { task: Task }) {
+  const list = useRef<HTMLOListElement>(null)
+  useEffect(() => { list.current?.scrollTo({ top: list.current.scrollHeight, behavior: 'smooth' }) }, [task.steps])
   const started = task.steps.filter((s) => s.status !== 'pending')
   const t0 = task.created_at ?? started[0]?.startedAt
   const running = task.status === 'running' || task.status === undefined
@@ -86,7 +89,7 @@ function Timeline({ task }: { task: Task }) {
       <div className="panel-title">
         执行记录<span className="task-name">{task.title}</span>
       </div>
-      <ol className="steps">
+      <ol className="steps" ref={list}>
         {started.map((s) => (
           <li key={s.id} className={s.status}>
             <span className="step-icon">{s.status === 'done' ? <IconCheck size={14} /> : <i />}</span>
@@ -120,13 +123,12 @@ function summarize(e: ProtocolEntry, glossary: Record<string, string>): { kind: 
   const name = e.path.split('/').pop()
   if (name === 'dispatch') {
     const action = { pick: '取货', place: '卸货' }[b.action as string] ?? '取物'
-    const id = b.items?.[0]?.item ?? ''
-    const item = glossary[id] ?? id
+    const item = (b.items ?? []).map((line: { item: string; count: number }) => `${glossary[line.item] ?? line.item} × ${line.count}`).join('、')
     const r = e.reply as Record<string, any> | null | undefined
     return { kind: '下发', text: `${action} · ${item}`, ok: r ? !!r.success : false }
   }
   if (name === 'progress')
-    return { kind: '回报', text: [b.label ?? b.stage, STATUS_TEXT[b.status] ?? b.status, b.detail].filter(Boolean).join(' · ') }
+    return { kind: '回报', text: b.message ? [b.pickIndex ? `第${b.pickIndex}件` : '', b.message].filter(Boolean).join(' · ') : [b.label ?? b.stage, STATUS_TEXT[b.status] ?? b.status, b.detail].filter(Boolean).join(' · ') }
   if (name === 'finished') return { kind: '完成', text: '完成通知', ok: true }
   return { kind: '故障', text: String(b.message ?? ''), ok: false }
 }
@@ -140,7 +142,7 @@ function ProtocolLog({ entries, glossary }: { entries: ProtocolEntry[]; glossary
   return (
     <div className="protocol">
       <div className="panel-title">
-        机器人通信<span className="task-name">兰剑协议 · 等级二</span>
+        机器人通信<span className="task-name">兰剑协议</span>
       </div>
       {entries.length === 0 ? (
         <p className="protocol-empty">还没有报文。下发任务后，这里会显示机器人回报的每一条消息。</p>
@@ -182,21 +184,21 @@ export function VisionPanel(props: {
   return (
     <section className="vision">
       <div className="panel-title">
-        <span>{props.backendMode === 'lanjian_http' ? '机器人执行' : `${config.assistantName}的视野`}</span>
-        {props.backendMode !== 'lanjian_http' && <span className="live-badge">
+        <span>{props.backendMode === 'lanjian_http' && !props.cameraSrc ? '机器人执行' : `${config.assistantName}的视野`}</span>
+        {(props.backendMode !== 'lanjian_http' || !!props.cameraSrc) && <span className="live-badge">
           <i />
           {props.scanning ? '识别中' : props.detections.length > 0 ? `识别到 ${props.detections.length} 个物品` : '相机快照'}
         </span>}
       </div>
 
-      {props.backendMode !== 'lanjian_http' && (
+      {(props.backendMode !== 'lanjian_http' || !!props.cameraSrc) && (
       <div className={`feed ${props.scanning ? 'scanning' : ''} ${hasVision ? 'active' : ''}`}>
         {props.cameraSrc ? <img src={props.cameraSrc} alt="机器人相机画面" />
           : props.backendMode === 'gdk' ? <div className="camera-empty">等待相机画面</div>
           : <SimulatedFeed detections={props.detections} />}
         <span className="hud hud-tl">头部相机</span>
         <span className="hud hud-tr">
-          <Clock />
+          {props.backendMode === 'lanjian_http' ? '识别照片' : <Clock />}
         </span>
         {!props.cameraSrc && props.backendMode !== 'gdk' && <span className="hud hud-br">模拟画面</span>}
         {props.detections.map((d, i) => (
@@ -216,13 +218,13 @@ export function VisionPanel(props: {
       {props.task && <Timeline task={props.task} />}
       {props.backendMode === 'lanjian_http' && <ProtocolLog entries={props.protocol ?? []} glossary={props.glossary ?? {}} />}
       <div className="task-controls">
-        {props.task?.status === 'running' && <button onClick={props.onCancel}>停止任务</button>}
+        {props.task?.status === 'running' && <button onClick={props.onCancel}>{props.backendMode === 'lanjian_http' ? '需要停下' : '停止任务'}</button>}
         {(props.backendMode === 'mock' || props.backendMode === 'gdk_mock') && props.task?.status === 'running'
-          && props.task.steps.some((step) => step.id === 'handover' && step.status === 'active')
+          && props.task.steps.some((step) => (step.id === 'handover' || step.id.endsWith(':handover')) && step.status === 'active')
           && <button onClick={props.onTake}>模拟接稳物品</button>}
-        {props.recoveryRequired && <span role="status">任务已停止，需要检查后复位。</span>}
+        {props.recoveryRequired && <span role="status">{props.task?.completion_note ?? "这次需要现场同事帮忙看一下。"}</span>}
         {(props.backendMode === 'mock' || props.backendMode === 'gdk_mock') && props.recoveryRequired && <button onClick={props.onRecover}>复位模拟器</button>}
-        {props.backendMode === 'lanjian_http' && props.recoveryRequired && <button onClick={props.onRecover}>已现场核对，解除锁定</button>}
+        {props.backendMode === 'lanjian_http' && (props.recoveryRequired || props.task?.status === 'running') && <OperatorHelp key={props.task?.id} taskId={props.task?.id} />}
       </div>
     </section>
   )

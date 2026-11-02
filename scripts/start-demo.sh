@@ -10,5 +10,5 @@ cd "$task_root/frontend"
 if [ ! -d node_modules ]; then npm ci; fi
 npm run build
 cd "$task_root/backend"
-uv sync --python 3.12 --extra dev
-exec uv run uvicorn bluesword.app:app --host 127.0.0.1 --port 8000 --workers 1
+uv sync --locked --python 3.12 --extra dev
+exec uv run --locked uvicorn bluesword.app:app --host 127.0.0.1 --port 8000 --workers 1

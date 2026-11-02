@@ -113,7 +113,7 @@ function AssistantTurn({
   // 只对实时到达的一轮做节奏控制；历史消息直接完整显示
   const animate = useRef(msgs.some((m) => m.streaming)).current
   // 显示层清理：代号翻译成中文、去掉引用说明的话（原文保留在消息数据里）
-  const parts = useMemo(() => msgs.map((m) => cleanReasoning(m.reasoning ?? '', glossary)), [msgs, glossary])
+  const parts = useMemo(() => msgs.map((m) => cleanReasoning(m.reasoning ?? '', glossary, m.reasoningMs === undefined && !!m.streaming)), [msgs, glossary])
   let combined = ''
   const ends: number[] = []
   for (const part of parts) {

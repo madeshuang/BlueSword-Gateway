@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import uuid
+from pathlib import Path
 
-from .config import Settings, load_scene
-from .domain import RobotError, TaskRecord, TaskRequest, TaskStep
+from .config import Item, Settings, load_scene
+from .domain import RobotError, TaskLine, TaskRecord, TaskRequest, TaskStep
 from .mock import MockRobot
 from .ports import RobotBundle
 from .remote import RemoteWorkflow, remote_steps
@@ -43,6 +45,23 @@ class TaskManager:
         self.bundle, self.settings, self.store, self.bus = bundle, settings, store, bus
         self.waypoints, self.items = load_scene()
         self.waypoints = getattr(bundle.robot, "scene_waypoints", self.waypoints)
+        catalog_path = settings.catalog_path
+        if not catalog_path and settings.robot_mode == "lanjian_http" and settings.robot_protocol == "vlm":
+            catalog_path = str(Path(__file__).resolve().parents[2] / "config/booth-catalog.example.json")
+        if catalog_path:
+            raw = json.loads(Path(catalog_path).read_text(encoding="utf-8"))
+            if not isinstance(raw, list) or not raw:
+                raise ValueError("物品目录必须是非空数组")
+            self.items = {}
+            for row in raw:
+                item = Item(id=row["id"], name=row["name"], aliases=[row["name"], *row.get("aliases", [])],
+                            location=row.get("location", ""), robot_item=row.get("robotItem", row["name"]), box=(0, 0, 0.1, 0.1), stock=row["initialStock"], category=row["category"])
+                if item.id in self.items:
+                    raise ValueError(f"物品目录 id 重复：{item.id}")
+                self.items[item.id] = item
+        if settings.robot_mode == "lanjian_http" and settings.robot_protocol != "vlm" and any(item.location.strip() in ("", "待配置") for item in self.items.values()):
+            raise ValueError("现场模式请配置物品 location 或 BLUESWORD_CATALOG_PATH")
+        self.store.init_inventory(self.items)
         self.lock = asyncio.Lock()
         self.active: TaskRecord | None = None
         self.owner: str | None = None
@@ -52,13 +71,18 @@ class TaskManager:
         self.inspection_owner: str | None = None
         # 取货成功后手里的物品；卸货需要它。未知时（异常/重启）保持 None，并由复位流程处理。
         self.held_item_id: str | None = None
-        # 展台库存（网关本地维护）：递出成功后减一，工作人员补货后重置
-        self.stock: dict[str, int] = {item_id: item.stock for item_id, item in self.items.items()}
+        # 库存在发单前持久化预留；只有明确拒单才自动退回。
+
         # lanjian_http 模式：机器人回调报文的收件箱与协议日志
         self.remote_inbox: asyncio.Queue = asyncio.Queue()
+        self.remote_visual: dict = {}
         from .remote import ProtocolLog
 
         self.protocol = ProtocolLog(bus.emit)
+
+    @property
+    def stock(self) -> dict[str, int]:
+        return self.store.inventory()
 
     @property
     def busy(self) -> bool:
@@ -82,26 +106,42 @@ class TaskManager:
                         step.status = "failed"
                         step.detail = "服务中断"
                 self.store.save(task)
+                self.active = task
+        if self.active is None and self.store.recovery_required:
+            self.active = next((t for t in self.store.recent() if t.recovery_required), None)
 
     async def start(self, request: TaskRequest, owner: str | None = None, *, narrate: bool = True) -> TaskRecord:
         async with self.lock:
             previous = self.store.by_request(request.request_id)
             if previous:
-                if previous.item_id != request.item_id:
+                prior_items = previous.items or [TaskLine(item_id=previous.item_id)]
+                if sorted((x.item_id,x.count) for x in prior_items) != sorted((x.item_id,x.count) for x in request.items) or previous.skill != request.skill:
                     raise RobotError("request_conflict", "同一 request_id 不能用于不同物品")
                 return previous
-            if request.item_id not in self.items:
+            if self.settings.robot_mode == "lanjian_http" and request.skill != "fetch" and not self.settings.split_skills:
+                raise RobotError("unsupported_skill", "当前机器人使用完整取物任务。")
+            if any(line.item_id not in self.items for line in request.items):
                 raise RobotError("unknown_item", "物品不在展会货架配置中")
             if previous is None and request.skill == "unload" and request.item_id != self.held_item_id:
                 raise RobotError("not_holding", "机器人手里没有这件物品，需要先执行取货")
             if previous is None and request.skill != "unload" and self.held_item_id:
                 raise RobotError("holding", "机器人手里还有物品，需要先卸货")
-            if previous is None and request.skill != "unload" and self.stock.get(request.item_id, 0) <= 0:
-                raise RobotError("out_of_stock", f"{self.items[request.item_id].name}已经没有库存了")
+            if request.skill != "unload":
+                for line in request.items:
+                    if self.stock.get(line.item_id, 0) < line.count:
+                        raise RobotError("out_of_stock", f"{self.items[line.item_id].name}数量不够了，换个选择吧。")
             if self.busy or self.inspection_owner:
                 raise RobotError("busy", "机器人正在执行任务，请等待完成或先停止任务")
             if self.store.recovery_required:
-                raise RobotError("recovery_required", "上次任务中止，需要先检查并复位")
+                raise RobotError("recovery_required", "这次需要现场同事帮忙看一下。")
+            if self.settings.robot_mode == "lanjian_http" and self.settings.robot_protocol == "vlm":
+                if request.skill != "fetch":
+                    raise RobotError("unsupported_skill", "当前机器人使用完整取物任务。")
+                health = await self.bundle.robot.health(refresh=True)
+                if not health["online"]:
+                    raise RobotError("robot_offline", "暂时没连上机器人，稍后再试试。")
+                if health.get("robot_busy"):
+                    raise RobotError("busy", "机器人还在忙，稍等一下再来吧。")
             item = self.items[request.item_id]
             skill = SKILLS[request.skill]
             title = {"fetch": f"拿取{item.name}", "pick": f"取货 · {item.name}", "unload": f"卸货 · {item.name}"}
@@ -109,10 +149,11 @@ class TaskManager:
                 id=uuid.uuid4().hex,
                 request_id=request.request_id,
                 item_id=item.id,
+                items=request.items,
                 skill=skill.name,
-                title=title[skill.name],
+                title=title[skill.name] if request.skill != "fetch" else "拿取" + self.order_label(request.items),
                 created_at=time.time(),
-                steps=remote_steps(skill.name, item)
+                steps=remote_steps(skill.name, item, self.settings.robot_protocol)
                 if self.settings.robot_mode == "lanjian_http"
                 else [
                     TaskStep(
@@ -125,12 +166,30 @@ class TaskManager:
                     for id_ in skill.steps
                 ],
             )
-            self.store.save(task)
+            if self.settings.robot_mode != "lanjian_http" and sum(x.count for x in request.items) > 1:
+                task.steps = [TaskStep(id=f"{n}:{step}", label=f"{self.items[item_id].name} · {STEP_DEFS[step].label}",
+                                      gdk=STEP_DEFS[step].gdk, status="done" if step == "plan" else "pending")
+                              for n,item_id in enumerate([x.item_id for x in request.items for _ in range(x.count)],1)
+                              for step in skill.steps]
+            self.store.create_task(task, reserve=request.skill != "unload")
             self.active, self.owner = task, owner
+            if self.settings.robot_mode == "lanjian_http":
+                self.remote_visual.clear()
+                self.bus.emit({"type":"camera", "src":None})
+                self.bus.emit({"type":"vision", "detections":[], "caption":"", "scanning":False})
             self.cancelling = False
             self.started.clear()
             self.job = asyncio.create_task(self._execute(task, narrate), name=f"{skill.name}-{task.id}")
             return task
+
+    def order_label(self, lines: list[TaskLine]) -> str:
+        return "、".join(f"{self.items[line.item_id].name} × {line.count}" for line in lines)
+
+    async def run_order(self, lines: list[TaskLine], request_id: str, owner: str | None = None) -> TaskRecord:
+        task = await self.start(TaskRequest(items=lines, request_id=request_id), owner, narrate=False)
+        if self.active is task and self.job is not None:
+            await asyncio.shield(self.job)
+        return task
 
     async def run_skill(self, skill: str, item_id: str, owner: str | None = None) -> TaskRecord:
         """Start a skill and wait for its final record (used by the LLM agent)."""
@@ -160,11 +219,12 @@ class TaskManager:
             workflow = FetchWorkflow(self.bundle, self.settings, self.waypoints, self.store, self.bus.emit)
         workflow.narrate = narrate
         try:
-            result = await workflow.run(task, self.items[task.item_id])
+            result = await workflow.run(task, self.items[task.item_id], self.items)
             if result.status == "completed":
                 self.held_item_id = result.item_id if SKILLS[result.skill].leaves_holding else None
-                if result.skill in ("fetch", "unload"):  # 东西交到观众手里才算出库
-                    self.stock[result.item_id] = max(0, self.stock.get(result.item_id, 0) - 1)
+                self.store.settle_stock(task.id)
+            elif (result.error or {}).get("code") == "rejected":
+                self.store.settle_stock(task.id, refund=True)
             return result
         finally:
             if hasattr(robot, "command_sink"):
@@ -178,6 +238,8 @@ class TaskManager:
             raise RobotError("task_conflict", "指定任务已不是当前执行任务")
         if owner is not None and self.owner != owner:
             return self.active
+        if self.settings.robot_mode == "lanjian_http":
+            raise RobotError("stop_unavailable", "这边还不能直接让机器人停下，请现场同事帮忙。")
         job = self.job
         await self.started.wait()
         if not self.cancelling and not job.done():
@@ -216,13 +278,38 @@ class TaskManager:
         return totals
 
     def restock(self, item_id: str | None = None) -> dict[str, int]:
-        for key, item in self.items.items():
-            if item_id in (None, key):
-                self.stock[key] = item.stock
+        if item_id is not None and item_id not in self.items:
+            raise RobotError("unknown_item", "没有找到这件物品。")
+        self.store.restock([item for key,item in self.items.items() if item_id in (None,key)])
         return self.inventory()
 
+    async def resolve_remote(self, expected_task_id: str | None) -> None:
+        async with self.lock:
+            if self.settings.robot_mode != "lanjian_http":
+                raise RobotError("mode", "模拟器请使用复位。")
+            if (self.active.id if self.active else None) != expected_task_id or (not self.active and not self.store.recovery_required):
+                raise RobotError("task_conflict", "任务已变化，请重新核对。")
+            if not self.busy and not self.store.recovery_required:
+                raise RobotError("task_conflict", "任务已结束，不需要恢复接单。")
+            if self.busy:
+                self.job.cancel()
+                await asyncio.shield(self.job)
+            if self.active:
+                self.active.status = "resolved"
+                self.active.recovery_required = False
+                self.store.save(self.active)
+                self.store.settle_stock(self.active.id)  # 现场处理不退库存
+            self.store.set_recovery(False)
+            self.held_item_id = None
+            self.bus.emit({"type":"task", "task":self.active.model_dump() if self.active else None})
+            self.bus.emit({"type":"phase", "phase":"listening"})
+
     async def shutdown(self) -> None:
-        await self.cancel()
+        if self.settings.robot_mode == "lanjian_http" and self.busy:
+            self.job.cancel()
+            await asyncio.shield(self.job)
+        else:
+            await self.cancel()
         await self.bundle.robot.close()
 
     async def inspect(self, owner: str) -> list:

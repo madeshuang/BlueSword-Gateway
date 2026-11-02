@@ -17,12 +17,14 @@ class Waypoint(BaseModel):
 
 
 class Item(BaseModel):
-    id: str
-    name: str
+    id: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1)
     aliases: list[str]
     shelf: str = "shelf"
+    robot_item: str = ""  # VLM v1.2 机器人接受的中文名或内部编码
+    location: str = ""  # 现场机器人约定的货架位置
     box: tuple[float, float, float, float]
-    stock: int = Field(default=3, ge=0)  # 展台初始库存（补货后恢复到这个数）
+    stock: int = Field(default=3, ge=0, strict=True)  # 展台初始库存（补货后恢复到这个数）
     category: str = "其他"  # 用于按类别查询库存
 
 
@@ -69,6 +71,15 @@ class Settings(BaseModel):
     confirm_timeout: float = Field(default=60, gt=0)
     # —— 兰剑协议（网关侧，lanjian_http 模式）
     robot_dispatch_url: str = ""  # 机器人接收任务的完整地址，如 http://127.0.0.1:8001/api/task/dispatch
+    robot_protocol: Literal["v1", "progress", "vlm"] = "v1"
+    split_skills: bool = False  # 仅已确认支持拆分的演示/机器人启用
+    operator_token: str = Field(default="", repr=False)
+    catalog_path: str = ""
+    speech_api_key: str = Field(default="", repr=False)
+    speech_workspace: str = ""
+    tts_model: str = "qwen3-tts-flash"
+    tts_voice: str = "Cherry"
+    speech_model: str = "qwen-audio-3.1-asr-flash-message"
     robot_timeout: float = Field(default=8, gt=0)  # 等待接单回复
     remote_task_timeout: float = Field(default=300, gt=0)  # 等待完成通知的上限
     # —— 兰剑协议（机器人侧）：回报发往的网关地址，如 http://127.0.0.1:8000；为空则不回报
@@ -83,6 +94,7 @@ class Settings(BaseModel):
     @classmethod
     def from_env(cls) -> Settings:
         load_dotenv()
+        load_dotenv(Path(__file__).resolve().parents[2] / ".env")
         values = {}
         for field in cls.model_fields:
             raw = os.getenv("BLUESWORD_" + field.upper())
@@ -95,6 +107,9 @@ class Settings(BaseModel):
             values.setdefault("llm_model", os.environ["DEEPSEEK_MODEL"])
         if os.getenv("DEEPSEEK_REASONING_EFFORT"):
             values.setdefault("llm_reasoning_effort", os.environ["DEEPSEEK_REASONING_EFFORT"])
+        values.setdefault("speech_api_key", os.getenv("DASHSCOPE_API_KEY", ""))
+        values.setdefault("speech_workspace", os.getenv("DASHSCOPE_WORKSPACE_ID", ""))
+        values.setdefault("operator_token", os.getenv("BOOTH_OPERATOR_TOKEN", ""))
         return cls(**values)
 
 

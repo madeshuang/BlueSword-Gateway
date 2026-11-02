@@ -91,6 +91,7 @@ export const initialState: State = {
 export type Action =
   | ServerEvent
   | { type: 'local_user'; text: string }
+  | { type: 'local_notice'; text: string }
   | { type: 'go_home' }
   | { type: 'confirm_answered'; id: string }
   | { type: 'open_history'; id: string }
@@ -116,6 +117,7 @@ function archive(state: State): HistoryItem[] {
 const reset = (state: State, extra: Partial<State> = {}): State => ({
   ...state,
   ...freshSession,
+  task: state.task?.status === 'running' || state.recoveryRequired ? state.task : null,
   history: archive(state),
   lastActivity: Date.now(),
   ...extra,
@@ -133,10 +135,12 @@ export function reducer(state: State, action: Action): State {
     case 'phase':
       return { ...s, phase: action.phase, view: action.phase === 'idle' ? s.view : 'session' }
     case 'asr':
-      if (!action.final) return { ...s, view: 'session', partial: action.text }
+      if (!action.final) return { ...s, ...(action.text ? { view: 'session' as const } : {}), partial: action.text }
       return { ...s, view: 'session', partial: '', messages: [...s.messages, { id: uid(), role: 'user', text: action.text }] }
     case 'local_user':
       return { ...s, view: 'session', messages: [...s.messages, { id: uid(), role: 'user', text: action.text }] }
+    case 'local_notice':
+      return { ...s, view: 'session', messages: [...s.messages, { id: uid(), role: 'assistant', text: action.text }] }
     case 'assistant_start':
       return { ...s, messages: [...s.messages, { id: action.id, role: 'assistant', text: '', streaming: true, thoughts: [] }] }
     case 'thought':
@@ -209,7 +213,9 @@ export function reducer(state: State, action: Action): State {
         },
       }
     case 'device':
-      return { ...state, device: { online: action.online, name: action.name } }
+      return { ...state, device: { online: action.online, name: action.name },
+        ...(!action.online ? { confirm: null, partial: '', messages: state.messages.map(m => ({ ...m, streaming: false })) } : {}),
+      }
     case 'backend':
       return { ...state, backendMode: action.mode, recoveryRequired: action.recovery_required, glossary: action.glossary ?? state.glossary }
     case 'open_history': {

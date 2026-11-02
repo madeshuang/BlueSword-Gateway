@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class RobotError(Exception):
@@ -98,17 +98,29 @@ class TaskStep(BaseModel):
     status: Literal["pending", "active", "done", "failed"] = "pending"
     detail: str = ""
     gdk: list[str] = Field(default_factory=list)
+    stage_index: int | None = None
+    pick_index: int | None = None
+    attempt: int = 0
+    startedAt: float | None = None
+
+
+class TaskLine(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    item_id: str = Field(min_length=1, max_length=80)
+    count: int = Field(default=1, ge=1, le=2, strict=True)
 
 
 class TaskRecord(BaseModel):
     id: str
     request_id: str
     item_id: str
+    items: list[TaskLine] = Field(default_factory=list)
     skill: Literal["fetch", "pick", "unload"] = "fetch"
     title: str
-    status: Literal["running", "completed", "failed", "cancelled", "interrupted"] = "running"
+    status: Literal["running", "completed", "failed", "cancelled", "interrupted", "resolved"] = "running"
     steps: list[TaskStep]
     error: dict[str, str] | None = None
+    completion_note: str | None = None
     holding: bool = False
     recovery_required: bool = False
     created_at: float
@@ -117,9 +129,28 @@ class TaskRecord(BaseModel):
 
 class TaskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    item_id: str = Field(min_length=1, max_length=80)
+    item_id: str | None = Field(default=None, min_length=1, max_length=80)
+    items: list[TaskLine] = Field(default_factory=list, max_length=2)
     request_id: str = Field(min_length=1, max_length=100)
     skill: Literal["fetch", "pick", "unload"] = "fetch"
+
+
+    @model_validator(mode="after")
+    def order(self):
+        if not self.items:
+            if not self.item_id:
+                raise ValueError("请先选择想拿的物品")
+            self.items = [TaskLine(item_id=self.item_id)]
+        elif self.item_id and self.item_id != self.items[0].item_id:
+            raise ValueError("物品清单不一致")
+        if len({line.item_id for line in self.items}) != len(self.items):
+            raise ValueError("同一种物品请合并数量")
+        if sum(line.count for line in self.items) > 2:
+            raise ValueError("每单最多两件")
+        if self.skill != "fetch" and (len(self.items) != 1 or self.items[0].count != 1):
+            raise ValueError("拆分技能只支持单件；两件请使用完整取物")
+        self.item_id = self.items[0].item_id
+        return self
 
 
 @dataclass(frozen=True)
