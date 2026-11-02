@@ -27,7 +27,7 @@ export class SpeechController {
   private speechQueue: string[] = []
   private text = new Map<string, string>()
   private spoken = new Set<string>()
-  private state: SpeechState = { enabled: false, tts: true, status: '' }
+  private state: SpeechState = { enabled: false, tts: false, status: '' }
   private local = false
   private ready: Promise<void> | null = null
 

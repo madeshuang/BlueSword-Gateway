@@ -71,7 +71,7 @@ class LocalVoice:
         self.audio = self.gate = None
         self.capture = self.asr = self.player = None
         self.enabled = self.playing = self.recognizing = self.busy = False
-        self.tts = True
+        self.tts = False
         self.sleeping = False
         self.error = ""
         self.phase = "stopped"

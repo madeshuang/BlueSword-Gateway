@@ -142,6 +142,10 @@ async def test_tts_toggle_does_not_cancel_recognition_and_slow_turn_reopens_foll
     voice = make_voice()
     await voice.start()
     try:
+        assert not voice.status()["tts"]
+        await voice.send_json({"type": "assistant_delta", "id": "silent", "text": "库存已更新"})
+        await voice.send_json({"type": "assistant_end", "id": "silent"})
+        assert voice.player is None and voice.speech_queue.empty()
         entered, release = asyncio.Event(), asyncio.Event()
         async def recognize(*args):
             entered.set()
@@ -178,6 +182,7 @@ async def test_reply_synthesized_once_and_cancelling_playback_guards_echo(monkey
         await asyncio.Event().wait()
     voice.audio.play = play
     try:
+        await voice.control("tts_on")
         for event in [{"type": "assistant_start", "id": "1"},
                       {"type": "assistant_delta", "id": "1", "text": "拿一瓶水吗？"},
                       {"type": "confirm_request", "id": "c", "timeout_s": 60},
@@ -201,6 +206,7 @@ async def test_sleep_stops_playback_and_latches_until_manual_wake(monkeypatch):
     voice = make_voice()
     await voice.start()
     try:
+        await voice.control("tts_on")
         await voice.send_json({"type": "assistant_delta", "id": "1", "text": "你好"})
         await voice.send_json({"type": "assistant_end", "id": "1"})
         await asyncio.wait_for(entered.wait(), 1)

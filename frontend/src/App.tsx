@@ -49,7 +49,7 @@ export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState)
   const bridge = useRef<Bridge | null>(null)
   const speech = useRef<SpeechController | null>(null)
-  const [voice, setVoice] = useState<SpeechState>({ enabled: false, tts: true, status: '' })
+  const [voice, setVoice] = useState<SpeechState>({ enabled: false, tts: false, status: '' })
 
   useEffect(() => {
     const controller = new SpeechController(
