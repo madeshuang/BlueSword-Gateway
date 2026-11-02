@@ -96,6 +96,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await app.state.manager.resolve_remote(body.get("task_id"))
         return {"resolved": True}
 
+    @app.post("/api/operator/refund", dependencies=[Depends(authorize), Depends(operator)])
+    async def refund_stock(request: Request):
+        body = await request.json()
+        if not isinstance(body, dict) or body.get("confirmation") != "确认本单全部物品仍在货架":
+            raise HTTPException(400, "请确认本单全部物品仍在货架；部分取走或状态不明时不能整单退回。")
+        returned = await app.state.manager.refund_reserved_stock(body.get("task_id"))
+        return {"returned": returned, "message": f"已退回预留库存，共 {sum(returned.values())} 件。" if returned
+                else "没有可退回的预留库存，可能已退回或已补满库存。"}
+
     @app.get("/health", dependencies=[Depends(authorize)])
     async def health():
         manager = app.state.manager

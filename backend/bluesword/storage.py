@@ -94,12 +94,16 @@ class TaskStore:
                     self.db.execute("INSERT INTO reservations VALUES (?,?,?,?)", (task.id,line.item_id,line.count,row[1]))
             self.db.execute("INSERT INTO tasks VALUES (?,?,?)", (task.id,task.request_id,task.model_dump_json()))
 
-    def settle_stock(self, task_id: str, refund: bool = False) -> None:
+    def settle_stock(self, task_id: str, refund: bool = False) -> dict[str, int]:
+        returned = {}
         with self.db:
             if refund:
                 for item, count, generation in self.db.execute("SELECT item_id,count,generation FROM reservations WHERE task_id=?", (task_id,)).fetchall():
-                    self.db.execute("UPDATE inventory SET count=count+? WHERE item_id=? AND generation=?", (count,item,generation))
+                    changed = self.db.execute("UPDATE inventory SET count=count+? WHERE item_id=? AND generation=?", (count,item,generation))
+                    if changed.rowcount:
+                        returned[item] = count
             self.db.execute("DELETE FROM reservations WHERE task_id=?", (task_id,))
+        return returned
 
     def restock(self, items) -> None:
         with self.db:

@@ -212,7 +212,8 @@ export function VisionPanel(props: {
           && <button onClick={props.onTake}>模拟接稳物品</button>}
         {props.recoveryRequired && <span role="status">{props.task?.completion_note ?? "这次需要现场同事帮忙看一下。"}</span>}
         {(props.backendMode === 'mock' || props.backendMode === 'gdk_mock') && props.recoveryRequired && <button onClick={props.onRecover}>复位模拟器</button>}
-        {props.backendMode === 'lanjian_http' && (props.recoveryRequired || props.task?.status === 'running') && <OperatorHelp key={props.task?.id} taskId={props.task?.id} />}
+        {props.backendMode === 'lanjian_http' && (props.recoveryRequired || props.task?.status === 'running') && <OperatorHelp key={props.task?.id} taskId={props.task?.id}
+          canRefund={props.recoveryRequired && !!props.task && ['failed', 'cancelled', 'interrupted'].includes(props.task.status ?? '')} />}
       </div>
     </section>
   )
