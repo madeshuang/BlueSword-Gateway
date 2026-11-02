@@ -34,7 +34,7 @@ export interface SkillCall {
   stock?: { name: string; count: number }[]
 }
 
-/** 机器人动作前的确认请求：观众允许后才会执行 */
+/** 机器人动作前的确认请求：用户允许后才会执行 */
 export interface ConfirmRequest {
   id: string
   title: string

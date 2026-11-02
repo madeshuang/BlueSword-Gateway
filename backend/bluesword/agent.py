@@ -30,20 +30,20 @@ logger = logging.getLogger(__name__)
 PROMPT_PATH = Path(__file__).with_name("prompts") / "system.md"
 MAX_ROUNDS = 6
 
-# 嘴上说了要去拿（或请观众点允许），却没有真正调用取货
+# 嘴上说了要去拿（或请用户点允许），却没有真正调用取货
 PROMISE = re.compile(r"点一下允许|点允许|这就去|马上去|我去(帮你|给你)?拿|去(帮你|给你)拿|这就给你拿|马上出发")
 def dangling_promise(content: str, items: dict) -> bool:
     """回复里有一句“我这就去拿某样东西”式的承诺（点名了具体物品、且不是问句），但这一轮没有真的去取货。"""
     names = {item.name for item in items.values()} | {a for item in items.values() for a in item.aliases}
     for sentence, end in re.findall(r"([^。！？!?]+)([。！？!?]?)", content or ""):
         if end in ("？", "?") or "哪" in sentence:
-            continue  # 问观众“要哪样”不是承诺
+            continue  # 问用户“要哪样”不是承诺
         if PROMISE.search(sentence) and any(name in sentence for name in names):
             return True
     return False
 
 
-NUDGE = "（你刚才说要去拿，但还没有真正去取货。如果确实要拿，现在就去取货；如果不打算拿，就向观众简单更正一句。）"
+NUDGE = "（你刚才说要去拿，但还没有真正去取货。如果确实要拿，现在就去取货；如果不打算拿，就向用户简单更正一句。）"
 HISTORY_TURNS = 12
 
 Emit = Callable[[dict], None]
@@ -119,7 +119,7 @@ def build_tools(manager: TaskManager) -> list[dict]:
             "function": {
                 "name": "check_inventory",
                 "description": "技能【查询库存】：查看展台货架上某一类东西还剩几件，数量为 0 的已经拿完了、不能再取。"
-                f"类别有：{'、'.join(manager.categories)}；按观众需求所属的类别查，拿不准就查“全部”。",
+                f"类别有：{'、'.join(manager.categories)}；按用户需求所属的类别查，拿不准就查“全部”。",
                 "parameters": {
                     "type": "object",
                     "properties": {"category": {"type": "string", "enum": [*manager.categories, "全部"]}},
@@ -185,12 +185,12 @@ def system_prompt(manager: TaskManager, health: dict | None = None) -> str:
         spots = "、".join(i.location or shelf_position(i.box) for i in same)
         alias = "、".join(a for a in item.aliases if a != item.name)
         count = f"，共 {len(same)} 件" if len(same) > 1 else ""
-        lines.append(f"- {item.name}（{item.category}）：{spots}{count}" + (f"；观众也可能叫它{alias}" if alias else ""))
+        lines.append(f"- {item.name}（{item.category}）：{spots}{count}" + (f"；用户也可能叫它{alias}" if alias else ""))
     held = manager.items[manager.held_item_id].name if manager.held_item_id else None
     health = health or {}
     state = [
         "- 机器人：" + ("在线" if health.get("online", True) else "离线，无法行动"),
-        "- 手里：" + (f"拿着{held}，还没有递给观众" if held else "空着"),
+        "- 手里：" + (f"拿着{held}，还没有递给用户" if held else "空着"),
         "- 任务：" + ("正在执行中" if manager.busy else "空闲"),
     ]
     if manager.store.recovery_required:
@@ -201,7 +201,7 @@ def system_prompt(manager: TaskManager, health: dict | None = None) -> str:
         .replace("{{STATE}}", "\n".join(state))
     )
     actions = "- 取物（fetch_items）：按完整清单执行取物并送到交付处；一次确认和调用对应一项完整任务。"
-    flow = "观众想要货架上的东西时，用取物技能一次提交完整清单，等整单结果，不要再发卸货。"
+    flow = "用户想要货架上的东西时，用取物技能一次提交完整清单，等整单结果，不要再发卸货。"
     if manager.settings.split_skills:
         actions = "- 取货（pick_item）：前往货架取下一件物品，结束时仍持物。\n- 卸货（unload_item）：回交付处递出手里的物品。"
         flow = "取货和卸货组成完整服务：取货成功后接着卸货，不再重复确认。"
@@ -215,7 +215,7 @@ def system_prompt(manager: TaskManager, health: dict | None = None) -> str:
     if manager.settings.robot_mode == "lanjian_http":
         prompt += "\n当前不能主动读取相机或持物遥测，只能引用机器人已经回报的进度与照片；没有回报时不要声称看到了或夹稳了。" \
             "停止按钮只能提示现场协助，不会远程停止机器人。" \
-            "completion_note 非空时必须向观众转述数量尚需核对，不能说整单物品全部送达；也不要自行补发或退库存。"
+            "completion_note 非空时必须向用户转述数量尚需核对，不能说整单物品全部送达；也不要自行补发或退库存。"
     return prompt
 
 
@@ -298,9 +298,9 @@ class AgentSession:
         return {"ok": False, "error": f"未知工具 {name}"}
 
     def _opening_line(self, calls: list[dict]) -> str:
-        """模型没开口就直接调用会让机器人动的技能时，补一句固定的开场白，保证观众先听到要做什么再看到确认。
+        """模型没开口就直接调用会让机器人动的技能时，补一句固定的开场白，保证用户先听到要做什么再看到确认。
 
-        只补“对观众说的话”，不改动思考链。
+        只补“对用户说的话”，不改动思考链。
         """
         for call in calls:
             try:
@@ -402,7 +402,7 @@ class AgentSession:
                 if not calls:
                     emit({"type": "assistant_end", "id": msg_id})
                     if not nudged and not moved and dangling_promise(content, self.manager.items):
-                        # 只说不做：在后台提醒一次（不显示给观众，本轮结束后从历史中移除）
+                        # 只说不做：在后台提醒一次（不显示给用户，本轮结束后从历史中移除）
                         nudged = True
                         self.history.append({"role": "user", "content": NUDGE, "_nudge": True})
                         continue
@@ -447,7 +447,7 @@ class AgentSession:
                     moved = moved or moves_robot
                     declined = False
                     if moves_robot and not (name == "unload_item" and item.id in approved_items):
-                        emit({**base, "status": "pending", "detail": "等待观众确认"})
+                        emit({**base, "status": "pending", "detail": "等待用户确认"})
                         plan = describe_plan("unload" if name == "unload_item" else "fetch", target)
                         if order:
                             plan.update(_items=[line.model_dump() for line in order.items], _skill=base)
@@ -460,7 +460,7 @@ class AgentSession:
                             if item:
                                 approved_items.add(item.id)
                     if declined:
-                        result = {"ok": False, "declined": True, "error": "观众没有允许执行，本次已取消，机器人没有动"}
+                        result = {"ok": False, "declined": True, "error": "用户没有允许执行，本次已取消，机器人没有动"}
                         emit({**base, "status": "cancelled", "detail": "未获允许"})
                     else:
                         emit({**base, "status": "running"})

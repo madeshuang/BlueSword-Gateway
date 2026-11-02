@@ -76,7 +76,7 @@ function Box({ d, i }: { d: Detection; i: number }) {
   )
 }
 
-/** 执行记录：步骤随机器人实际进展逐条出现（不预先列出整张清单），并标注距任务开始的时间 */
+/** 执行过程：步骤随机器人实际进展逐条出现（不预先列出整张清单），并标注距任务开始的时间 */
 function Timeline({ task }: { task: Task }) {
   const list = useRef<HTMLOListElement>(null)
   useEffect(() => { list.current?.scrollTo({ top: list.current.scrollHeight, behavior: 'smooth' }) }, [task.steps])
@@ -87,7 +87,7 @@ function Timeline({ task }: { task: Task }) {
   return (
     <div className="task">
       <div className="panel-title">
-        执行记录<span className="task-name">{task.title}</span>
+        执行过程<span className="task-name">{task.title}</span>
       </div>
       <ol className="steps" ref={list}>
         {started.map((s) => (

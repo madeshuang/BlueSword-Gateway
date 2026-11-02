@@ -20,7 +20,7 @@ export interface State {
   scanning: boolean
   cameraSrc: string | null
   task: Task | null
-  /** 等待观众允许的机器人动作；null 表示没有弹窗 */
+  /** 等待用户允许的机器人动作；null 表示没有弹窗 */
   confirm: (ConfirmRequest & { receivedAt: number }) | null
   backendMode: BackendMode | 'demo' | 'unknown'
   /** 最近的机器人协议报文 */

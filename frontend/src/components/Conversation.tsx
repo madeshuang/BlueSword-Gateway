@@ -34,7 +34,7 @@ function ThoughtCard({ thoughts, live }: { thoughts: Thought[]; live: boolean })
 }
 
 /**
- * 按可读速度逐字呈现思考链：模型往往一次吐出整段，直接显示观众来不及看。
+ * 按可读速度逐字呈现思考链：模型往往一次吐出整段，直接显示用户来不及看。
  * 基础速度约 30 字/秒；积压过多时加速，避免越落越远。
  */
 const READ_CPS = 30
@@ -174,9 +174,9 @@ function SkillCard({ skill }: { skill: SkillCall }) {
         调用技能 · <b>{skill.title}</b>
         {skill.target && ` · ${skill.target}`}
       </span>
-      {skill.status === 'pending' && <span className="skill-note">等待观众允许…</span>}
+      {skill.status === 'pending' && <span className="skill-note">等待用户允许…</span>}
       {skill.status === 'running' && <span className="skill-note">执行中…</span>}
-      {skill.status === 'cancelled' && <span className="skill-note">观众未允许，已取消</span>}
+      {skill.status === 'cancelled' && <span className="skill-note">用户未允许，已取消</span>}
       {skill.status === 'done' && skill.detail && skill.detail !== '完成' && <span className="skill-note">{skill.detail}</span>}
       {skill.status === 'failed' && skill.detail && <span className="skill-note">{skill.detail}</span>}
     </div>

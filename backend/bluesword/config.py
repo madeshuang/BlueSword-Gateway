@@ -67,7 +67,7 @@ class Settings(BaseModel):
     llm_model: str = "deepseek-flash"
     llm_base_url: str = "https://api.deepseek.com"
     llm_timeout: float = Field(default=90, gt=0)
-    # 机器人动作前等待观众确认的时长（秒），超时视为取消
+    # 机器人动作前等待用户确认的时长（秒），超时视为取消
     confirm_timeout: float = Field(default=60, gt=0)
     # —— 兰剑协议（网关侧，lanjian_http 模式）
     robot_dispatch_url: str = ""  # 机器人接收任务的完整地址，如 http://127.0.0.1:8001/api/task/dispatch
