@@ -101,6 +101,8 @@ def apply_progress(task: TaskRecord, report: Progress) -> bool:
         stage_index=report.stageIndex,
         pick_index=report.pickIndex,
         attempt=attempt,
+        detected_item=report.detection.item if report.detection else None,
+        detected_label=report.detection.label if report.detection else None,
         startedAt=previous.startedAt if previous else task.last_progress_at,
     )
     if previous:
@@ -108,6 +110,34 @@ def apply_progress(task: TaskRecord, report: Progress) -> bool:
     else:
         task.steps.append(step)
     return True
+
+
+def failure_refunds(task: TaskRecord, items: dict) -> dict[str, int] | None:
+    """Temporary onsite policy: use received grasp milestones to settle explicit faults."""
+    remaining = {line.item_id: line.count for line in task.items}
+    grasped = {s.pick_index for s in task.steps if s.id.endswith(':grasped') and s.status == 'done'}
+    total = sum(remaining.values())
+    if len(grasped) >= total:
+        return {}
+    # Later delivery milestones can mean grasp reports were lost; do not refund them.
+    if any(s.id in ('vlm:0:at_delivery', 'vlm:0:placed') and s.status == 'done' for s in task.steps):
+        return None
+    for pick in sorted(grasped):
+        candidates = [key for key, count in remaining.items() if count]
+        product_codes = {items[key].robot_item or items[key].name for key in candidates}
+        if len(product_codes) > 1:
+            observed = next((s for s in task.steps if s.id == f'vlm:{pick}:target_located'), None)
+            if not observed:
+                return None
+            candidates = [key for key in candidates if
+                          (observed.detected_item and observed.detected_item in (key, items[key].robot_item or items[key].name))
+                          or (observed.detected_label and observed.detected_label == items[key].name)]
+            if len(candidates) != 1:
+                return None
+        if not candidates:
+            return None
+        remaining[candidates[0]] -= 1
+    return {key: count for key, count in remaining.items() if count}
 
 
 def completion(task: TaskRecord) -> None:

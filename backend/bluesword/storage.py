@@ -105,6 +105,28 @@ class TaskStore:
             self.db.execute("DELETE FROM reservations WHERE task_id=?", (task_id,))
         return returned
 
+    def auto_refund_stock(self, task_id: str, quantities: dict[str, int]) -> dict[str, int]:
+        returned = {}
+        with self.db:
+            if self.db.execute("SELECT 1 FROM events WHERE task_id=? AND json_extract(payload,'$.type')='automatic_stock_refund'", (task_id,)).fetchone():
+                return returned
+            for item, wanted in quantities.items():
+                row = self.db.execute("SELECT count,generation FROM reservations WHERE task_id=? AND item_id=?", (task_id,item)).fetchone()
+                if not row:
+                    continue
+                count = min(wanted, row[0])
+                if count <= 0:
+                    continue
+                changed = self.db.execute("UPDATE inventory SET count=count+? WHERE item_id=? AND generation=?", (count,item,row[1]))
+                if changed.rowcount:
+                    returned[item] = count
+                self.db.execute("UPDATE reservations SET count=count-? WHERE task_id=? AND item_id=?", (count,task_id,item))
+            self.db.execute("DELETE FROM reservations WHERE task_id=? AND count=0", (task_id,))
+            self.db.execute("INSERT INTO events(task_id,payload) VALUES (?,?)", (task_id,json.dumps({
+                "type": "automatic_stock_refund", "items": returned, "requested": quantities,
+                "basis": "explicit_robot_error_and_received_grasp_reports"})))
+        return returned
+
     def restock(self, items) -> None:
         with self.db:
             for item in items:

@@ -270,6 +270,8 @@ def test_operator_refunds_only_failed_order_once_and_keeps_recovery(gateway, cou
     body = {'task_id': identifier, 'confirmation': '确认本单全部物品仍在货架'}
     assert client.post('/api/operator/refund', json=body).status_code == 403
     assert client.post('/api/operator/refund', headers=headers, json=body).status_code == 409
+    for pick in range(1, count + 1):
+        client.post('/api/task/progress', json=progress(identifier, 'grasped', 3 * pick, pick, total=3 * count + 2))
     client.post('/api/task/error', json={'taskId': identifier, 'message': '抓取失败'})
     final(client, identifier)
     assert client.post('/api/operator/refund', headers=headers, json={**body, 'confirmation': ''}).status_code == 400
@@ -292,6 +294,7 @@ def test_refund_after_restock_does_not_add_stock_again(gateway):
     client, _ = gateway
     before = client.get('/api/inventory').json()
     identifier = start(client, 1)
+    client.post('/api/task/progress', json=progress(identifier, 'grasped', 3, 1, total=5))
     client.post('/api/task/error', json={'taskId': identifier, 'message': '识别失败'})
     final(client, identifier)
     headers = {'X-Operator-Token': 'onsite'}
@@ -300,6 +303,53 @@ def test_refund_after_restock_does_not_add_stock_again(gateway):
         'task_id': identifier, 'confirmation': '确认本单全部物品仍在货架'})
     assert result.status_code == 200 and result.json()['returned'] == {}
     assert client.get('/api/inventory').json() == before
+
+
+@pytest.mark.parametrize('scenario, expected', [
+    ('before_grasp', {'矿泉水': 3, '薯片': 3}),
+    ('after_grasp', {'矿泉水': 2, '薯片': 3}),
+    ('reordered_partial', {'矿泉水': 3, '薯片': 2}),
+    ('same_product_partial', {'矿泉水': 2, '薯片': 3}),
+    ('unknown_partial', {'矿泉水': 2, '薯片': 2}),
+    ('delivery_without_grasp', {'矿泉水': 2, '薯片': 3}),
+])
+def test_fault_stock_follows_received_grasp_reports(gateway, scenario, expected):
+    client, _ = gateway
+    if scenario == 'same_product_partial':
+        identifier = client.post('/api/tasks', json={'items': [{'item_id': 'water', 'count': 2}], 'request_id': scenario}).json()['id']
+    else:
+        identifier = start(client, 2 if scenario in ('reordered_partial', 'unknown_partial') else 1)
+    if scenario == 'reordered_partial':
+        client.post('/api/task/progress', json=progress(identifier, 'target_located', 2, 1,
+                    detection={'item': 'shupian', 'label': '薯片', 'attempt': 1}))
+    if scenario in ('after_grasp', 'reordered_partial', 'same_product_partial', 'unknown_partial'):
+        client.post('/api/task/progress', json=progress(identifier, 'grasped', 3, 1,
+                    total=5 if scenario == 'after_grasp' else 8))
+    if scenario == 'delivery_without_grasp':
+        client.post('/api/task/progress', json=progress(identifier, 'at_delivery', 4, 0, total=5))
+    body = {'taskId': identifier, 'message': '执行失败'}
+    assert client.post('/api/task/error', json=body).json()['success']
+    failed = final(client, identifier)
+    stock = client.get('/api/inventory').json()
+    assert {key: stock[key] for key in expected} == expected
+    assert failed['recovery_required'] and failed['completion_note']
+    assert not client.post('/api/task/error', json=body).json()['success']
+    assert client.get('/api/inventory').json() == stock
+    if scenario == 'before_grasp':
+        result = client.post('/api/operator/refund', headers={'X-Operator-Token': 'onsite'}, json={
+            'task_id': identifier, 'confirmation': '确认本单全部物品仍在货架'})
+        assert result.json()['returned'] == {}
+        assert client.get('/api/inventory').json() == stock
+
+
+def test_timeout_keeps_reservation_until_explicit_error_arrives(gateway):
+    client, _ = gateway
+    client.app.state.manager.settings.remote_task_timeout = 0.02
+    identifier = start(client, 1)
+    assert final(client, identifier)['error']['code'] == 'result_timeout'
+    assert client.get('/api/inventory').json()['矿泉水'] == 2
+    assert client.post('/api/task/error', json={'taskId': identifier, 'message': '抓取失败'}).json()['success']
+    assert client.get('/api/inventory').json()['矿泉水'] == 3
 
 
 def test_same_robot_product_in_two_display_slots_is_one_wire_line(gateway):
