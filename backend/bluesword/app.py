@@ -193,7 +193,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         queue = bus.subscribe()
         session = app.state.agent.session(owner) if app.state.agent else None
         turn: asyncio.Task | None = None
-        # 机器人动作前的确认：id → 等待观众答复的 future
+        # 机器人动作前的确认：id → 等待用户答复的 future
         pending: dict[str, tuple[asyncio.Future, dict]] = {}
         muted_tasks: set[str] = set()
 
@@ -258,7 +258,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if reason != "updated":
                     return bool(approved)
                 if plan.get("_skill"):
-                    emit({**plan["_skill"], "target": plan["target"], "status": "pending", "detail": "等待观众确认"})
+                    emit({**plan["_skill"], "target": plan["target"], "status": "pending", "detail": "等待用户确认"})
                 say(f"好，这单改为{plan['target']}，确认后我再出发。")
 
         def answer_confirm(identifier: str | None, approved: bool) -> bool:

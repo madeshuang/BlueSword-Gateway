@@ -4,7 +4,7 @@ import { IconRobot } from './Icons'
 
 /**
  * 机器人动作前的确认条：停靠在输入框位置，一行问题 + 右侧两个选项（类似 Codex 的执行确认）。
- * 观众允许后才执行；超时由后端按“取消”处理。
+ * 用户允许后才执行；超时由后端按“取消”处理。
  */
 export function ConfirmBar({
   request,

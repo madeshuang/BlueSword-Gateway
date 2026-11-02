@@ -6,7 +6,9 @@ React 前端 + Python/FastAPI 后端，负责语音对话、整单确认、任�
 
 ## 安装与启动
 
-当前版本使用 **npm + uv**，分别按 `frontend/package-lock.json` 和 `backend/uv.lock` 安装。准备 Node.js 24（当前前端要求 `^20.19.0` 或 `>=22.12.0`）、npm、uv、Python 3.12，以及启动脚本使用的 Bash、curl、lsof。SQLite 无需单独部署；模拟模式无需真实机器人或厂商 SDK。
+当前版本使用 **npm + uv**，分别按 `frontend/package-lock.json` 和 `backend/uv.lock` 安装。准备 Node.js 24（当前前端要求 `^20.19.0` 或 `>=22.12.0`）、npm、uv、Python 3.12；使用 Bash 一键脚本时还需 Bash、curl、lsof。SQLite 无需单独部署；模拟模式无需真实机器人或厂商 SDK。
+
+Windows 可以原生使用 PowerShell，见下方“Windows 原生安装与启动”。WSL2 是运行现有 Bash 一键脚本的可选方式：选择 WSL2 时，需在 WSL 内安装依赖，并核对 Windows 到 WSL 的端口访问；连接真实机器人时还需确保机器人能访问网关回调地址。下方标为 `bash` 的命令用于 Linux／WSL2，不能直接粘贴到 PowerShell。
 
 ### 首次安装
 
@@ -18,7 +20,50 @@ uv python install 3.12
 (cd backend && uv sync --locked --python 3.12 --extra dev)
 ```
 
-需要大模型时，在 `backend/.env` 配置 `DEEPSEEK_API_KEY`，可选 `DEEPSEEK_MODEL=deepseek-flash`，并执行 `chmod 600 backend/.env`。后端依次读取 `backend/.env`、根目录 `.env`，已有环境变量优先；修改后需重启服务。没有模型 Key 时使用规则路由。配置项见 [backend/.env.example](backend/.env.example)，不要提交真实 `.env`。
+### 首次配置
+
+在项目根目录执行；已有文件会保留，请按示例补充配置：
+
+```bash
+if [ ! -f backend/.env ]; then cp backend/.env.example backend/.env; fi
+chmod 600 backend/.env
+```
+
+编辑 `backend/.env`：文字 AI 填 `DEEPSEEK_API_KEY`；语音识别和播报填 `DASHSCOPE_API_KEY`；本地演示保留 `BLUESWORD_ROBOT_MODE=mock`。连接真机时再按下文填写模式、协议、发单地址和工作人员口令。
+
+旧版配置请按新示例逐项核对：旧 `BOOTH_*`、`OPENAI_*`、`TENCENT_*` 配置多数不再读取（工作人员口令 `BOOTH_OPERATOR_TOKEN` 仍兼容），不要直接沿用旧文件作为完整配置。
+
+配置统一填写在 `backend/.env`，已有进程环境变量优先；修改后需重启服务。模型默认 `deepseek-flash`，可用 `DEEPSEEK_MODEL` 调整；没有模型 Key 时使用规则路由。配置项见 [backend/.env.example](backend/.env.example)，不要提交真实 `.env`。
+
+### Windows 原生安装与启动
+
+安装 Windows 版 Git、Node.js 24 和 uv 后，在项目根目录打开 PowerShell。以下命令按顺序执行，任一步报错时先处理错误：
+
+```powershell
+uv python install 3.12
+npm.cmd ci --prefix frontend
+npm.cmd run build --prefix frontend
+uv sync --locked --project backend --python 3.12 --extra dev
+if (-not (Test-Path backend/.env)) { Copy-Item backend/.env.example backend/.env }
+notepad.exe backend/.env
+```
+
+按“首次配置”填写并保存。内部模拟体验时保留 `BLUESWORD_ROBOT_MODE=mock`；从项目根目录启动：
+
+```powershell
+Set-Location backend
+uv run --locked uvicorn bluesword.app:app --host 127.0.0.1 --port 8000 --workers 1
+```
+
+打开 <http://127.0.0.1:8000>，按 `Ctrl+C` 停止。连接真实机器人时，先停止模拟服务，按下方“连接真实机器人”填写 `backend/.env`，在 `backend` 目录运行：
+
+```powershell
+uv run --locked uvicorn bluesword.app:app --host 0.0.0.0 --port 8000 --workers 1
+```
+
+现场需允许机器人通过 Windows 防火墙访问网关 8000 端口，并使用网关电脑实际局域网地址配置回调。PowerShell 临时环境变量语法为 `$env:变量名="值"`，会优先于 `.env`；切换场景前用 `Remove-Item Env:变量名` 清除先前的临时覆盖。关闭启动终端前先按 `Ctrl+C`。
+
+需要使用现有 VLM 双服务或 Blender 一键脚本时，可选择 WSL2 按相应 Bash 步骤运行。
 
 ### 选择启动方式
 
@@ -176,7 +221,7 @@ npm run dev
 
 - Key 放在 `backend/.env`（已加入 `.gitignore`，权限 600）：`DEEPSEEK_API_KEY=...`，可选 `DEEPSEEK_MODEL=deepseek-flash`。真实环境变量优先。
 - 系统提示词：`backend/bluesword/prompts/system.md`（人设、话术长度、物品规则、失败时如何表述）。物品清单由当前加载的目录自动注入（VLM 默认使用 `config/booth-catalog.example.json`，内部模拟默认使用 `scene.json`）。
-- 默认动作是 **整单取物 `fetch_items`**：最多两件，同种两件或两种各一件；一次确认、一次任务，不按观众或会话限次。
+- 默认动作是 **整单取物 `fetch_items`**：最多两件，同种两件或两种各一件；一次确认、一次任务，不按用户或会话限次。
 - 等待确认时可以继续说话修改整单：先说“来一个饼干”，再说“再来一个薯片”，原确认卡片会更新为各一件，无需先取消。原单只有一种物品时，“再来一个”追加同种；原单有两种时会先询问想加哪种。“改成两包薯片”替换整单，“饼干不要了”从多种物品中去掉饼干；只剩一种时说“取消”取消整单。超量或含糊的修改会保留原清单并提示。修改后需重新确认，旧卡片的确认不再有效；已经确认下发的任务不能追加。
 - 以下取货／卸货分拆技能仅在 `BLUESWORD_SPLIT_SKILLS=true` 时启用；现场接口未约定拆分，请保持关闭。技能目录：`backend/bluesword/skills.py`。技能 = 步骤的有序组合，步骤 = GDK 原语的组合：
   - **取货 `pick_item`**：导航 → 精确停靠 → 扫描 → 三维定位 → 横移对齐 → 抓取验证 → 抬起收臂（结束时持物）
@@ -289,6 +334,21 @@ BLUESWORD_SCENARIO=grasp_failure uv run uvicorn bluesword.app:app --host 127.0.0
 
 | 变量 | 默认值 / 说明 |
 | --- | --- |
+| `DEEPSEEK_API_KEY` / `DEEPSEEK_MODEL` | Key 留空时使用规则路由；模型默认 `deepseek-flash` |
+| `BLUESWORD_LLM_BASE_URL` | `https://api.deepseek.com`；自定义服务须兼容当前 Chat Completions、工具调用和 `reasoning_effort` 请求，不直接沿用旧 Responses 中转配置 |
+| `BLUESWORD_LLM_TIMEOUT` | `90` 秒，模型请求超时；不是整轮多次模型调用的总时限 |
+| `BLUESWORD_LLM_REASONING_EFFORT` / `BLUESWORD_LLM_REVIEW_EFFORT` | 常规思考 `high`，技能结果复盘 `max`；均可选 `low` / `high` / `max` |
+| `DASHSCOPE_API_KEY` / `DASHSCOPE_WORKSPACE_ID` | 阿里百炼北京地域 Key；工作空间可选，用于识别；需开通识别及播报模型，Key 留空仍可打字 |
+| `BLUESWORD_SPEECH_MODEL` | `qwen-audio-3.1-asr-flash-message`，语音识别模型 |
+| `BLUESWORD_TTS_MODEL` / `BLUESWORD_TTS_VOICE` | `qwen3-tts-flash` / `Cherry`，播报模型与音色 |
+| `BLUESWORD_CONFIRM_TIMEOUT` | `60` 秒，等待用户确认；超时取消尚未下发的请求 |
+| `BLUESWORD_ROBOT_TIMEOUT` | `8` 秒，机器人健康查询及接单请求超时 |
+| `BLUESWORD_REMOTE_TASK_TIMEOUT` | `300` 秒，接单后等待最终结果；超时需现场核对，不代表机器人停止，不自动退库存 |
+| `BLUESWORD_ROBOT_PROTOCOL` | 代码默认 `v1`，示例显式设为 `vlm`；现场使用 `vlm` |
+| `BLUESWORD_ROBOT_DISPATCH_URL` | 现场必填，完整发单地址，例如 `http://<机器人IP>:8080/api/task/dispatch` |
+| `BLUESWORD_CATALOG_PATH` | VLM 留空使用项目内示例目录；自定义建议绝对路径，重启生效 |
+| `BLUESWORD_SPLIT_SKILLS` | `false`；现场保持完整取送任务，拆分仅用于已确认支持的演示 |
+| `BLUESWORD_OPERATOR_TOKEN` | 工作人员恢复接单和补货的口令；留空不开放操作，与网页访问 token 分开 |
 | `BLUESWORD_ROBOT_MODE` | `mock`；Blender 联动为 `gdk_mock`；现场 HTTP 对接为 `lanjian_http`；直接 GDK 为 `gdk` |
 | `BLUESWORD_SIMULATION_SPEED` | `1`；仅控制 GDK 模拟联动的动作播放速度 |
 | `BLUESWORD_DRIVER_FACTORY` | 可选；真实模式默认 `bluesword.gdk_v223:create_driver` |
@@ -305,13 +365,27 @@ BLUESWORD_SCENARIO=grasp_failure uv run uvicorn bluesword.app:app --host 127.0.0
 
 默认只监听本机。展台内网部署时按实际终端设置监听地址、允许来源和访问 token。
 
+所有上述超时单位均为**秒**。进程环境中的同名变量优先于 `backend/.env`；`BLUESWORD_LLM_API_KEY`、`BLUESWORD_LLM_MODEL`、`BLUESWORD_SPEECH_API_KEY`、`BLUESWORD_SPEECH_WORKSPACE` 如有设置，优先于对应的 `DEEPSEEK_*` / `DASHSCOPE_*` 别名。避免同时配置两套同用途变量。
+
+### 可选：网页访问 token
+
+默认留空。启用时在 `backend/.env` 设置 `BLUESWORD_API_TOKEN`，并在本机 `frontend/.env.local` 设置同一 token 的 WebSocket 地址，例如：
+
+```dotenv
+VITE_AGENT_WS=ws://127.0.0.1:8000/ws?token=<经过URL编码的网页访问token>
+```
+
+地址必须能从使用网页的电脑访问；跨电脑访问请改为网关实际地址，HTTPS 页面使用 `wss://`。然后在项目根目录运行 `npm run build --prefix frontend`、重启后端并刷新页面；开发模式则重启 Vite。`VITE_*` 在构建时写入网页，之后只改后端配置不会更新它。网页从该地址读取 token，用于 WebSocket 和 HTTP API；仅设置后端 token 会导致默认网页无法连接。
+
+此 token 会出现在浏览器及构建产物中，只用于受控部署的网页访问，不要复用供应商 Key 或工作人员口令；不要提交 `frontend/.env.local`。跨源访问时，将页面来源加入 `BLUESWORD_ALLOWED_ORIGINS` 的 JSON 数组。机器人 VLM 回调不使用此 token；本机协议模拟脚本会将网页 token 置空，测试时也应使用不含 token 的本机前端地址。
+
 ## 现场 HTTP 对接与人工核对
 
 现场以机器人团队提供的 **VLM HTTP v1.2** 对接，设置 `BLUESWORD_ROBOT_PROTOCOL=vlm`，详见 [接口文档](docs/接口文档.md)。同时配置 `BLUESWORD_ROBOT_MODE=lanjian_http` 和 `BLUESWORD_ROBOT_DISPATCH_URL`。VLM 模式默认读取项目内的 `config/booth-catalog.example.json`，也可以用 `BLUESWORD_CATALOG_PATH` 指定另一份目录。
 
 目录格式参考 [物品目录示例](config/booth-catalog.example.json)：`id` 为网关标识，`name` 为显示名称，`initialStock` 为初始及补满数量；可选 `robotItem` 填机器人实际支持的中文名或内部编码，未填则使用 `name`；`aliases` 填日常说法，如 `["奥利奥", "饼干"]`，供规则识别及确认期间的修改使用。当前示例沿用原目录的十种物品，`robotItem` 暂用原 `id`（如 `shupian`），现场仍需核对机器人是否支持这些编码。替换这份 JSON 后，等当前任务结束并完成必要的现场核对，再重启后端、刷新页面即可生效，不需要改代码或重新构建前端。它不是运行中热加载。同一商品保持 `id` 不变，库存会保留；新商品使用新 `id`。修改 `initialStock` 只改变新商品的初始库存和之后的补满数量，不自动给已有商品补货。旧目录的 `maxCount` 不改变每单最多两件的规则。VLM 的 `location` 只用于日志，可以不填；旧 v1 模式要求现场确认的位置。路径相对启动目录，建议用绝对路径。
 
-VLM 发单携带任务编号，先查 `/api/health`，接收真实进度和带框的 JPEG 识别照片，复用现有“执行记录”和“布鲁的视野”。两件任务按实际回报顺序显示；重复进度不加行，新的识别尝试更新照片，跳号不补造动作。照片不是实时视频。只有最终完成通知才结束任务；双件任务如果缺少足够的数量依据，会请现场核对，避免把只送回一件说成两件全部送达。
+VLM 发单携带任务编号，先查 `/api/health`，接收真实进度和带框的 JPEG 识别照片，复用现有“执行过程”和“布鲁的视野”。两件任务按实际回报顺序显示；重复进度不加行，新的识别尝试更新照片，跳号不补造动作。照片不是实时视频。只有最终完成通知才结束任务；双件任务如果缺少足够的数量依据，会请现场核对，避免把只送回一件说成两件全部送达。
 
 兼容设置仍保留：`v1` 为旧完整任务接口（默认值，不携带编号），`progress` 为圣涵原提案模拟协议。两者均不是 VLM v1.2；现场需显式选择 `vlm`。本次只接收机器人团队已经提供的进度和照片，不修改机器人运动或增加机器人侧埋点。
 
@@ -323,7 +397,7 @@ VLM 发单携带任务编号，先查 `/api/health`，接收真实进度和带�
 
 配置 `DASHSCOPE_API_KEY`，可选 `DASHSCOPE_WORKSPACE_ID`；识别默认沿用原 main 的 `qwen-audio-3.1-asr-flash-message`，播报默认 `qwen3-tts-flash` / `Cherry`。可通过 `BLUESWORD_SPEECH_MODEL`、`BLUESWORD_TTS_MODEL`、`BLUESWORD_TTS_VOICE` 调整。
 
-首页保留“你好，布鲁”提示。首次打开网页仍需先点击麦克风或“开启语音”，授权并看到“我在听”后再说话；未开启麦克风时只喊唤醒词不会生效。只说“你好，布鲁”会进入聆听对话并显示“我在，接着说吧”，接着说请求即可，不需要先打字。说完停顿会提交识别；20 秒无交互后进入唤醒待机，说“你好，布鲁”可继续，也可以一句话连着说请求。点右上角“停止收音”会关闭麦克风及唤醒监听、丢弃尚未提交的识别，并停止当前播放；按钮变回“开启语音”后不会继续录背景声音。已经提交的对话或机器人任务不会被取消。“播报开／关”单独控制之后的回复朗读。只播报对观众的回复，不朗读思考。播报与模型处理期间暂停收音，避免把自身声音识别为新请求；网页不能在未经浏览器授权时自动打开麦克风。部署在其他电脑访问时需要 HTTPS；localhost 可直接测试。
+首页保留“你好，布鲁”提示。首次打开网页仍需先点击麦克风或“开启语音”，授权并看到“我在听”后再说话；未开启麦克风时只喊唤醒词不会生效。只说“你好，布鲁”会进入聆听对话并显示“我在，接着说吧”，接着说请求即可，不需要先打字。说完停顿会提交识别；20 秒无交互后进入唤醒待机，说“你好，布鲁”可继续，也可以一句话连着说请求。点右上角“停止收音”会关闭麦克风及唤醒监听、丢弃尚未提交的识别，并停止当前播放；按钮变回“开启语音”后不会继续录背景声音。已经提交的对话或机器人任务不会被取消。“播报开／关”单独控制之后的回复朗读。只播报对用户的回复，不朗读思考。播报与模型处理期间暂停收音，避免把自身声音识别为新请求；网页不能在未经浏览器授权时自动打开麦克风。部署在其他电脑访问时需要 HTTPS；localhost 可直接测试。
 
 语音识别本身不发单：识别文本进入同一对话流程，仍使用原有允许／取消条确认整单。语音故障会显示在对话里，可重新点麦克风或继续打字。若再次出现“语音刚才没接上”，记下时间及当时使用的启动方式；后端日志中的 `speech_asr_failed` 记录异常类型和耗时，不记录音频、识别内容或密钥。音频不写入数据库，Key 不发送到前端；待机状态下检测到的说话声会送云端判断是否包含唤醒词，不是离线唤醒。
 

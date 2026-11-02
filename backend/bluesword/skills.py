@@ -91,7 +91,7 @@ SKILLS: dict[SkillName, Skill] = {
     "unload": Skill(
         "unload",
         "卸货",
-        "带着物品回到递物点 → 递出 → 确认观众接稳后松爪 → 收臂",
+        "带着物品回到递物点 → 递出 → 确认用户接稳后松爪 → 收臂",
         UNLOAD_STEPS,
         requires_holding=True,
         leaves_holding=False,

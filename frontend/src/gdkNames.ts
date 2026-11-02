@@ -1,4 +1,4 @@
-// GDK 接口 → 观众能看懂的中文能力名（大屏不显示英文函数名；原始接口名仍保留在数据里）
+// GDK 接口 → 用户能看懂的中文能力名（大屏不显示英文函数名；原始接口名仍保留在数据里）
 const GDK_ZH: Record<string, string> = {
   'Pnc.normal_navi': '底盘导航',
   'Pnc.high_precision_navi': '高精度停靠',
