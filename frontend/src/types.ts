@@ -97,7 +97,7 @@ export interface Task {
 export type ServerEvent =
   | { type: 'voice_status'; session_id?: string; mode: 'local'; enabled: boolean; active: boolean; tts: boolean; status: string; phase: string; error: string }
   | { type: 'wake' }
-  | { type: 'phase'; phase: Phase }
+  | { type: 'phase'; phase: Phase; task_id?: string }
   | { type: 'asr'; text: string; final: boolean }
   | { type: 'assistant_start'; id: string }
   | { type: 'thought'; id: string; thought: Thought }
@@ -109,13 +109,13 @@ export type ServerEvent =
   | ({ type: 'confirm_request' } & ConfirmRequest)
   | { type: 'confirm_refresh'; id: string; timeout_s: number }
   | { type: 'confirm_closed'; id: string; reason: 'approved' | 'declined' | 'timeout' | 'cancelled' | 'updated' }
-  | { type: 'vision'; detections?: Detection[]; caption?: string; scanning?: boolean }
-  | { type: 'camera'; src: string | null }
+  | { type: 'vision'; detections?: Detection[]; caption?: string; scanning?: boolean; task_id?: string }
+  | { type: 'camera'; src: string | null; task_id?: string }
   | { type: 'task'; task: Task | null }
   | { type: 'task_step'; id: string; status: StepStatus; detail?: string; gdk?: string[]; at?: number }
   | { type: 'device'; online: boolean; name: string }
   | { type: 'backend'; mode: BackendMode; show_camera?: boolean; boot_id?: string; recovery_required: boolean; glossary?: Record<string, string> }
-  | { type: 'session_end' }
+  | { type: 'session_end'; task_id?: string | null }
 
 export type ClientEvent =
   | { type: 'text_input'; text: string; request_id?: string }
