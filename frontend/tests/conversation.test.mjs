@@ -22,6 +22,9 @@ test('PCM is mono 16 kHz little endian with clipping', () => {
 })
 
 test('wake phrase preserves the order and ignores unrelated conversation', () => {
+  assert.equal(wakeCommand('Hello, Blue! Bring me a bottle of water.'), 'Bring me a bottle of water.')
+  assert.equal(wakeCommand('HELLO BLUE.'), '')
+  assert.equal(wakeCommand('Hello blueberry'), null)
   assert.equal(wakeCommand('你好，布鲁，拿两瓶矿泉水。'), '拿两瓶矿泉水。')
   assert.equal(wakeCommand('你好布噜'), '')
   assert.equal(wakeCommand('你好 Blue，查询库存'), '查询库存')

@@ -54,7 +54,8 @@ class TaskManager:
                 raise ValueError("物品目录必须是非空数组")
             self.items = {}
             for row in raw:
-                item = Item(id=row["id"], name=row["name"], aliases=[row["name"], *row.get("aliases", [])],
+                item = Item(id=row["id"], name=row["name"], name_en=row.get("nameEn", ""),
+                            aliases_en=row.get("aliasesEn", []), aliases=[row["name"], *row.get("aliases", [])],
                             location=row.get("location", ""), robot_item=row.get("robotItem", row["name"]), box=(0, 0, 0.1, 0.1), stock=row["initialStock"], category=row["category"])
                 if item.id in self.items:
                     raise ValueError(f"物品目录 id 重复：{item.id}")

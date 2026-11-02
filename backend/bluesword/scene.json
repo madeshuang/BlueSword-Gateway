@@ -5,12 +5,12 @@
     "handover": {"name": "递物点", "map_id": "demo-exhibition", "x": 0.0, "y": 0.0, "yaw": 0.0}
   },
   "items": [
-    {"id": "poker", "name": "扑克牌", "aliases": ["扑克", "扑克牌"], "box": [0.16, 0.2, 0.09, 0.13], "category": "日用品"},
-    {"id": "tissue", "name": "纸巾", "aliases": ["纸巾", "抽纸"], "box": [0.52, 0.19, 0.2, 0.14], "category": "日用品"},
-    {"id": "oreo", "name": "奥利奥", "aliases": ["奥利奥", "饼干"], "box": [0.12, 0.47, 0.22, 0.15], "category": "零食饮料"},
-    {"id": "yogurt1", "name": "安慕希", "aliases": ["安慕希", "酸奶"], "box": [0.44, 0.42, 0.09, 0.2], "category": "零食饮料"},
-    {"id": "yogurt2", "name": "安慕希", "aliases": [], "box": [0.65, 0.42, 0.09, 0.2], "category": "零食饮料"},
-    {"id": "water", "name": "矿泉水", "aliases": ["矿泉水", "纯净水", "瓶水"], "box": [0.16, 0.73, 0.07, 0.18], "category": "零食饮料"},
-    {"id": "chips", "name": "薯片", "aliases": ["薯片"], "box": [0.46, 0.75, 0.2, 0.16], "category": "零食饮料"}
+    {"id": "poker", "name": "扑克牌", "aliases": ["扑克", "扑克牌"], "box": [0.16, 0.2, 0.09, 0.13], "category": "日用品", "name_en": "playing cards", "aliases_en": ["playing cards", "cards", "a deck of cards"]},
+    {"id": "tissue", "name": "纸巾", "aliases": ["纸巾", "抽纸"], "box": [0.52, 0.19, 0.2, 0.14], "category": "日用品", "name_en": "tissues", "aliases_en": ["tissues", "tissue", "tissue paper"]},
+    {"id": "oreo", "name": "奥利奥", "aliases": ["奥利奥", "饼干"], "box": [0.12, 0.47, 0.22, 0.15], "category": "零食饮料", "name_en": "Oreo cookies", "aliases_en": ["oreos", "oreo", "cookies", "cookie", "biscuits", "biscuit", "oreo cookies"]},
+    {"id": "yogurt1", "name": "安慕希", "aliases": ["安慕希", "酸奶"], "box": [0.44, 0.42, 0.09, 0.2], "category": "零食饮料", "name_en": "Ambrosial yogurt", "aliases_en": ["yogurt", "yoghurt", "ambrosial", "ambrosial yogurt"]},
+    {"id": "yogurt2", "name": "安慕希", "aliases": [], "box": [0.65, 0.42, 0.09, 0.2], "category": "零食饮料", "name_en": "Ambrosial yogurt", "aliases_en": []},
+    {"id": "water", "name": "矿泉水", "aliases": ["矿泉水", "纯净水", "瓶水"], "box": [0.16, 0.73, 0.07, 0.18], "category": "零食饮料", "name_en": "bottled water", "aliases_en": ["water", "mineral water", "bottled water", "waters"]},
+    {"id": "chips", "name": "薯片", "aliases": ["薯片"], "box": [0.46, 0.75, 0.2, 0.16], "category": "零食饮料", "name_en": "potato chips", "aliases_en": ["chips", "crisps", "potato chips", "lays", "lay's chips"]}
   ]
 }

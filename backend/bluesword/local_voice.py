@@ -12,6 +12,7 @@ import uuid
 from fastapi import WebSocketDisconnect
 
 from . import speech
+from .language import language_of
 from .service import EventBus
 from .wake import RATE, AudioGate, SherpaWake, command_text
 
@@ -83,10 +84,10 @@ class LocalVoice:
 
     def status(self):
         labels = {
-            "stopped": "本地监听已暂停", "starting": "正在准备本地唤醒…",
-            "standby": "本地待唤醒 · 说“你好，布鲁”", "listening": "我在听，说完稍等一下",
-            "recognizing": "正在识别这句话…", "thinking": "正在处理，请稍候",
-            "speaking": "正在播报…", "error": self.error,
+            "stopped": "本地监听已暂停 · Paused", "starting": "正在准备本地唤醒 · Starting…",
+            "standby": "本地待唤醒 · 你好，布鲁 / Hello Blue", "listening": "我在听 · Listening…",
+            "recognizing": "正在识别 · Recognizing…", "thinking": "正在处理 · Please wait…",
+            "speaking": "正在播报 · Speaking…", "error": self.error,
         }
         return {"mode": "local", "enabled": self.enabled, "tts": self.tts,
                 "phase": self.phase,
@@ -197,7 +198,8 @@ class LocalVoice:
 
     async def _recognize(self, pcm):
         try:
-            text = command_text(await speech.recognize(pcm, self.settings))
+            recognized = await speech.recognize(pcm, self.settings)
+            text = command_text(recognized)
             if not self.enabled:
                 return
             self.gate.activate()
@@ -211,6 +213,13 @@ class LocalVoice:
                                                  "request_id": uuid.uuid4().hex}))
             else:
                 self.output.emit({"type": "wake"})
+                if recognized.strip():
+                    identifier = uuid.uuid4().hex
+                    greeting = "I'm listening. How can I help?" if language_of(recognized) == "en" else "我在，请说。"
+                    for event in ({"type": "assistant_start", "id": identifier},
+                                  {"type": "assistant_delta", "id": identifier, "text": greeting},
+                                  {"type": "assistant_end", "id": identifier}):
+                        await self.send_json(event)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

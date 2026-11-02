@@ -22,6 +22,7 @@ from pydantic import ValidationError
 
 from .config import Settings
 from .domain import RobotError, TaskRecord, TaskRequest
+from .language import item_label, language_of, order_label
 from .service import TaskManager
 from .skills import SKILLS
 
@@ -31,14 +32,16 @@ PROMPT_PATH = Path(__file__).with_name("prompts") / "system.md"
 MAX_ROUNDS = 6
 
 # 嘴上说了要去拿（或请用户点允许），却没有真正调用取货
-PROMISE = re.compile(r"点一下允许|点允许|这就去|马上去|我去(帮你|给你)?拿|去(帮你|给你)拿|这就给你拿|马上出发")
+PROMISE = re.compile(r"点一下允许|点允许|这就去|马上去|我去(帮你|给你)?拿|去(帮你|给你)拿|这就给你拿|马上出发"
+                     r"|\bi(?:'ll| will)\s+(?:go (?:and )?)?(?:fetch|bring|get)\b|\b(?:tap|click) (?:allow|confirm)\b", re.I)
 def dangling_promise(content: str, items: dict) -> bool:
     """回复里有一句“我这就去拿某样东西”式的承诺（点名了具体物品、且不是问句），但这一轮没有真的去取货。"""
-    names = {item.name for item in items.values()} | {a for item in items.values() for a in item.aliases}
+    names = {name.casefold() for item in items.values()
+             for name in [item.name, item.name_en, *item.aliases, *item.aliases_en] if name}
     for sentence, end in re.findall(r"([^。！？!?]+)([。！？!?]?)", content or ""):
         if end in ("？", "?") or "哪" in sentence:
             continue  # 问用户“要哪样”不是承诺
-        if PROMISE.search(sentence) and any(name in sentence for name in names):
+        if PROMISE.search(sentence) and any(name in sentence.casefold() for name in names):
             return True
     return False
 
@@ -52,10 +55,20 @@ Confirm = Callable[[dict], Awaitable[bool]]
 SAFETY_NOTE = "执行期间请与机器人保持一米以上距离；需要停下时，请现场同事帮忙。"
 
 
-def describe_plan(skill: str, item_name: str) -> dict:
+def describe_plan(skill: str, item_name: str, language="zh") -> dict:
     """Text for the pre-motion confirmation dialog."""
+    if language == "en":
+        return {
+            "language": "en", "title": "Confirm robot task",
+            "skill": "Deliver" if skill == "unload" else "Fetch and deliver", "target": item_name,
+            "message": f"Allow Blue to {'deliver' if skill == 'unload' else 'fetch and deliver'} {item_name}?",
+            "steps": (["Return to delivery point", "Hand over items"] if skill == "unload"
+                      else ["Go to shelf", "Identify and pick items", "Deliver items"]),
+            "note": "Keep at least one metre away during motion. Ask on-site staff if the robot needs to stop.",
+        }
     if skill == "unload":
         return {
+            "language": "zh",
             "title": "机器人即将执行",
             "skill": "卸货",
             "target": item_name,
@@ -64,6 +77,7 @@ def describe_plan(skill: str, item_name: str) -> dict:
             "note": SAFETY_NOTE,
         }
     return {
+        "language": "zh",
         "title": "机器人即将执行",
         "skill": "取货 → 卸货",
         "target": item_name,
@@ -185,7 +199,8 @@ def system_prompt(manager: TaskManager, health: dict | None = None) -> str:
         spots = "、".join(i.location or shelf_position(i.box) for i in same)
         alias = "、".join(a for a in item.aliases if a != item.name)
         count = f"，共 {len(same)} 件" if len(same) > 1 else ""
-        lines.append(f"- {item.name}（{item.category}）：{spots}{count}" + (f"；用户也可能叫它{alias}" if alias else ""))
+        english = f"；英文名称：{item.name_en}；英文别称：{', '.join(item.aliases_en)}" if item.name_en else ""
+        lines.append(f"- {item.name}（{item.category}）：{spots}{count}" + (f"；用户也可能叫它{alias}" if alias else "") + english)
     held = manager.items[manager.held_item_id].name if manager.held_item_id else None
     health = health or {}
     state = [
@@ -253,9 +268,11 @@ class AgentSession:
         self.tools = build_tools(manager)
         self.order_attempted = False
         self.request_id = ""
+        self.language = "zh"
 
     def reset(self) -> None:
         self.history.clear()
+        self.language = "zh"
 
     async def _tool(self, name: str, args: dict) -> dict:
         manager = self.manager
@@ -312,13 +329,18 @@ class AgentSession:
             if call["name"] == "fetch_items":
                 try:
                     request = TaskRequest(items=args.get("items", []), request_id="preview")
-                    target = self.manager.order_label(request.items)
-                    return f"好嘞，这单是{target}，请在屏幕上点一下允许。"
+                    target = order_label(request.items, self.manager.items, self.language)
+                    return (f'The order is {target}. Say "yes" or tap Confirm to let me fetch it.'
+                            if self.language == "en" else f"好嘞，这单是{target}，请在屏幕上点一下允许。")
                 except (ValidationError, KeyError):
                     continue
             if call["name"] == "pick_item" and args.get("item_id") in self.manager.items:
+                if self.language == "en":
+                    return f'Please confirm that I may fetch {item_label(self.manager.items[args["item_id"]], "en")}. Say "yes" or tap Confirm.'
                 return f"好嘞，我去帮你拿{self.manager.items[args['item_id']].name}，请在屏幕上点一下允许。"
             if call["name"] == "unload_item" and self.manager.held_item_id:
+                if self.language == "en":
+                    return "The robot reports a successful pick. I'll bring the item to the delivery point."
                 return f"{self.manager.items[self.manager.held_item_id].name}拿到了，我这就给你送过来。"
         return ""
 
@@ -365,6 +387,7 @@ class AgentSession:
     async def turn(self, text: str, emit: Emit, confirm: Confirm, request_id: str | None = None) -> None:
         """One user turn. Every robot-moving skill waits for confirm(plan) to return True."""
         self.request_id = request_id or uuid.uuid4().hex
+        self.language = language_of(text, self.language)
         self.order_attempted = False
         approved_items: set[str] = set()  # 本轮已获允许的物品：取货时的确认同时覆盖紧接着的卸货
         nudged = moved = False
@@ -377,7 +400,9 @@ class AgentSession:
                     health = await self.manager.bundle.robot.health()
                 except Exception:
                     health = {}
-                messages = [{"role": "system", "content": system_prompt(self.manager, health)}]
+                language_instruction = ("\n本轮对用户的回复必须使用英语，物品名称也使用英语；工具参数仍使用清单中的原始 ID。"
+                                        if self.language == "en" else "\n本轮请用简体中文对用户回复。")
+                messages = [{"role": "system", "content": system_prompt(self.manager, health) + language_instruction}]
                 # 以下划线开头的是内部标记，不发给模型接口
                 messages += [{k: v for k, v in m.items() if not k.startswith("_")} for m in self.history]
                 # 拿到技能结果后的那一轮用更高的思考强度复盘机器人回报；决策轮保持默认强度
@@ -438,7 +463,7 @@ class AgentSession:
                     item = self.manager.items.get(args.get("item_id", "")) if name == "pick_item" else None
                     if name == "unload_item" and self.manager.held_item_id:
                         item = self.manager.items.get(self.manager.held_item_id)
-                    target = self.manager.order_label(order.items) if order else item.name if item else ""
+                    target = order_label(order.items, self.manager.items, self.language) if order else item_label(item, self.language) if item else ""
                     if name == "check_inventory":
                         target = args.get("category") or "全部"
                     base = {"type": "skill", "id": msg_id, "call_id": call["id"], "name": name,
@@ -448,14 +473,14 @@ class AgentSession:
                     declined = False
                     if moves_robot and not (name == "unload_item" and item.id in approved_items):
                         emit({**base, "status": "pending", "detail": "等待用户确认"})
-                        plan = describe_plan("unload" if name == "unload_item" else "fetch", target)
+                        plan = describe_plan("unload" if name == "unload_item" else "fetch", target, self.language)
                         if order:
                             plan.update(_items=[line.model_dump() for line in order.items], _skill=base)
                         declined = not await confirm(plan)
                         if order and not declined:
                             order = TaskRequest(items=plan["_items"], request_id=self.request_id)
                             args = {**args, "items": [line.model_dump() for line in order.items]}
-                            base = {**base, "target": self.manager.order_label(order.items)}
+                            base = {**base, "target": order_label(order.items, self.manager.items, self.language)}
                         if not declined:
                             if item:
                                 approved_items.add(item.id)

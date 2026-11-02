@@ -48,7 +48,7 @@ class SherpaWake:
 
 def command_text(text: str) -> str:
     """KWS has already accepted the wake phrase; strip an ASR spelling variant."""
-    return re.sub(r"^\s*你好[，,、\s]*(?:布鲁|布噜|布路|布卢|blue)[，,。！!？?\s]*", "", text,
+    return re.sub(r"^\s*(?:你好[，,、\s]*(?:布鲁|布噜|布路|布卢|blue)|hello[，,\s]+blue\b)[，,。！!？?.:\s]*", "", text,
                   flags=re.IGNORECASE).strip()
 
 

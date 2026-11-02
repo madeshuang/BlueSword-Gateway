@@ -19,6 +19,8 @@ class Waypoint(BaseModel):
 class Item(BaseModel):
     id: str = Field(min_length=1, max_length=80)
     name: str = Field(min_length=1)
+    name_en: str = ""
+    aliases_en: list[str] = []
     aliases: list[str]
     shelf: str = "shelf"
     robot_item: str = ""  # VLM v1.2 机器人接受的中文名或内部编码

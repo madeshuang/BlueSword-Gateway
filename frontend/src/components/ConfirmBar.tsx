@@ -26,6 +26,7 @@ export function ConfirmBar({
   // Enter = 允许，Esc = 取消；捕获阶段拦截，避免触发全局快捷键
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' && (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target as HTMLElement).isContentEditable)) return
       if (e.key === 'Escape' || e.key === 'Enter') {
         e.stopImmediatePropagation()
         e.preventDefault()
@@ -37,7 +38,8 @@ export function ConfirmBar({
   }, [onAnswer])
 
   const target = request.target ?? ''
-  const question = !target
+  const english = request.language === 'en'
+  const question = english ? request.message : !target
     ? `${request.message.replace(/。$/, '')}，允许吗？`
     : request.skill === '卸货'
       ? `允许布鲁把${target}送到交付处吗？`
@@ -54,15 +56,15 @@ export function ConfirmBar({
         </div>
         <div className="confirm-bar-sub">
           {request.steps?.join(' → ')}
-          <span className="confirm-bar-time"> · 可以继续说“再来…”调整 · 说“可以”确认 · {left}s</span>
+          <span className="confirm-bar-time">{english ? ' · Say “add…” to edit · “yes” to confirm · ' : ' · 可以继续说“再来…”调整 · 说“可以”确认 · '}{left}s</span>
         </div>
       </div>
       <div className="confirm-bar-actions">
         <button className="confirm-bar-no" onClick={() => onAnswer(false)}>
-          取消<kbd>Esc</kbd>
+          {english ? 'Cancel' : '取消'}<kbd>Esc</kbd>
         </button>
         <button className="confirm-bar-yes" onClick={() => onAnswer(true)} autoFocus>
-          允许<kbd>↵</kbd>
+          {english ? 'Confirm' : '允许'}<kbd>↵</kbd>
         </button>
       </div>
     </div>

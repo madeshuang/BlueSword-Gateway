@@ -25,7 +25,7 @@ export function Home(props: { phase: Phase; voiceEnabled: boolean; localVoice?: 
       <Composer big phase={props.phase} partial="" onSubmit={props.onSubmit} onMic={props.onMic} />
       <div className="home-voice-hint">
         {props.localVoice
-          ? (props.voiceEnabled ? '直接说“你好，布鲁”，然后告诉我你需要什么' : '本地监听已暂停，可在上方恢复')
+          ? (props.voiceEnabled ? '说“你好，布鲁”或 “Hello Blue”，然后告诉我你需要什么 / How can I help?' : '本地监听已暂停，可在上方恢复 / Listening paused')
           : (props.voiceEnabled ? '麦克风已开启，说完稍等一下就好' : '先点麦克风开启语音，就能叫我啦')}
       </div>
 

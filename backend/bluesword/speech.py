@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from websockets.asyncio.client import connect
 
 from .config import Settings
+from .language import tts_language
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,7 @@ async def synthesize(text: str, settings: Settings) -> bytes:
             headers={"Authorization": f"Bearer {settings.speech_api_key}"},
             json={
                 "model": settings.tts_model,
-                "input": {"text": text, "voice": settings.tts_voice, "language_type": "Chinese"},
+                "input": {"text": text, "voice": settings.tts_voice, "language_type": tts_language(text)},
             },
         )
         response.raise_for_status()
@@ -136,6 +137,7 @@ def mount_speech(app: FastAPI, settings: Settings) -> None:
         return {
             "configured": bool(settings.speech_api_key),
             "wake_phrase": "你好，布鲁",
+            "wake_phrases": ["你好，布鲁", "Hello Blue"],
             "tts": bool(settings.speech_api_key),
             "mode": settings.speech_mode,
             "local": app.state.local_voice.status() if app.state.local_voice else None,

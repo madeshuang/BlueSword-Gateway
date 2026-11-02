@@ -36,6 +36,7 @@ export interface SkillCall {
 
 /** 机器人动作前的确认请求：用户允许后才会执行 */
 export interface ConfirmRequest {
+  language?: 'zh' | 'en'
   id: string
   title: string
   skill?: string

@@ -472,7 +472,7 @@ bash scripts/setup.sh --voice
 bash scripts/start.sh --port 8013
 ```
 
-服务启动后，由**运行后端的电脑**自动打开麦克风，用 sherpa-onnx 在本地检测“你好，布鲁”。网页打开即可看到“本地待唤醒”，不用点击网页麦克风；首次运行仍需允许操作系统的麦克风权限。说“你好，布鲁，查询库存”可连贯下达指令；唤醒后 20 秒内可继续对话，空闲后自动回到本地唤醒。启动脚本运行期间保持监听；关机、休眠或停止进程后不会监听，这次不安装系统登录启动项。
+服务启动后，由**运行后端的电脑**自动打开麦克风，用 sherpa-onnx 在本地检测“你好，布鲁”或“Hello Blue”。网页打开即可看到“本地待唤醒”，不用点击网页麦克风；首次运行仍需允许操作系统的麦克风权限。说“你好，布鲁，查询库存”或“Hello Blue, check the inventory”可连贯下达指令；唤醒后 20 秒内可继续对话，空闲后自动回到本地唤醒。启动脚本运行期间保持监听；关机、休眠或停止进程后不会监听，这次不安装系统登录启动项。
 
 ```text
 本机麦克风 → sherpa-onnx 唤醒 → 语音分段 → 千问 ASR
@@ -492,6 +492,16 @@ bash scripts/start.sh --port 8013
 
 `BLUESWORD_WAKE_THRESHOLD` 控制命中阈值（默认 0.25，越大越难唤醒）；`BLUESWORD_VOICE_RMS`、`BLUESWORD_VOICE_SILENCE`、`BLUESWORD_VOICE_IDLE` 调节音量门限、句尾静音和续聊窗口。模型默认位于 `backend/models/`（不提交），下载脚本校验 SHA-256；使用官方 [中英双语 KWS 模型](https://k2-fsa.github.io/sherpa/onnx/kws/pretrained_models/index.html)，关键词使用对应的 `phone+ppinyin` 编码。Python 包与原生 core 同版本锁定，避免平台依赖遗漏。
 
+### 中英双语接待
+
+中文和英语共用同一个会话、库存和机器人接口。说“你好，布鲁”或“Hello Blue”唤醒，也可连着说请求，例如 `Hello Blue, could you bring me a bottle of water?`。英语请求会得到英语回复、英语确认卡及英语播报；中文请求继续使用中文。纯唤醒后会简短回应“我在，请说”或 “I'm listening. How can I help?”。ASR 使用同一个多语言模型，TTS 根据回复选择 Chinese / English，混合文本使用 Auto。
+
+等待确认时可以说 `Yes, please` / `Confirm` / `Go ahead`，或 `No, thanks` / `Cancel`；也可以先说 `Add one pack of chips`、`Change it to two bottles of water`、`Remove chips`、`Make it two`。改单后须重新确认，旧确认按钮不生效。`Yes, add chips` 只修改清单，不会直接批准；超过两件或含未知物品时保留原清单并提示。语音确认／取消仅在收音窗口有效，播报和执行中仍需使用页面或请现场工作人员协助。
+
+示例物品清单已增加 `nameEn`（英文展示名）和 `aliasesEn`（英语别称）。使用自己的 `BLUESWORD_CATALOG_PATH` 时也请补充这两个可选字段，例如 `"nameEn":"bottled water", "aliasesEn":["water","mineral water","bottled water"]`。它们不改变原有 `id`、`robotItem`、位置或机器人报文；缺少英文展示名时确认卡会保留原物品名。场景 JSON 对应字段为 `name_en` / `aliases_en`。
+
+从仅中文唤醒版本升级后，在项目根目录运行 `python3 scripts/setup-voice.py` 更新关键词文件，然后构建前端并重启后端。双语接待覆盖语音对话、确认卡和唤醒提示；任务详情及工作人员界面仍以中文展示。
+
 ### 原网页语音模式
 
 默认 `BLUESWORD_SPEECH_MODE=browser` 保持兼容：先点击麦克风或“开启语音”并授权，再说话。此模式先将说话声送千问识别，再判断文字是否包含唤醒词，**不是离线唤醒**。20 秒无交互后进入文字唤醒待机；“停止收音”关闭网页麦克风并停止播放。其他电脑访问需要 HTTPS，localhost 可直接测试。
@@ -506,7 +516,7 @@ node --test frontend/tests/*.test.mjs
 
 现场还需一起手动检查麦克风权限、嘈杂环境中的唤醒与识别、音箱音量及回声，并使用已确认的物品名称／编码、机器人地址和网关回调地址联调 VLM。模拟器和供应商测试不能证明真实机器人已完成取送。
 
-安装 voice 扩展并配置 Key 后，可在后端目录运行 `.venv/bin/python scripts/smoke_voice.py`：自动生成“你好，布鲁，查询库存”语音，实际经过 sherpa 唤醒、千问 ASR、DeepSeek 库存工具、千问 TTS。这项测试会产生少量模型调用费用；不开麦克风、不播放音频，使用独立内存数据库与 mock 机器人，不会影响正在演示的会话。合成语音测试通过不代表真人、远场或展馆噪声下的唤醒率已验收。
+安装 voice 扩展并配置 Key 后，可在后端目录运行 `.venv/bin/python scripts/smoke_voice.py`：自动生成“你好，布鲁，查询库存”语音，实际经过 sherpa 唤醒、千问 ASR、DeepSeek 库存工具、千问 TTS。这项测试会产生少量模型调用费用；不开麦克风、不播放音频，使用独立内存数据库与 mock 机器人，不会影响正在演示的会话。可加 `--language en --fetch` 验证英语唤醒、取物请求、语音确认、隔离 mock 取物及英文播报；不加 `--fetch` 时只查库存。合成语音测试通过不代表真人、远场或展馆噪声下的唤醒率已验收。
 
 浏览器回归使用 `frontend/tests/order.browser.cjs`、`frontend/tests/speech.browser.cjs`、`frontend/tests/speech-home.browser.cjs` 和 `frontend/tests/order-revision.browser.cjs`。先构建前端，在单独终端启动隔离模拟服务，再使用已安装的 `playwright-cli`：
 

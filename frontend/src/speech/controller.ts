@@ -149,7 +149,7 @@ export class SpeechController {
     } else {
       this.lead.push(frame)
       if (this.lead.length > Math.ceil(this.context!.sampleRate * 0.15 / frame.length)) this.lead.shift()
-      if (now > this.activeUntil && this.state.status !== '说“你好，布鲁”叫我') this.report('说“你好，布鲁”叫我')
+      if (now > this.activeUntil && this.state.status !== '你好，布鲁 / Hello Blue') this.report('你好，布鲁 / Hello Blue')
     }
   }
 
@@ -172,9 +172,9 @@ export class SpeechController {
         const text = command ?? data.text.trim()
         this.activeUntil = Date.now() + 20_000
         if (text) { this.partial(''); this.submit(text) }
-        else if (command !== null) { this.wake(); this.report('我在，接着说吧') }
+        else if (command !== null) { this.wake(); this.report('我在，接着说吧 / Listening…') }
         else this.report('这次没听清，再说一遍吧')
-      } else this.report('说“你好，布鲁”叫我')
+      } else this.report('你好，布鲁 / Hello Blue')
     } catch {
       if (generation === this.generation && !this.closed) {
         this.stopListening()

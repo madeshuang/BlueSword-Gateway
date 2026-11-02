@@ -15,7 +15,7 @@ SUFFIX = "epoch-13-avg-2-chunk-8-left-64"
 FILES = [f"encoder-{SUFFIX}.int8.onnx", f"decoder-{SUFFIX}.onnx",
          f"joiner-{SUFFIX}.int8.onnx", "tokens.txt"]
 # Official phone+ppinyin encoding, matching this model's tokens.txt.
-KEYWORDS = "n ǐ h ǎo b ù l ǔ @你好布鲁\n"
+KEYWORDS = "n ǐ h ǎo b ù l ǔ @你好布鲁\nHH AH0 L OW1 B L UW1 @Hello_Blue\n"
 
 
 def setup(root: Path):
@@ -38,7 +38,7 @@ def setup(root: Path):
                     with source.extractfile(member) as content, (destination / name).open("wb") as target:
                         shutil.copyfileobj(content, target)
     (destination / "bluesword-keywords.txt").write_text(KEYWORDS, encoding="utf-8")
-    print(f"唤醒模型就绪：{destination}\n唤醒词：你好，布鲁", flush=True)
+    print(f"唤醒模型就绪：{destination}\n唤醒词：你好，布鲁 / Hello Blue", flush=True)
 
 
 if __name__ == "__main__":
