@@ -182,7 +182,7 @@ def test_skipped_grasp_does_not_claim_two_deliveries_or_refund(gateway):
     assert client.get("/health").json()["recovery_required"]
     with client.websocket_connect("/ws") as ws:
         snapshot = [ws.receive_json() for _ in range(4)]
-        assert snapshot[-1] == {"type": "phase", "phase": "listening"}
+        assert snapshot[-1] == {"type": "phase", "phase": "listening", "task_id": identifier}
         assert snapshot[-2]["task"]["completion_note"]
     assert client.get("/api/inventory").json()["薯片"] == 2
     assert (

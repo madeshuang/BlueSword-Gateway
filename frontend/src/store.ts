@@ -27,6 +27,9 @@ export interface State {
   scanning: boolean
   cameraSrc: string | null
   task: Task | null
+  /** 新对话收起旧任务展示；后台任务和故障锁定仍独立保留。 */
+  visionDismissed: boolean
+  dismissedTaskId: string | null
   /** 等待用户允许的机器人动作；null 表示没有弹窗 */
   confirm: (ConfirmRequest & { receivedAt: number }) | null
   backendMode: BackendMode | 'demo' | 'unknown'
@@ -66,7 +69,9 @@ function loadCurrent(): Partial<State> {
     if (!saved || typeof saved.id !== 'string') return {}
     const messages = safeMessages(saved.messages)
     const sessionBootId = typeof saved.bootId === 'string' ? saved.bootId : null
-    return { sessionBootId, ...(messages.length ? { sessionId: saved.id, messages, view: 'session', restored: true } : {}) }
+    return { sessionBootId, visionDismissed: saved.visionDismissed === true,
+      dismissedTaskId: typeof saved.dismissedTaskId === 'string' ? saved.dismissedTaskId : null,
+      ...(messages.length ? { sessionId: saved.id, messages, view: 'session', restored: true } : {}) }
   } catch { return {} }
 }
 
@@ -74,7 +79,8 @@ export function persist(state: State): boolean {
   try {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(state.history.slice(0, 19)))
     // Do not save image data, credentials or live confirmation capabilities.
-    localStorage.setItem(CURRENT_KEY, JSON.stringify({ id: state.sessionId, bootId: state.sessionBootId, messages: state.messages }))
+    localStorage.setItem(CURRENT_KEY, JSON.stringify({ id: state.sessionId, bootId: state.sessionBootId, messages: state.messages,
+      visionDismissed: state.visionDismissed, dismissedTaskId: state.dismissedTaskId }))
     return true
   } catch { return false }
 }
@@ -101,6 +107,8 @@ export const initialState: State = {
   homeAfterRestart: false,
   restored: false,
   showCamera: true,
+  visionDismissed: false,
+  dismissedTaskId: null,
   ...loadCurrent(),
   cameraSrc: null,
   device: { online: false, name: config.agentWsUrl ? '机器人后端' : '前端演示' },
@@ -156,6 +164,7 @@ export function reducer(state: State, action: Action): State {
     case 'wake':
       return { ...s, homeAfterRestart: false, view: 'session', phase: 'listening', partial: '' }
     case 'phase':
+      if (action.task_id && action.task_id === s.dismissedTaskId) return s
       return { ...s, phase: action.phase, view: action.phase === 'idle' || s.homeAfterRestart ? s.view : 'session' }
     case 'asr':
       if (!action.final) return { ...s, ...(action.text ? { view: 'session' as const } : {}), partial: action.text }
@@ -204,16 +213,21 @@ export function reducer(state: State, action: Action): State {
       }
     }
     case 'vision':
+      if (action.task_id && action.task_id === s.dismissedTaskId) return s
       return {
         ...s,
+        // 单独环视没有任务编号，可在新对话中再次打开视野；清空画面的事件不展开。
+        visionDismissed: !action.task_id && (action.caption || action.scanning || action.detections?.length) ? false : s.visionDismissed,
         detections: action.detections ?? s.detections,
         caption: action.caption ?? s.caption,
         scanning: action.scanning ?? s.scanning,
       }
     case 'camera':
+      if (action.task_id && action.task_id === s.dismissedTaskId) return s
       return { ...s, cameraSrc: action.src }
     case 'task':
-      return { ...s, task: action.task, recoveryRequired: action.task?.recovery_required ?? false }
+      return { ...s, task: action.task, recoveryRequired: action.task?.recovery_required ?? false,
+        visionDismissed: action.task?.id ? action.task.id === s.dismissedTaskId : s.visionDismissed }
     case 'task_step':
       if (!s.task) return s
       return {
@@ -260,8 +274,9 @@ export function reducer(state: State, action: Action): State {
       return { ...state, homeAfterRestart: false, view: 'session', viewing: item.id }
     }
     case 'session_end':
-      return state
+      return action.task_id ? { ...state, visionDismissed: true, dismissedTaskId: action.task_id } : state
     case 'go_home':
-      return reset(state)
+      return reset(state, { visionDismissed: true, dismissedTaskId: state.task?.id ?? state.dismissedTaskId,
+        homeAfterRestart: true })
   }
 }

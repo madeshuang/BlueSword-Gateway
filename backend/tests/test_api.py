@@ -195,9 +195,7 @@ def test_new_conversation_clears_confirmation_but_not_running_order():
             ws.send_json({'type': 'confirm_response', 'id': confirm['id'], 'approved': True})
             task = _drain_until(ws, 'task')['task']
             ws.send_json({'type': 'reset'})
-            _drain_until(ws, 'session_end')
-            restored = _drain_until(ws, 'task')['task']
-            assert restored['id'] == task['id'] and restored['status'] == 'running'
+            assert _drain_until(ws, 'session_end')['task_id'] == task['id']
             for _ in range(400):
                 event = ws.receive_json()
                 assert event['type'] not in ('assistant_start', 'assistant_delta', 'assistant_end')

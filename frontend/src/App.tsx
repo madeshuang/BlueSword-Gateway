@@ -81,7 +81,7 @@ export default function App() {
     let saved: State | null = null
     const timer = setInterval(() => {
       const current = latestState.current
-      if (current.messages !== saved?.messages || current.history !== saved?.history || current.sessionId !== saved?.sessionId || current.sessionBootId !== saved?.sessionBootId) {
+      if (current.messages !== saved?.messages || current.history !== saved?.history || current.sessionId !== saved?.sessionId || current.sessionBootId !== saved?.sessionBootId || current.visionDismissed !== saved?.visionDismissed || current.dismissedTaskId !== saved?.dismissedTaskId) {
         if (persist(current)) saved = current
       }
     }, 250)
@@ -132,7 +132,7 @@ export default function App() {
     [],
   )
 
-  const showVision = !state.viewing && (!!state.task || state.recoveryRequired || state.showCamera && (state.detections.length > 0 || state.scanning || !!state.caption || !!state.cameraSrc))
+  const showVision = !state.viewing && !state.visionDismissed && (!!state.task || state.recoveryRequired || state.showCamera && (state.detections.length > 0 || state.scanning || !!state.caption || !!state.cameraSrc))
   const displayedMessages = state.viewing ? state.history.find(h => h.id === state.viewing)?.messages ?? [] : state.messages
   const firstUser = state.messages.find(m => m.role === 'user')
   const sidebarHistory = firstUser ? [{ id: state.sessionId, title: firstUser.text, at: state.lastActivity, messages: state.messages }, ...state.history] : state.history
@@ -158,7 +158,7 @@ export default function App() {
       detections={state.detections}
       caption={state.caption}
       scanning={state.scanning}
-      task={state.task}
+      task={state.task?.id === state.dismissedTaskId ? null : state.task}
       backendMode={state.backendMode}
       glossary={state.glossary}
       recoveryRequired={state.recoveryRequired}

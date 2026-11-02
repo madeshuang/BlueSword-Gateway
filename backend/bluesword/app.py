@@ -252,8 +252,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             caption += f" · 第{progress.pickIndex}件 · 第{progress.detection.attempt}次识别"
                         src = "data:image/jpeg;base64," + progress.image.data
                         manager.remote_visual.update(task_id=active.id, src=src, caption=caption)
-                        manager.bus.emit({"type":"camera", "src":src})
-                        manager.bus.emit({"type":"vision", "detections":[], "caption":caption, "scanning":False})
+                        manager.bus.emit({"type":"camera", "task_id":active.id, "src":src})
+                        manager.bus.emit({"type":"vision", "task_id":active.id, "detections":[], "caption":caption, "scanning":False})
                     return answer
                 if not manager.busy and active.recovery_required and kind in ("finished","error"):
                     if kind == "finished":

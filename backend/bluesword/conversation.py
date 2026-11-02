@@ -88,9 +88,12 @@ async def serve_conversation(ws: Transport, settings, manager, agent, take, reco
     if manager.active and (manager.busy or manager.active.recovery_required):
         emit({"type": "task", "task": manager.active.model_dump()})
     if manager.active and manager.remote_visual.get("task_id") == manager.active.id and (manager.busy or manager.active.recovery_required):
-        emit({"type":"camera", "src":manager.remote_visual["src"]})
-        emit({"type":"vision", "detections":[], "caption":manager.remote_visual["caption"], "scanning":False})
-    emit({"type": "phase", "phase": "acting" if manager.busy else "listening" if manager.store.recovery_required else "idle"})
+        emit({"type":"camera", "task_id":manager.active.id, "src":manager.remote_visual["src"]})
+        emit({"type":"vision", "task_id":manager.active.id, "detections":[], "caption":manager.remote_visual["caption"], "scanning":False})
+    phase = {"type": "phase", "phase": "acting" if manager.busy else "listening" if manager.store.recovery_required else "idle"}
+    if manager.active and (manager.busy or manager.store.recovery_required):
+        phase["task_id"] = manager.active.id
+    emit(phase)
 
     async def request_confirm(plan: dict) -> bool:
         """Ask the visitor before any robot motion; timeout or disconnect counts as declined."""
@@ -245,11 +248,7 @@ async def serve_conversation(ws: Transport, settings, manager, agent, take, reco
                     language = "zh"
                     if session:
                         session.reset()
-                    emit({"type": "session_end"})
-                    if manager.active and (manager.busy or manager.store.recovery_required):
-                        emit({"type":"task", "task":manager.active.model_dump()})
-                    if manager.busy or manager.store.recovery_required:
-                        emit({"type":"phase", "phase":"acting" if manager.busy else "listening"})
+                    emit({"type": "session_end", "task_id": manager.active.id if manager.active else None})
                 elif event.type == "cancel_task":
                     await manager.cancel(event.task_id)
                 elif event.type == "mock_take":
