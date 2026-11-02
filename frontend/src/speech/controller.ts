@@ -3,7 +3,7 @@ import type { ServerEvent } from '../types'
 import workletUrl from './capture-worklet.js?url'
 import { pcm16, wakeCommand } from './audio'
 
-export interface SpeechState { enabled: boolean; tts: boolean; status: string; mode?: 'browser' | 'local' }
+export interface SpeechState { enabled: boolean; tts: boolean; status: string; active?: boolean; mode?: 'browser' | 'local' }
 
 export class SpeechController {
   private context: AudioContext | null = null
@@ -62,7 +62,7 @@ export class SpeechController {
 
   private localState(state: SpeechState) {
     this.local = true
-    this.state = { enabled: state.enabled, tts: state.tts, status: state.status, mode: 'local' }
+    this.state = { enabled: state.enabled, tts: state.tts, status: state.status, active: state.active, mode: 'local' }
     this.update(this.state)
   }
 
@@ -79,11 +79,13 @@ export class SpeechController {
   async mic() {
     await this.initialize()
     if (this.closed || this.starting) return
-    if (this.local) { await this.control('resume'); return }
+    if (this.local) {
+      this.starting = true
+      try { await this.control('toggle') } finally { this.starting = false }
+      return
+    }
     if (this.stream) {
-      this.interrupt()
-      this.activeUntil = Date.now() + 20_000
-      this.report('我在听，说完稍等一下')
+      this.stopListening()
       return
     }
     const generation = this.generation
@@ -205,7 +207,7 @@ export class SpeechController {
     if (!text || this.spoken.has(id)) return
     this.spoken.add(id); this.text.delete(id)
     if (this.spoken.size > 100) this.spoken.delete(this.spoken.values().next().value!)
-    if (!this.state.tts || !this.context) return
+    if (!this.state.enabled || !this.state.tts || !this.context) return
     this.speechQueue.push(text.slice(0, 1000))
     void this.playNext()
   }

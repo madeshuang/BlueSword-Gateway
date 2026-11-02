@@ -82,10 +82,10 @@ export default function App() {
     return () => clearTimeout(t)
   }, [state.view, state.phase, state.lastActivity, state.backendMode, state.task?.status, state.confirm])
 
-  // 快捷键：T 切换明暗主题，Esc 回首页，空格开启语音
+  // 快捷键：T 切换明暗主题，Esc 回首页，空格切换语音
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).tagName === 'INPUT') return
+      if ((e.target as HTMLElement).closest('input, textarea, button, [contenteditable="true"]') || e.repeat) return
       if (e.key === 't' || e.key === 'T') {
         const root = document.documentElement
         root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light'
@@ -132,10 +132,11 @@ export default function App() {
   )
   const confirmVisible = useConfirmVisible(state)
   const confirmBar = state.confirm && confirmVisible ? <ConfirmBar request={state.confirm} onAnswer={answerConfirm} /> : undefined
+  const voiceActive = voice.mode === 'local' ? !!voice.active : voice.enabled
   const speechSettings = <div className="speech-settings">
     {voice.status && <span role="status">{voice.status}</span>}
-    <button aria-pressed={voice.enabled} onClick={() => voice.enabled ? speech.current?.stopListening() : void speech.current?.mic()}>
-      {voice.mode === 'local' ? (voice.enabled ? '暂停监听' : '恢复监听') : (voice.enabled ? '停止收音' : '开启语音')}
+    <button aria-pressed={voiceActive} onClick={actions.mic}>
+      {voiceActive ? '关闭语音' : '唤醒布鲁'}
     </button>
     <button aria-pressed={voice.tts} onClick={() => speech.current?.setTts(!voice.tts)}>播报{voice.tts ? '开' : '关'}</button>
   </div>
@@ -143,7 +144,7 @@ export default function App() {
   if (state.backendMode === 'gdk_mock') return (
     <>
       {speechSettings}
-      <DemoConsole state={state} onSubmit={actions.submit} onMic={actions.mic}
+      <DemoConsole state={state} voiceActive={voiceActive} onSubmit={actions.submit} onMic={actions.mic}
     onCancel={() => bridge.current?.send({ type: 'cancel_task', task_id: state.task?.id })}
     onTake={() => bridge.current?.send({ type: 'mock_take' })}
     onRecover={() => bridge.current?.send({ type: 'mock_recover' })} confirm={confirmBar} />
@@ -157,7 +158,7 @@ export default function App() {
         activeId={state.viewing}
         device={state.device}
         onNew={actions.home}
-        phase={state.viewing ? 'idle' : state.phase}
+        phase={!voiceActive ? 'sleep' : state.viewing ? 'idle' : state.phase}
         onPet={actions.mic}
         onOpen={(id) => {
           speech.current?.reset()
@@ -168,10 +169,11 @@ export default function App() {
       <main className="main">
         {speechSettings}
         {state.view === 'home' ? (
-          <Home phase={state.phase} voiceEnabled={voice.enabled} localVoice={voice.mode === 'local'} onSubmit={actions.submit} onMic={actions.mic} />
+          <Home phase={state.phase} voiceActive={voiceActive} voiceEnabled={voice.enabled} localVoice={voice.mode === 'local'} onSubmit={actions.submit} onMic={actions.mic} />
         ) : (
           <div className={`session ${showVision ? 'with-vision' : ''}`}>
             <Conversation
+              voiceActive={voiceActive}
               readOnly={!!state.viewing}
               phase={state.viewing ? 'idle' : state.phase}
               partial={state.partial}

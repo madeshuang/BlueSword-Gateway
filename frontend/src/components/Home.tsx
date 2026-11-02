@@ -11,7 +11,7 @@ function greeting() {
   return '晚上好'
 }
 
-export function Home(props: { phase: Phase; voiceEnabled: boolean; localVoice?: boolean; onSubmit: (t: string) => void; onMic: () => void }) {
+export function Home(props: { phase: Phase; voiceActive?: boolean; voiceEnabled: boolean; localVoice?: boolean; onSubmit: (t: string) => void; onMic: () => void }) {
   return (
     <section className="home">
       <h1 className="home-title">
@@ -22,10 +22,12 @@ export function Home(props: { phase: Phase; voiceEnabled: boolean; localVoice?: 
         {greeting()}，我是<span className="accent">{config.assistantName}</span>
       </h1>
 
-      <Composer big phase={props.phase} partial="" onSubmit={props.onSubmit} onMic={props.onMic} />
+      <Composer big phase={props.phase} voiceActive={props.voiceActive} partial="" onSubmit={props.onSubmit} onMic={props.onMic} />
       <div className="home-voice-hint">
         {props.localVoice
-          ? (props.voiceEnabled ? '说“你好，布鲁”或 “Hello Blue”，然后告诉我你需要什么 / How can I help?' : '本地监听已暂停，可在上方恢复 / Listening paused')
+          ? (props.voiceActive ? '点击布鲁或麦克风关闭语音 / Click Blue or the mic to end voice'
+            : props.voiceEnabled ? '说“你好，布鲁”或 “Hello Blue”唤醒，也可以点击布鲁 / Say Hello Blue or click Blue'
+            : '点击布鲁或麦克风开启语音 / Click Blue or the mic to start')
           : (props.voiceEnabled ? '麦克风已开启，说完稍等一下就好' : '先点麦克风开启语音，就能叫我啦')}
       </div>
 

@@ -72,6 +72,7 @@ class LocalVoice:
         self.capture = self.asr = self.player = None
         self.enabled = self.playing = self.recognizing = self.busy = False
         self.tts = True
+        self.sleeping = False
         self.error = ""
         self.phase = "stopped"
         self.snapshot = {}
@@ -85,17 +86,20 @@ class LocalVoice:
     def status(self):
         labels = {
             "stopped": "本地监听已暂停 · Paused", "starting": "正在准备本地唤醒 · Starting…",
-            "standby": "本地待唤醒 · 你好，布鲁 / Hello Blue", "listening": "我在听 · Listening…",
+            "standby": "布鲁休眠中 · 你好，布鲁 / Hello Blue", "listening": "我在听 · Listening…",
             "recognizing": "正在识别 · Recognizing…", "thinking": "正在处理 · Please wait…",
             "speaking": "正在播报 · Speaking…", "error": self.error,
         }
         return {"mode": "local", "enabled": self.enabled, "tts": self.tts,
+                "active": bool(self.enabled and not self.sleeping and
+                               (self.playing or self.recognizing or self.busy or self.gate and self.gate.active)),
                 "phase": self.phase,
                 "status": labels[self.phase] + (f" · {self.error}" if self.error and self.phase != "error" else ""),
                 "error": self.error}
 
     def report(self, phase=None):
-        phase = phase or ("stopped" if not self.enabled else "speaking" if self.playing
+        phase = phase or ("stopped" if not self.enabled else "standby" if self.sleeping
+                          else "speaking" if self.playing
                           else "recognizing" if self.recognizing else "thinking" if self.busy
                           else "listening" if self.gate and self.gate.active else "standby")
         old = self.status()
@@ -177,9 +181,11 @@ class LocalVoice:
                     self.gate.reset()
                     continue
                 woke, pcm = self.gate.feed(
-                    samples, self.busy or self.playing or self.recognizing or time.monotonic() < self.mute_until,
+                    samples, self.control_lock.locked() or (self.busy and not self.sleeping)
+                    or self.playing or self.recognizing or time.monotonic() < self.mute_until,
                 )
                 if woke:
+                    self.sleeping = False
                     self.output.emit({"type": "wake"})
                 if pcm is not None:
                     self.recognizing = True
@@ -200,7 +206,7 @@ class LocalVoice:
         try:
             recognized = await speech.recognize(pcm, self.settings)
             text = command_text(recognized)
-            if not self.enabled:
+            if not self.enabled or self.sleeping:
                 return
             self.gate.activate()
             self.error = ""
@@ -236,7 +242,7 @@ class LocalVoice:
         if len(self.spoken) >= 100:
             self.spoken.clear()
         self.spoken.add(identifier)
-        if self.enabled and self.tts and not self.speech_queue.full():
+        if self.enabled and not self.sleeping and self.tts and not self.speech_queue.full():
             self.speech_queue.put_nowait(text[:1000])
             if not self.player or self.player.done():
                 self.player = asyncio.create_task(self._speak())
@@ -264,7 +270,8 @@ class LocalVoice:
             if self.gate:
                 self.gate.clear()
                 self.gate.detector.reset()
-                self.gate.activate(max(self.settings.voice_idle, self.confirm_until - time.monotonic()))
+                if self.enabled and not self.sleeping:
+                    self.gate.activate(max(self.settings.voice_idle, self.confirm_until - time.monotonic()))
             self.report()
 
     async def receive_text(self):
@@ -284,12 +291,12 @@ class LocalVoice:
             self.snapshot[kind] = event
         if kind == "phase":
             self.busy = event["phase"] in {"thinking", "speaking", "acting"}
-            if event["phase"] == "listening" and self.gate and self.enabled:
+            if event["phase"] == "listening" and self.gate and self.enabled and not self.sleeping:
                 self.gate.activate(max(self.settings.voice_idle, self.confirm_until - time.monotonic()))
         elif kind == "confirm_request":
             self.confirm_until = time.monotonic() + event["timeout_s"]
             self.busy = False
-            if self.gate:
+            if self.gate and self.enabled and not self.sleeping:
                 self.gate.activate(event["timeout_s"])
             for identifier in list(self.text):
                 self.enqueue(identifier)
@@ -306,6 +313,7 @@ class LocalVoice:
             self.enqueue(event["id"])
         elif kind == "session_end":
             await self.interrupt()
+            self.busy = False
             self.text.clear()
             if self.gate:
                 self.gate.reset()
@@ -320,6 +328,23 @@ class LocalVoice:
             await self.start()
         elif action == "pause":
             await self.stop()
+        elif action in {"sleep", "listen", "toggle"}:
+            if action != "sleep":
+                await self.start()
+                if not self.enabled:
+                    return self.status()
+            async with self.control_lock:
+                active = action == "listen" or (action == "toggle" and not self.status()["active"])
+                # Latch sleep before cancelling TTS: its finally block must not reopen ASR.
+                self.sleeping = not active
+                await self.interrupt()
+                self.text.clear()
+                if self.gate:
+                    self.gate.reset()
+                    if active and self.enabled:
+                        self.gate.activate()
+                        self.output.emit({"type": "wake"})
+                self.report()
         elif action in {"tts_on", "tts_off"}:
             self.tts = action == "tts_on"
             if not self.tts:

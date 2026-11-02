@@ -8,7 +8,10 @@ import { BlueModel, type BlueState } from './blueModel'
  * 场景、灯光、跳跃、转身、视线跟随在这里实现。透明背景，直接融进侧边栏。
  */
 
-const STATE: Record<Phase, BlueState> = {
+type PetPhase = Phase | 'sleep'
+
+const STATE: Record<PetPhase, BlueState> = {
+  sleep: 'sleep',
   idle: 'idle',
   listening: 'listening',
   thinking: 'thinking',
@@ -16,7 +19,8 @@ const STATE: Record<Phase, BlueState> = {
   acting: 'executing',
 }
 
-const BUBBLE: Partial<Record<Phase, string>> = {
+const BUBBLE: Partial<Record<PetPhase, string>> = {
+  sleep: 'Zzz · 休眠中',
   listening: '我在听…',
   thinking: '让我想想…',
   speaking: '正在回答',
@@ -95,7 +99,7 @@ function radialTexture(stops: [number, string][]) {
   return t
 }
 
-export default function BluePet3D(props: { phase: Phase; onActivate: () => void; onFail: () => void }) {
+export default function BluePet3D(props: { phase: PetPhase; onActivate: () => void; onFail: () => void }) {
   const host = useRef<HTMLDivElement>(null)
   const root = useRef<HTMLButtonElement>(null)
   const phaseRef = useRef(props.phase)
@@ -223,7 +227,7 @@ export default function BluePet3D(props: { phase: Phase; onActivate: () => void;
     let nextHop = last + 1200
     let spin: { start: number; dur: number } | null = null
     let nextSpin = last + 12000 + Math.random() * 8000
-    let lastPhase: Phase = phaseRef.current
+    let lastPhase: PetPhase = phaseRef.current
 
     const tick = (now: number) => {
       raf = requestAnimationFrame(tick)
@@ -237,12 +241,13 @@ export default function BluePet3D(props: { phase: Phase; onActivate: () => void;
       const rect = root.current?.getBoundingClientRect()
       const cx = rect ? rect.left + rect.width / 2 : 0
       const cy = rect ? rect.top + rect.height * 0.6 : 0
-      const tracking = now - pointer.at < 4000
+      const tracking = p !== 'sleep' && now - pointer.at < 4000
       const dx = pointer.x - cx
       const dy = pointer.y - cy
 
       // —— 状态切换时的小动作
       if (p !== lastPhase) {
+        if (p === 'sleep') { hop = null; spin = null }
         if (p === 'listening' || p === 'speaking') nextHop = now
         lastPhase = p
       }
@@ -252,7 +257,10 @@ export default function BluePet3D(props: { phase: Phase; onActivate: () => void;
       let pitchTarget = 0
       let gx = 0
       let gy = 0
-      if (p === 'thinking') {
+      if (p === 'sleep') {
+        pitchTarget = 0.18
+        gy = -0.2
+      } else if (p === 'thinking') {
         yawTarget = BASE_YAW + Math.sin(t * 0.9) * 0.25
         pitchTarget = -0.12
         gx = 0.4
@@ -324,7 +332,7 @@ export default function BluePet3D(props: { phase: Phase; onActivate: () => void;
       const lift = clamp(hy / 0.4, 0, 1)
       shadow.scale.setScalar(1 - lift * 0.35)
       ;(shadow.material as THREE.MeshBasicMaterial).opacity = 1 - lift * 0.5
-      const active = p !== 'idle'
+      const active = p !== 'idle' && p !== 'sleep'
       const level =
         p === 'speaking' ? ((Math.sin(t * 9) + 1) / 2) * 0.6 : p === 'listening' ? 0.25 + Math.sin(t * 4) * 0.15 : 0
       haloMat.opacity = (active ? 0.85 : 0.3) - lift * 0.2
@@ -357,9 +365,10 @@ export default function BluePet3D(props: { phase: Phase; onActivate: () => void;
   }, [])
 
   const bubble = BUBBLE[props.phase]
+  const label = props.phase === 'sleep' ? '唤醒布鲁 / Wake Blue' : '关闭语音，让布鲁休眠 / End voice'
 
   return (
-    <button ref={root} className="pet pet3d" data-phase={props.phase} onClick={props.onActivate} title="点我说话">
+    <button ref={root} className="pet pet3d" data-phase={props.phase} onClick={props.onActivate} title={label} aria-label={label} aria-pressed={props.phase !== 'sleep'}>
       <span className={`pet-bubble ${bubble ? 'show' : ''}`}>{bubble ?? ''}</span>
       <div ref={host} className="pet3d-canvas" aria-label="布鲁" />
     </button>

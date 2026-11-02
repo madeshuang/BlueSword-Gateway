@@ -192,6 +192,34 @@ async def test_reply_synthesized_once_and_cancelling_playback_guards_echo(monkey
         await voice.stop()
 
 
+async def test_sleep_stops_playback_and_latches_until_manual_wake(monkeypatch):
+    entered = asyncio.Event()
+    async def synthesize(*args):
+        entered.set()
+        await asyncio.Event().wait()
+    monkeypatch.setattr(speech, "synthesize", synthesize)
+    voice = make_voice()
+    await voice.start()
+    try:
+        await voice.send_json({"type": "assistant_delta", "id": "1", "text": "你好"})
+        await voice.send_json({"type": "assistant_end", "id": "1"})
+        await asyncio.wait_for(entered.wait(), 1)
+        status = await voice.control("toggle")
+        assert status["enabled"] and not status["active"] and status["phase"] == "standby"
+        assert voice.player is None and not voice.gate.active and voice.audio.closes == 0
+        # Late agent/confirmation events and toggling TTS must not undo deliberate sleep.
+        await voice.send_json({"type": "phase", "phase": "listening"})
+        await voice.send_json({"type": "assistant_delta", "id": "2", "text": "要拿水吗？"})
+        await voice.send_json({"type": "confirm_request", "id": "c", "timeout_s": 60})
+        await voice.send_json({"type": "assistant_end", "id": "2"})
+        await voice.control("tts_on")
+        assert not voice.gate.active and voice.player is None and voice.speech_queue.empty()
+        assert (await voice.control("toggle"))["active"]
+        assert voice.gate.active and not voice.sleeping and voice.audio.opens == 1
+    finally:
+        await voice.stop()
+
+
 def until(ws, predicate):
     for _ in range(250):
         event = ws.receive_json()
@@ -254,6 +282,8 @@ async def test_native_capture_only_calls_asr_after_wake(monkeypatch):
     voice = make_voice()
     await voice.start()
     try:
+        assert (await voice.control("toggle"))["active"]
+        assert not (await voice.control("toggle"))["active"]
         for _ in range(20):
             voice.audio.frames.put(frame(0.1))
         voice.audio.frames.put(frame(0.5))
@@ -263,5 +293,6 @@ async def test_native_capture_only_calls_asr_after_wake(monkeypatch):
         event = json.loads(await voice.receive_text())
         assert event["type"] == "text_input" and event["text"] == "查询库存"
         assert len(clips) == 1
+        assert not voice.sleeping and voice.status()["active"]
     finally:
         await voice.stop()

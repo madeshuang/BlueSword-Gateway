@@ -20,7 +20,10 @@ const EYE_BASE = [
 const PX = 203
 const PY = 318
 
-const BUBBLE: Partial<Record<Phase, string>> = {
+type PetPhase = Phase | 'sleep'
+
+const BUBBLE: Partial<Record<PetPhase, string>> = {
+  sleep: 'Zzz · 休眠中',
   listening: '我在听…',
   thinking: '让我想想…',
   speaking: '正在回答',
@@ -49,7 +52,7 @@ function hopCurve(t: number, height: number) {
   return { y: 0, sx: 1 + 0.08 * s, sy: 1 - 0.11 * s }
 }
 
-export function BluePet({ phase, onActivate }: { phase: Phase; onActivate: () => void }) {
+export function BluePet({ phase, onActivate }: { phase: PetPhase; onActivate: () => void }) {
   const root = useRef<HTMLButtonElement>(null)
   const body = useRef<SVGGElement>(null)
   const eyes = useRef<(SVGGElement | null)[]>([])
@@ -84,7 +87,7 @@ export function BluePet({ phase, onActivate }: { phase: Phase; onActivate: () =>
     let hop: { start: number; dur: number; h: number; then: number } | null = null
     let nextHop = last + 1500
     let lean = 0
-    let lastPhase: Phase = phaseRef.current
+    let lastPhase: PetPhase = phaseRef.current
 
     const tick = (now: number) => {
       const dt = Math.min(0.05, (now - last) / 1000)
@@ -96,7 +99,7 @@ export function BluePet({ phase, onActivate }: { phase: Phase; onActivate: () =>
       const rect = root.current?.getBoundingClientRect()
       const cx = rect ? rect.left + rect.width / 2 : 0
       const cy = rect ? rect.top + rect.height * 0.55 : 0
-      const tracking = now - pointer.at < 4000
+      const tracking = p !== 'sleep' && now - pointer.at < 4000
       const dx = pointer.x - cx
       const dy = pointer.y - cy
 
@@ -111,7 +114,10 @@ export function BluePet({ phase, onActivate }: { phase: Phase; onActivate: () =>
       // —— 视线（世界坐标 → 身体局部坐标需要按朝向翻转）
       let gx: number
       let gy: number
-      if (p === 'thinking') {
+      if (p === 'sleep') {
+        gx = 0
+        gy = 4
+      } else if (p === 'thinking') {
         gx = 7
         gy = -7
       } else if (tracking) {
@@ -131,6 +137,7 @@ export function BluePet({ phase, onActivate }: { phase: Phase; onActivate: () =>
 
       // —— 跳跃节奏
       if (p !== lastPhase) {
+        if (p === 'sleep') hop = null
         if (p === 'listening' || p === 'speaking') nextHop = now // 被叫到时先蹦一下
         lastPhase = p
       }
@@ -200,6 +207,7 @@ export function BluePet({ phase, onActivate }: { phase: Phase; onActivate: () =>
         if (p === 'listening') ey *= 1.1
         if (p === 'thinking') ey *= i ? 0.7 : 0.9
         if (p === 'acting') ey *= 0.82
+        if (p === 'sleep') ey = 0.08
         const ex = p === 'listening' ? 1.08 : 1
         eyes.current[i]?.setAttribute(
           'transform',
@@ -210,7 +218,7 @@ export function BluePet({ phase, onActivate }: { phase: Phase; onActivate: () =>
       for (const s of shapes.current) if (s && s.getAttribute('d') !== d) s.setAttribute('d', d)
 
       // —— 光环：平时很淡，被唤醒后亮起
-      const active = p !== 'idle'
+      const active = p !== 'idle' && p !== 'sleep'
       const pulse = p === 'listening' || p === 'speaking' ? (Math.sin(now / 200) + 1) / 2 : 0
       halo.current?.setAttribute('opacity', ((active ? 0.85 : 0.3) + pulse * 0.15 - lift * 0.2).toFixed(2))
       sweep.current?.setAttribute('stroke-dashoffset', reduced ? '0' : ((-now * (active ? 0.3 : 0.06)) / 95).toFixed(1))
@@ -225,9 +233,10 @@ export function BluePet({ phase, onActivate }: { phase: Phase; onActivate: () =>
   }, [])
 
   const bubble = BUBBLE[phase]
+  const label = phase === 'sleep' ? '唤醒布鲁 / Wake Blue' : '关闭语音，让布鲁休眠 / End voice'
 
   return (
-    <button ref={root} className="pet" data-phase={phase} onClick={onActivate} title="点我说话">
+    <button ref={root} className="pet" data-phase={phase} onClick={onActivate} title={label} aria-label={label} aria-pressed={phase !== 'sleep'}>
       <span className={`pet-bubble ${bubble ? 'show' : ''}`}>{bubble ?? ''}</span>
       <svg viewBox="20 40 366 320" className="pet-svg" aria-label="布鲁">
         <defs>

@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class VoiceControl(BaseModel):
-    action: Literal["resume", "pause", "tts_on", "tts_off", "interrupt"]
+    action: Literal["resume", "pause", "sleep", "listen", "toggle", "tts_on", "tts_off", "interrupt"]
 
 
 async def recognize(pcm: bytes, settings: Settings) -> str:
