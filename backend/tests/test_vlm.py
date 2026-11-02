@@ -267,7 +267,9 @@ def test_booth_catalog_default_and_json_replacement_preserve_inventory(tmp_path)
         robot_dispatch_url="http://robot.test:8080/api/task/dispatch",
         db_path=str(tmp_path / "catalog.sqlite"), api_token="test-gateway",
     )
-    catalog = json.loads((Path(__file__).resolve().parents[2] / "config/booth-catalog.example.json").read_text())
+    catalog = json.loads(
+        (Path(__file__).resolve().parents[2] / "config/booth-catalog.example.json").read_text(encoding="utf-8")
+    )
     replacement = tmp_path / "replacement.json"
     sent = []
 

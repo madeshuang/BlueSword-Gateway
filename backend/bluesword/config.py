@@ -128,7 +128,7 @@ def load_dotenv(path: Path | None = None) -> None:
 
 def load_scene() -> tuple[dict[str, Waypoint], dict[str, Item]]:
     path = Path(os.getenv("BLUESWORD_SCENE", str(Path(__file__).with_name("scene.json"))))
-    raw = json.loads(path.read_text())
+    raw = json.loads(path.read_text(encoding="utf-8"))
     waypoints = {key: Waypoint(**value) for key, value in raw["waypoints"].items()}
     items = {value["id"]: Item(**value) for value in raw["items"]}
     if "handover" not in waypoints or any(item.shelf not in waypoints for item in items.values()):
