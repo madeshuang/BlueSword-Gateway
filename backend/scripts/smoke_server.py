@@ -34,10 +34,14 @@ async def main(args):
         task = None
         async with connect(websocket_url, max_size=2**22, proxy=None) as ws:
             await ws.send(json.dumps({"type": "text_input", "text": "帮我拿一瓶矿泉水", "request_id": request_id}))
-            async with asyncio.timeout(60):
+            async with asyncio.timeout(180):
                 async for raw in ws:
                     event = json.loads(raw)
                     events.append(event)
+                    if event["type"] == "confirm_request":
+                        await ws.send(json.dumps({
+                            "type": "confirm_response", "id": event["id"], "approved": True,
+                        }))
                     if (event["type"] == "task" and event.get("task")
                             and event["task"].get("request_id") == request_id
                             and event["task"]["status"] != "running"):
@@ -59,7 +63,7 @@ async def main(args):
         if args.output:
             path = Path(args.output)
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+            path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

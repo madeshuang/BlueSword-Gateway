@@ -6,28 +6,46 @@ React 前端 + Python/FastAPI 后端，负责语音对话、整单确认、任�
 
 ## 安装与启动
 
-当前版本使用 **npm + uv**，分别按 `frontend/package-lock.json` 和 `backend/uv.lock` 安装。准备 Node.js 24（当前前端要求 `^20.19.0` 或 `>=22.12.0`）、npm、uv、Python 3.12；使用 Bash 一键脚本时还需 Bash、curl、lsof。SQLite 无需单独部署；模拟模式无需真实机器人或厂商 SDK。
+当前版本使用 **npm + uv**，分别按 `frontend/package-lock.json` 和 `backend/uv.lock` 安装。首次准备 Git、Node.js 24（当前前端要求 `^20.19.0` 或 `>=22.12.0`）、npm 和 uv，Python 3.12 由 uv 管理。SQLite 无需单独部署；模拟模式无需真实机器人或厂商 SDK。Ubuntu 下的 VLM 双服务和 Blender 演示脚本另外需要 Bash、curl、lsof。
 
-Windows 可以原生使用 PowerShell，见下方“Windows 原生安装与启动”。WSL2 是运行现有 Bash 一键脚本的可选方式：选择 WSL2 时，需在 WSL 内安装依赖，并核对 Windows 到 WSL 的端口访问；连接真实机器人时还需确保机器人能访问网关回调地址。下方标为 `bash` 的命令用于 Linux／WSL2，不能直接粘贴到 PowerShell。
+Ubuntu 和 Windows 均支持原生安装、内部模拟和真实机器人联调。Windows 使用 PowerShell，见下方“Windows 原生安装与启动”；标为 `bash` 的命令用于 Ubuntu，标为 `powershell` 的命令用于 Windows。
 
-### 首次安装
+### Ubuntu 安装与启动
 
-先按 [uv 官方说明](https://docs.astral.sh/uv/getting-started/installation/) 安装 uv，并确认普通终端可运行 `node`、`npm` 和 `uv`。以下命令从项目根目录执行：
+先按 [uv 官方说明](https://docs.astral.sh/uv/getting-started/installation/) 安装 uv，并确认普通终端可运行 `node`、`npm` 和 `uv`。首次安装可选择分步执行或使用快捷脚本，执行其中一种即可。已有环境按后文“已有环境与版本更新”处理。
+
+**分步安装：** 从项目根目录逐条执行，任一步报错时先处理错误。
 
 ```bash
 uv python install 3.12
-(cd frontend && npm ci && npm run build)
-(cd backend && uv sync --locked --python 3.12 --extra dev)
-```
-
-### 首次配置
-
-在项目根目录执行；已有文件会保留，请按示例补充配置：
-
-```bash
+npm ci --prefix frontend
+npm run build --prefix frontend
+uv sync --locked --project backend --python 3.12 --extra dev
 if [ ! -f backend/.env ]; then cp backend/.env.example backend/.env; fi
 chmod 600 backend/.env
 ```
+
+以上依次准备 Python、安装前端依赖、构建网页、同步后端依赖（含开发测试依赖），最后在缺少配置文件时复制示例。已有 `backend/.env` 的内容会保留。
+
+**快捷安装：** 如需一次完成上述步骤，在项目根目录执行：
+
+```bash
+bash scripts/setup.sh
+```
+
+脚本自动准备可用的 Python 3.12 并执行安装流程，任一步失败都会停止；不会拉取 Git 更新或覆盖已有配置。完整更新或环境修复时也可以使用，重复执行的行为见后文。
+
+按下方“首次配置”填写并保存后，日常启动只需：
+
+```bash
+bash scripts/start.sh
+```
+
+打开 <http://127.0.0.1:8000>，按 `Ctrl+C` 停止。启动入口检查配置文件、前端构建产物和端口，固定在 `backend` 目录运行单 worker 服务；启动时不安装依赖、不构建网页。Ubuntu 和 Windows 的入口共用 `scripts/manage.py`，机器人模式由配置决定。
+
+### 首次配置
+
+编辑上述步骤生成的 `backend/.env`。Ubuntu 快捷脚本新建文件的权限为 `600`；已有文件按需执行 `chmod 600 backend/.env`。Windows 可用记事本编辑。配置文件请保存为 UTF-8。
 
 编辑 `backend/.env`：文字 AI 填 `DEEPSEEK_API_KEY`；语音识别和播报填 `DASHSCOPE_API_KEY`；本地演示保留 `BLUESWORD_ROBOT_MODE=mock`。连接真机时再按下文填写模式、协议、发单地址和工作人员口令。
 
@@ -37,7 +55,9 @@ chmod 600 backend/.env
 
 ### Windows 原生安装与启动
 
-安装 Windows 版 Git、Node.js 24 和 uv 后，在项目根目录打开 PowerShell。以下命令按顺序执行，任一步报错时先处理错误：
+安装 Windows 版 Git、Node.js 24 和 uv 后，重新打开 PowerShell，确认 `node`、`npm.cmd` 和 `uv` 可用。首次安装可选择分步执行或使用快捷脚本，执行其中一种即可。
+
+**分步安装：** 从项目根目录逐条执行，任一步报错时先处理错误。
 
 ```powershell
 uv python install 3.12
@@ -45,35 +65,76 @@ npm.cmd ci --prefix frontend
 npm.cmd run build --prefix frontend
 uv sync --locked --project backend --python 3.12 --extra dev
 if (-not (Test-Path backend/.env)) { Copy-Item backend/.env.example backend/.env }
+```
+
+以上依次准备 Python、安装前端依赖、构建网页、同步后端依赖，最后在缺少配置文件时复制示例。已有配置会保留。
+
+**快捷安装：** 如需一次完成上述步骤，在项目根目录执行：
+
+```powershell
+.\scripts\setup.cmd
+```
+
+分步安装全部成功，或快捷脚本显示“安装／更新完成”后，打开配置文件：
+
+```powershell
 notepad.exe backend/.env
 ```
 
 按“首次配置”填写并保存。内部模拟体验时保留 `BLUESWORD_ROBOT_MODE=mock`；从项目根目录启动：
 
 ```powershell
-Set-Location backend
-uv run --locked uvicorn bluesword.app:app --host 127.0.0.1 --port 8000 --workers 1
+.\scripts\start.cmd
 ```
 
-打开 <http://127.0.0.1:8000>，按 `Ctrl+C` 停止。连接真实机器人时，先停止模拟服务，按下方“连接真实机器人”填写 `backend/.env`，在 `backend` 目录运行：
+打开 <http://127.0.0.1:8000>，按 `Ctrl+C` 停止。连接真实机器人时，先停止模拟服务，按下方“连接真实机器人”填写 `backend/.env`，仍在项目根目录运行：
 
 ```powershell
-uv run --locked uvicorn bluesword.app:app --host 0.0.0.0 --port 8000 --workers 1
+.\scripts\start.cmd --host 0.0.0.0
 ```
 
-现场需允许机器人通过 Windows 防火墙访问网关 8000 端口，并使用网关电脑实际局域网地址配置回调。PowerShell 临时环境变量语法为 `$env:变量名="值"`，会优先于 `.env`；切换场景前用 `Remove-Item Env:变量名` 清除先前的临时覆盖。关闭启动终端前先按 `Ctrl+C`。
+已安装好的环境日常只需运行 `start.cmd`；取得新版本后按下方“已有环境与版本更新”选择需要的步骤。这些 `.cmd` 入口可直接从 PowerShell 调用，无需修改 PowerShell 脚本执行策略。
 
-需要使用现有 VLM 双服务或 Blender 一键脚本时，可选择 WSL2 按相应 Bash 步骤运行。
+现场需允许机器人通过 Windows 防火墙访问网关 8000 端口，并使用网关电脑实际局域网地址配置回调。自定义端口可加 `--port 4100`，机器人回调端口需同步修改。PowerShell 临时环境变量语法为 `$env:变量名="值"`，会优先于 `.env`；切换场景前用 `Remove-Item Env:变量名` 清除先前的临时覆盖。服务和日志在当前终端运行，关闭终端前先按 `Ctrl+C`；端口占用时脚本报错，不会自动结束其他进程。
+
+停止后如果终端询问 `Terminate batch job (Y/N)?`，输入 `Y` 并回车结束脚本。
+
+### 已有环境与版本更新
+
+已经安装好且代码未变化时，直接使用 `start` 入口，无需再次执行 `setup`。更新部署版本前先停止服务，再取得目标代码版本，按实际变化处理：
+
+| 更新内容 | 需要执行的步骤 |
+| --- | --- |
+| 只改文档 | 无需安装依赖或构建 |
+| 只改前端代码，依赖未变 | 构建网页后启动服务，刷新浏览器 |
+| 只改后端业务代码，依赖未变 | 重新启动服务 |
+| `frontend/package.json` 或 `frontend/package-lock.json` 变化 | 安装前端依赖、构建网页，再启动服务 |
+| `backend/pyproject.toml` 或 `backend/uv.lock` 变化 | 同步后端依赖，再启动服务 |
+| 多部分同时变化 | 合并执行对应步骤 |
+| 不确定变化范围，或需要完整更新、修复环境 | 运行 `setup`，成功后启动服务 |
+
+对应的操作如下，均从项目根目录执行：
+
+| 操作 | Ubuntu | Windows PowerShell |
+| --- | --- | --- |
+| 安装前端依赖 | `npm ci --prefix frontend` | `npm.cmd ci --prefix frontend` |
+| 构建网页 | `npm run build --prefix frontend` | `npm.cmd run build --prefix frontend` |
+| 同步后端依赖 | `uv sync --locked --project backend --python 3.12 --extra dev` | 同左 |
+| 完整安装／更新 | `bash scripts/setup.sh` | `.\scripts\setup.cmd` |
+
+`setup` 每次都会执行 `npm ci`，清理现有 `frontend/node_modules` 后按锁文件重新安装，并重新构建网页；它不只是检查是否已安装。npm 会利用缓存，但缓存不足时仍需下载。后端的 `uv sync --locked` 会检查并同步依赖，通常保留已满足要求的包，也会利用缓存。已有可用的 Python 3.12 通常会复用；Git、Node.js 和 uv 不会由脚本重新安装。因此，仅修改业务代码时可按上表执行，避免不必要的完整安装。
+
+已有 `.env` 不会被覆盖，新配置项请对照 `.env.example` 补充；修改后重启服务。前端 `VITE_*` 配置变化时需重新构建网页。日常 `start` 入口不执行依赖安装或网页构建。
 
 ### 选择启动方式
 
 以下命令从项目根目录执行。先按需要选一种，不要同时启动：
 
-| 用途 | 命令 | 协议与机器人 |
-| --- | --- | --- |
-| 只体验页面、语音和确认流程 | `BLUESWORD_ROBOT_MODE=mock bash scripts/start-demo.sh` | 后端内部模拟器 |
-| 本地验证现场接口（推荐联调入口） | `bash scripts/start-protocol-demo.sh --no-blender` | VLM v1.2，两个本地 HTTP 服务 |
-| 连接真实机器人 | 按下文配置后启动 uvicorn | VLM v1.2，真实机器人地址 |
+| 用途 | Ubuntu 命令 | Windows PowerShell 命令 | 配置与机器人 |
+| --- | --- | --- | --- |
+| 只体验页面、语音和确认流程 | `bash scripts/start.sh` | `.\scripts\start.cmd` | `.env` 设置 `BLUESWORD_ROBOT_MODE=mock` |
+| 本地验证现场接口（Ubuntu 模拟联调） | `bash scripts/start-protocol-demo.sh --no-blender` | 暂无原生双服务启动脚本 | VLM v1.2，两个本地 HTTP 服务 |
+| 连接真实机器人 | `bash scripts/start.sh --host 0.0.0.0` | `.\scripts\start.cmd --host 0.0.0.0` | 按下文配置 VLM v1.2 和真实机器人地址 |
 
 前两种默认打开 <http://127.0.0.1:8000>。它们都不需要 Blender。`source "$HOME/.local/bin/env"` 只用于让终端找到 uv；已经可以运行 `uv --version` 时无需重复。
 
@@ -82,14 +143,14 @@ uv run --locked uvicorn bluesword.app:app --host 0.0.0.0 --port 8000 --workers 1
 在项目根目录执行：
 
 ```bash
-BLUESWORD_ROBOT_MODE=mock bash scripts/start-demo.sh
+BLUESWORD_ROBOT_MODE=mock bash scripts/start.sh
 ```
 
 打开 <http://127.0.0.1:8000>，输入“帮我拿一瓶矿泉水”，按页面提示确认执行；默认自动模拟接物。API 文档在 <http://127.0.0.1:8000/docs>，健康检查为 `GET /health`。保持终端打开，按 `Ctrl+C` 停止。
 
-### 2. VLM HTTP 模拟联调（无需 Blender）
+### 2. VLM HTTP 模拟联调（Ubuntu，无需 Blender）
 
-确保 8000、8001 空闲，在项目根目录执行：
+本节的一键双服务脚本用于 Ubuntu。确保 8000、8001 空闲，在项目根目录执行：
 
 ```bash
 bash scripts/start-protocol-demo.sh --no-blender
@@ -140,12 +201,16 @@ BLUESWORD_ROBOT_DISPATCH_URL=http://<机器人IP>:8080/api/task/dispatch
 BLUESWORD_CATALOG_PATH=
 ```
 
-在项目根目录执行：
+在项目根目录执行；Ubuntu 使用：
 
 ```bash
-npm run build --prefix frontend
-cd backend
-uv run --locked uvicorn bluesword.app:app --host 0.0.0.0 --port 8000 --workers 1
+bash scripts/start.sh --host 0.0.0.0
+```
+
+Windows PowerShell 使用：
+
+```powershell
+.\scripts\start.cmd --host 0.0.0.0
 ```
 
 机器人团队将 `vlm.url` 配为 **网关电脑的局域网IP:8000**，确保双向网络可达。网关电脑可打开 <http://127.0.0.1:8000>，按 `Ctrl+C` 停止服务。不要用 `mock` 或上述模拟联调脚本连接真机；模拟脚本会固定指向本机模拟机器人。现场口令、编码映射和回调说明见 [接口文档](docs/接口文档.md)。在其他电脑通过浏览器使用麦克风时还需 HTTPS。
@@ -173,9 +238,9 @@ uv run --locked uvicorn bluesword.app:app --host 0.0.0.0 --port 8000 --workers 1
 
 接单、进度 `placed` 与最终 `finished` 是不同阶段。失败、超时或数量不明时先核对机器人和物品，不重复发单，也不把网页解除限制当成停止机器人。完整字段与数量处理见 [接口文档](docs/接口文档.md)。
 
-### Blender 三维联动
+### Blender 三维联动（Ubuntu）
 
-额外安装 Blender 4.5 LTS，并将 `BLENDER_BIN` 设置为实际可执行文件的绝对路径。Linux 需要图形桌面和中文字体；Ubuntu 可安装 `fonts-noto-cjk`。完成上述前后端安装后，在项目根目录执行：
+本节的一键演示脚本用于 Ubuntu，需要图形桌面和中文字体（可安装 `fonts-noto-cjk`）。额外安装 Blender 4.5 LTS，并将 `BLENDER_BIN` 设置为实际可执行文件的绝对路径。完成上述前后端安装后，在项目根目录执行：
 
 ```bash
 # 先设置 BLENDER_BIN；该文件应可以直接执行
