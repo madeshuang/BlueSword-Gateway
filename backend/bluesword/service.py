@@ -271,6 +271,19 @@ class TaskManager:
         self.store.restock([item for key,item in self.items.items() if item_id in (None,key)])
         return self.inventory()
 
+    async def refund_reserved_stock(self, expected_task_id: str | None) -> dict[str, int]:
+        async with self.lock:
+            task = self.active
+            if self.settings.robot_mode != "lanjian_http" or not task or task.id != expected_task_id:
+                raise RobotError("task_conflict", "任务已变化，请重新核对。")
+            if self.busy or task.status not in ("failed", "cancelled", "interrupted") or not task.recovery_required:
+                raise RobotError("task_conflict", "仅可退回已中止且待现场处理任务的预留库存，请先确认机器人已停止动作。")
+            returned = self.store.settle_stock(task.id, refund=True)
+            if returned:
+                self.store.append(task.id, {"type": "operator_stock_refund", "items": returned,
+                                            "confirmation": "确认本单全部物品仍在货架"})
+            return returned
+
     async def resolve_remote(self, expected_task_id: str | None) -> None:
         async with self.lock:
             if self.settings.robot_mode != "lanjian_http":

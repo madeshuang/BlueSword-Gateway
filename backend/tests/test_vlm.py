@@ -261,6 +261,47 @@ def test_fault_is_terminal_and_previous_order_cannot_complete_new_order(gateway)
     assert client.get("/api/tasks/" + second).json() == failed
 
 
+@pytest.mark.parametrize("count", [1, 2])
+def test_operator_refunds_only_failed_order_once_and_keeps_recovery(gateway, count):
+    client, _ = gateway
+    before = client.get('/api/inventory').json()
+    identifier = start(client, count)
+    headers = {'X-Operator-Token': 'onsite'}
+    body = {'task_id': identifier, 'confirmation': '确认本单全部物品仍在货架'}
+    assert client.post('/api/operator/refund', json=body).status_code == 403
+    assert client.post('/api/operator/refund', headers=headers, json=body).status_code == 409
+    client.post('/api/task/error', json={'taskId': identifier, 'message': '抓取失败'})
+    final(client, identifier)
+    assert client.post('/api/operator/refund', headers=headers, json={**body, 'confirmation': ''}).status_code == 400
+    assert client.post('/api/operator/refund', headers=headers, json={**body, 'task_id': 'wrong'}).status_code == 409
+    result = client.post('/api/operator/refund', headers=headers, json=body)
+    assert result.status_code == 200 and sum(result.json()['returned'].values()) == count
+    assert client.get('/api/inventory').json() == before
+    assert client.get('/health').json()['recovery_required']
+    assert client.post('/api/operator/refund', headers=headers, json=body).json()['returned'] == {}
+    assert client.get('/api/inventory').json() == before
+    events = client.get(f'/api/tasks/{identifier}/events').json()
+    assert sum(e.get('type') == 'operator_stock_refund' for e in events) == 1
+    assert client.post('/api/operator/resolve', headers=headers, json={
+        'task_id': identifier, 'confirmation': '已核对机器人和物品'}).status_code == 200
+    assert not client.get('/health').json()['recovery_required']
+    assert client.post('/api/operator/refund', headers=headers, json=body).status_code == 409
+
+
+def test_refund_after_restock_does_not_add_stock_again(gateway):
+    client, _ = gateway
+    before = client.get('/api/inventory').json()
+    identifier = start(client, 1)
+    client.post('/api/task/error', json={'taskId': identifier, 'message': '识别失败'})
+    final(client, identifier)
+    headers = {'X-Operator-Token': 'onsite'}
+    assert client.post('/api/inventory/reset', headers=headers).status_code == 200
+    result = client.post('/api/operator/refund', headers=headers, json={
+        'task_id': identifier, 'confirmation': '确认本单全部物品仍在货架'})
+    assert result.status_code == 200 and result.json()['returned'] == {}
+    assert client.get('/api/inventory').json() == before
+
+
 def test_same_robot_product_in_two_display_slots_is_one_wire_line(gateway):
     client, sent = gateway
     response = client.post(
