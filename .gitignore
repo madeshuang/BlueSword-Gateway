@@ -6,6 +6,7 @@ __pycache__/
 *.egg-info/
 .env
 backend/data/
+backend/models/
 output/
 tmp/
 simulation/assets/agibot_g2/robots/

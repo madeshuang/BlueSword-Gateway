@@ -22,7 +22,7 @@ def load_catalog(settings: Settings, scene_items: dict[str, Item]) -> dict[str, 
     for n, row in enumerate(rows):
         # Synthetic placement belongs only to the local mock, never to the robot protocol.
         box = row.get("box", (0.14 + n % 4 * 0.18, 0.18 + n // 4 * 0.23, 0.09, 0.14))
-        item = Item(id=row["id"], name=row["name"], aliases=list(dict.fromkeys([row["name"], *row.get("aliases", [])])),
+        item = Item(id=row["id"], name=row["name"], name_en=row.get("nameEn", ""), aliases_en=row.get("aliasesEn", []), aliases=list(dict.fromkeys([row["name"], *row.get("aliases", [])])),
                     location=row.get("location", ""), robot_item=row.get("robotItem") or row["name"],
                     box=box, stock=row["initialStock"], category=row["category"], description=row.get("description", ""))
         if item.id in items:

@@ -11,7 +11,7 @@ function greeting() {
   return '晚上好'
 }
 
-export function Home(props: { phase: Phase; voiceEnabled: boolean; voiceListening: boolean; voiceStatus: string; onSubmit: (t: string) => void; onMic: () => void }) {
+export function Home(props: { voiceActive?: boolean; phase: Phase; voiceEnabled: boolean; voiceListening: boolean; voiceStatus: string; onSubmit: (t: string) => void; onMic: () => void }) {
   return (
     <section className="home">
       <h1 className="home-title">
@@ -22,7 +22,7 @@ export function Home(props: { phase: Phase; voiceEnabled: boolean; voiceListenin
         {greeting()}，我是<span className="accent">{config.assistantName}</span>
       </h1>
 
-      <Composer big phase={props.phase} partial="" onSubmit={props.onSubmit} onMic={props.onMic} voiceEnabled={props.voiceEnabled} voiceListening={props.voiceListening} voiceStatus={props.voiceStatus} />
+      <Composer voiceActive={props.voiceActive} big phase={props.phase} partial="" onSubmit={props.onSubmit} onMic={props.onMic} voiceEnabled={props.voiceEnabled} voiceListening={props.voiceListening} voiceStatus={props.voiceStatus} />
 
 
       <div className="chips">

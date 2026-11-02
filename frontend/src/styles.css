@@ -361,6 +361,9 @@ button {
   height: 3.3rem;
 }
 
+.mic:not(.active) { color: var(--muted); background: var(--surface); }
+.mic.active { box-shadow: inset 0 0 0 1px var(--accent); }
+
 .mic-ring {
   position: absolute;
   inset: 0;
@@ -1156,6 +1159,8 @@ button {
   opacity: 1;
   transform: translate(-50%, 0) scale(1);
 }
+
+.pet[data-phase="sleep"] .pet-bubble { color: var(--muted); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

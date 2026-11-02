@@ -12,6 +12,7 @@ const PHASE_HINT: Record<Phase, string> = {
 }
 
 export function Composer(props: {
+  voiceActive?: boolean
   voiceListening?: boolean
   voiceEnabled?: boolean
   voiceStatus?: string
@@ -24,6 +25,8 @@ export function Composer(props: {
 }) {
   const [text, setText] = useState('')
   const listening = !!props.voiceListening
+  const active = props.voiceActive ?? listening
+  const micLabel = active ? '关闭语音，让布鲁休眠 / End voice' : '唤醒布鲁 / Wake Blue'
   const busy = props.phase === 'thinking' || props.phase === 'acting'
 
   const submit = () => {
@@ -35,8 +38,8 @@ export function Composer(props: {
 
   return (
     <div className={`composer ${props.big ? 'big' : ''} ${listening ? 'listening' : ''}`}>
-      <button className="mic" onClick={props.onMic} aria-pressed={listening} aria-label={listening ? '停止收音' : '语音'} title={listening ? '停止收音，最后一句会继续识别，播报不受影响' : props.voiceEnabled ? '点一下，直接和我说话' : '开启语音输入'}>
-        {listening ? <span className="mic-stop" /> : <IconMic size={props.big ? 24 : 22} />}
+      <button className={`mic ${active ? 'active' : ''}`} onClick={props.onMic} aria-pressed={active} aria-label={micLabel} title={micLabel}>
+        {active ? <span className="mic-stop" /> : <IconMic size={props.big ? 24 : 22} />}
         <span className="mic-ring" />
       </button>
 

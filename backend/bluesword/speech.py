@@ -8,16 +8,24 @@ import logging
 import secrets
 import time
 import uuid
+from typing import Literal
 from urllib.parse import urlparse
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 from websockets.asyncio.client import connect
 
 from .config import Settings
+from .language import tts_language
 
 logger = logging.getLogger(__name__)
+
+
+class VoiceControl(BaseModel):
+    session_id: str | None = Field(default=None, max_length=100)
+    action: Literal["resume", "pause", "sleep", "listen", "toggle", "tts_on", "tts_off", "interrupt"]
 
 
 async def recognize(pcm: bytes, settings: Settings) -> str:
@@ -91,7 +99,7 @@ async def synthesize(text: str, settings: Settings) -> bytes:
             headers={"Authorization": f"Bearer {settings.speech_api_key}"},
             json={
                 "model": settings.tts_model,
-                "input": {"text": text, "voice": settings.tts_voice, "language_type": "Chinese"},
+                "input": {"text": text, "voice": settings.tts_voice, "language_type": tts_language(text)},
             },
         )
         response.raise_for_status()
@@ -130,8 +138,21 @@ def mount_speech(app: FastAPI, settings: Settings) -> None:
         return {
             "configured": bool(settings.speech_api_key),
             "wake_phrase": "你好，布鲁",
+            "wake_phrases": ["你好，布鲁", "Hello Blue"],
             "tts": bool(settings.speech_api_key),
+            "mode": settings.speech_mode,
+            "local": app.state.local_voice.status() if app.state.local_voice else None,
         }
+
+    @app.post("/api/speech/control")
+    async def control(body: VoiceControl, request: Request, authorization: str | None = Header(default=None)):
+        authorized(authorization)
+        origin = request.headers.get("origin")
+        if origin and origin not in settings.allowed_origins and origin != str(request.base_url).rstrip("/"):
+            raise HTTPException(403, "请从布鲁页面控制语音。")
+        if app.state.local_voice is None:
+            raise HTTPException(409, "当前未启用本地语音模式。")
+        return await app.state.local_voice.control(body.action, body.session_id)
 
     async def read_limited(request: Request, limit: int) -> bytes:
         body = bytearray()

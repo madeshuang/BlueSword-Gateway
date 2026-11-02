@@ -10,6 +10,8 @@ from typing import Literal
 
 from .config import Item
 from .domain import TaskLine, TaskRequest
+from .english_orders import normalized, parse_items, revise_english
+from .language import language_of
 
 
 @dataclass(frozen=True)
@@ -23,8 +25,16 @@ class Intent:
 
 def resolve(text: str, items: dict[str, Item]) -> Intent:
     text = text.strip()
-    if text in {"停止", "停下", "取消", "取消任务", "别拿了", "停止任务"}:
+    if text in {"停止", "停下", "取消", "取消任务", "别拿了", "停止任务"} or normalized(text) in {
+        "stop", "stop please", "please stop", "cancel", "cancel the task", "cancel the order", "cancel order",
+    }:
         return Intent("cancel")
+    if language_of(text) == "en":
+        try:
+            lines = parse_items(text, items)
+            return Intent("fetch", item_id=lines[0].item_id, items=lines)
+        except ValueError as exc:
+            return Intent("chat", str(exc))
     if any(word in text for word in ("不要", "别拿", "不想", "不用", "别动", "不要动")):
         return Intent("chat", "好的，我不会发起取物。若需要中止正在执行的任务，请点击停止任务。")
     if any(word in text for word in ("库存", "还剩", "剩余", "还有多少")):
@@ -77,6 +87,14 @@ _NO = ("取消", "不要", "不用", "算了", "别", "不行", "不可以", "�
 
 def confirmation_reply(text: str) -> bool | None:
     """Interpret a typed/spoken answer to a pending confirmation; None when unclear."""
+    english = normalized(text)
+    if english in {"yes", "yes please", "yes, please", "confirm", "confirmed", "i confirm", "go ahead",
+                   "please go ahead", "okay", "ok", "sure", "yes go ahead", "yes, go ahead"}:
+        return True
+    if english in {"no", "no thanks", "no, thanks", "no thank you", "no, thank you", "cancel",
+                   "cancel please", "please cancel", "cancel the order", "no cancel", "no, cancel", "stop", "please stop",
+                   "never mind", "nevermind", "not now", "wait", "don't", "do not"}:
+        return False
     text = re.sub(r"[\s，,。！!～~、]", "", text)
     if text in {*_NO, "取消吧", "不要了", "不用了", "算了吧", "先不拿了", "别拿了", "停止", "停下"}:
         return False
@@ -93,6 +111,8 @@ def revise_order(text: str, current: list[TaskLine], items: dict[str, Item]) -> 
     """
     if confirmation_reply(text) is not None:
         return None
+    if language_of(text) == "en":
+        return revise_english(text, current, items)
     adding = bool(re.search(r"再(?:来|拿|要|加|给)|加(?:上|个|一|两|二|\d|点)?|还要|也要|另外", text))
     replacing = bool(re.search(r"改成|换成|改为|换为|只要", text))
     removing = bool(re.search(r"不要|不用|去掉|删掉|不拿", text))

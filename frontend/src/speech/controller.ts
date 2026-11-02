@@ -3,8 +3,8 @@ import type { ServerEvent } from '../types'
 import workletUrl from './capture-worklet.js?url'
 import { pcm16, wakeCommand } from './audio'
 
-export interface SpeechState { enabled: boolean; listening: boolean; tts: boolean; status: string }
-const WAITING = '说「你好，布鲁」叫我，或在这里输入…'
+export interface SpeechState { enabled: boolean; listening: boolean; tts: boolean; status: string; active?: boolean; mode?: 'browser' | 'local'; phase?: string; session_id?: string }
+const WAITING = '说「你好，布鲁 / Hello Blue」叫我，或在这里输入…'
 const LISTENING = '我在听，你说吧…'
 const STOPPED = '想说话时，点一下麦克风就好'
 const LAST_SENTENCE = '麦克风关好啦，最后一句让我听完…'
@@ -45,7 +45,10 @@ export class SpeechController {
   private spoken = new Set<string>()
   private lastPlayback = ''
   private echoUntil = 0
-  private state: SpeechState = { enabled: false, listening: false, tts: true, status: '' }
+  private state: SpeechState = { enabled: false, listening: false, tts: false, status: '' }
+
+  private local = false
+  private ready: Promise<void> | null = null
 
   private submit: (text: string) => void
   private notice: (text: string) => void
@@ -58,8 +61,35 @@ export class SpeechController {
   }
 
   async unlock() {
+    await this.initialize()
+    if (this.local || this.closed) return
     this.context ??= new AudioContext()
     if (this.context.state === 'suspended') await this.context.resume()
+  }
+
+  initialize() {
+    this.ready ??= apiFetch('/api/speech').then(async response => {
+      if (!response.ok) throw new Error('语音状态暂不可用')
+      const data = await response.json()
+      if (!this.closed && !this.local && data.mode === 'local' && data.local) this.localState(data.local)
+    }).catch(() => { this.ready = null })
+    return this.ready
+  }
+
+  private localState(state: Omit<SpeechState, 'listening'>) {
+    this.local = true
+    this.state = { enabled: state.enabled, tts: state.tts, status: state.status, active: state.active, listening: !!state.active && state.phase === 'listening', phase: state.phase, session_id: state.session_id ?? this.state.session_id, mode: 'local' }
+    this.update(this.state)
+  }
+
+  private async control(action: string) {
+    try {
+      const response = await apiFetch('/api/speech/control', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, session_id: this.state.session_id }),
+      })
+      if (!response.ok) throw new Error('本地语音未连接')
+      if (!this.closed) this.localState(await response.json())
+    } catch { if (!this.closed) this.report('本地语音未连接，请检查后端服务') }
   }
 
   private isActive() {
@@ -68,7 +98,7 @@ export class SpeechController {
 
   private report(status: string) {
     if (!this.closed) {
-      this.state = { ...this.state, listening: this.state.enabled && this.isActive(), status }
+      this.state = { ...this.state, listening: this.local ? this.state.listening : this.state.enabled && this.isActive(), status }
       this.update(this.state)
     }
   }
@@ -76,25 +106,37 @@ export class SpeechController {
   private readyStatus() { return !this.state.enabled ? STOPPED : this.isActive() ? LISTENING : WAITING }
 
   activate() {
+    if (this.local) return
     this.engaged = true
     this.activeUntil = Date.now() + ACTIVE_MS
     if (this.state.enabled) this.report(LISTENING)
   }
 
   async autoStart() {
+    await this.initialize()
+    if (this.local) return
     if (this.autoAttempted || this.stopped || this.closed) return
     this.autoAttempted = true
     await this.mic(true)
   }
 
   async toggle() {
+    await this.initialize()
+    if (this.local) { await this.mic(); return }
     if (this.starting || this.state.enabled && this.isActive()) this.stopListening()
     else if (this.state.enabled) this.activate()
     else await this.mic()
   }
 
   async mic(automatic = false) {
+    await this.initialize()
     if (this.closed || this.starting) return
+    if (this.local) {
+      if (automatic) return
+      this.starting = true
+      try { await this.control('toggle') } finally { this.starting = false }
+      return
+    }
     this.stopped = false
     if (this.stream) { if (!automatic) this.activate(); return }
     const generation = ++this.micEpoch
@@ -141,6 +183,7 @@ export class SpeechController {
   }
 
   stopListening() {
+    if (this.local) { void this.control('pause'); return }
     this.stopped = true
     // Flush before releasing the stream. Already submitted ASR survives this operation.
     this.finish()
@@ -149,6 +192,7 @@ export class SpeechController {
   }
 
   setTts(enabled: boolean) {
+    if (this.local) { void this.control(enabled ? 'tts_on' : 'tts_off'); return }
     this.state = { ...this.state, tts: enabled }
     if (!enabled) this.stopPlayback()
     this.update(this.state)
@@ -231,6 +275,11 @@ export class SpeechController {
   }
 
   onEvent(event: ServerEvent) {
+    if (event.type === 'voice_status') { this.localState(event); return }
+    if (this.local) {
+      if (event.type === 'device' && !event.online) this.report('连接中 · 本地监听由后端运行')
+      return
+    }
     if (event.type === 'phase') {
       const wasProcessing = this.processing
       this.processing = event.phase === 'thinking'
@@ -299,11 +348,12 @@ export class SpeechController {
     this.speechQueue = []; this.playing = false
   }
 
-  interrupt() { this.stopPlayback() }
+  interrupt() { if (!this.local) this.stopPlayback() }
   reset() {
+    if (this.local) { this.partial(''); return }
     this.epoch++; this.inputAbort.abort(); this.inputAbort = new AbortController()
     this.recordings = []; this.recognizing = false; this.clearAudio(); this.stopPlayback()
     this.text.clear(); this.activeUntil = 0; this.engaged = false; this.processing = false; this.confirming = false; this.partial(''); this.report(this.readyStatus())
   }
-  close() { this.closed = true; this.reset(); this.releaseMic(); void this.context?.close() }
+  close() { this.closed = true; if (!this.local) { this.reset(); this.releaseMic() }; void this.context?.close() }
 }

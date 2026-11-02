@@ -150,6 +150,7 @@ const reset = (state: State, extra: Partial<State> = {}): State => ({
 })
 
 export function reducer(state: State, action: Action): State {
+  if (action.type === 'voice_status') return state
   const s: State = { ...state, lastActivity: Date.now() }
   switch (action.type) {
     case 'wake':
@@ -158,7 +159,7 @@ export function reducer(state: State, action: Action): State {
       return { ...s, phase: action.phase, view: action.phase === 'idle' || s.homeAfterRestart ? s.view : 'session' }
     case 'asr':
       if (!action.final) return { ...s, ...(action.text ? { view: 'session' as const } : {}), partial: action.text }
-      return { ...s, view: 'session', partial: '', messages: [...s.messages, { id: uid(), role: 'user', text: action.text }] }
+      return { ...s, viewing: null, restored: false, homeAfterRestart: false, sessionBootId: s.backendBootId ?? s.sessionBootId, view: 'session', partial: '', messages: [...s.messages, { id: uid(), role: 'user', text: action.text }] }
     case 'local_user':
       return { ...s, viewing: null, restored: false, homeAfterRestart: false, sessionBootId: s.backendBootId ?? s.sessionBootId, view: 'session', messages: [...s.messages, { id: uid(), role: 'user', text: action.text }] }
     case 'local_notice':

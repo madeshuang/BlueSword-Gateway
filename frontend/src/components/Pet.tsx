@@ -6,7 +6,7 @@ import { BluePet } from './BluePet'
 const BluePet3D = lazy(() => import('../pet3d/BluePet3D'))
 
 /** 优先 3D 布鲁；浏览器不支持 WebGL 时退回 2D 版 */
-export function Pet(props: { phase: Phase; onActivate: () => void }) {
+export function Pet(props: { phase: Phase | 'sleep'; onActivate: () => void }) {
   const [webgl, setWebgl] = useState(() => {
     try {
       return !!document.createElement('canvas').getContext('webgl2')

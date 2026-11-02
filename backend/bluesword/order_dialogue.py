@@ -58,7 +58,10 @@ def apply_decision(decision: Decision, current: list[TaskLine], items: dict) -> 
     return TaskRequest(items=[TaskLine(item_id=k, count=v) for k, v in counts.items()], request_id="draft").items
 
 
-def change_message(previous: list[TaskLine], current: list[TaskLine], items: dict) -> str:
+def change_message(previous: list[TaskLine], current: list[TaskLine], items: dict, language="zh") -> str:
+    if language == "en":
+        from .language import order_label
+        return f'Updated to {order_label(current, items, language)}. Say "yes" or tap Confirm when ready.'
     before = {line.item_id: line.count for line in previous}
     after = {line.item_id: line.count for line in current}
     added = [f"{items[k].name} × {n - before.get(k, 0)}" for k, n in after.items() if n > before.get(k, 0)]

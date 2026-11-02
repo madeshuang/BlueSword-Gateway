@@ -20,7 +20,7 @@ export function Sidebar(props: {
   device: { online: boolean; name: string }
   onNew: () => void
   onOpen: (id: string) => void
-  phase: Phase
+  phase: Phase | 'sleep'
   onPet: () => void
 }) {
   const groups = new Map<string, HistoryItem[]>()

@@ -13,6 +13,11 @@
     "robotItem": "lighter_box",
     "aliases": [
       "打火机"
+    ],
+    "nameEn": "USB lighter",
+    "aliasesEn": [
+      "lighter",
+      "usb lighter"
     ]
   },
   {
@@ -30,6 +35,12 @@
     "aliases": [
       "扑克牌",
       "扑克"
+    ],
+    "nameEn": "playing cards",
+    "aliasesEn": [
+      "playing cards",
+      "cards",
+      "a deck of cards"
     ]
   },
   {
@@ -47,6 +58,12 @@
     "aliases": [
       "签字笔",
       "圆珠笔"
+    ],
+    "nameEn": "signature pen",
+    "aliasesEn": [
+      "pen",
+      "pens",
+      "signature pen"
     ]
   },
   {
@@ -63,6 +80,12 @@
     "robotItem": "table_tennis_ball_box",
     "aliases": [
       "乒乓球"
+    ],
+    "nameEn": "table tennis balls",
+    "aliasesEn": [
+      "table tennis balls",
+      "ping pong balls",
+      "ping-pong balls"
     ]
   },
   {
@@ -79,6 +102,12 @@
     "robotItem": "shuttlecock_tube",
     "aliases": [
       "羽毛球"
+    ],
+    "nameEn": "shuttlecocks",
+    "aliasesEn": [
+      "shuttlecocks",
+      "shuttlecock",
+      "badminton shuttlecocks"
     ]
   },
   {
@@ -95,6 +124,11 @@
     "robotItem": "air_pump",
     "aliases": [
       "打气筒"
+    ],
+    "nameEn": "air pump",
+    "aliasesEn": [
+      "air pump",
+      "pump"
     ]
   },
   {
@@ -112,6 +146,16 @@
     "aliases": [
       "奥利奥",
       "饼干"
+    ],
+    "nameEn": "Oreo cookies",
+    "aliasesEn": [
+      "oreos",
+      "oreo",
+      "cookies",
+      "cookie",
+      "biscuits",
+      "biscuit",
+      "oreo cookies"
     ]
   },
   {
@@ -129,6 +173,13 @@
     "aliases": [
       "安慕希",
       "酸奶"
+    ],
+    "nameEn": "Ambrosial yogurt",
+    "aliasesEn": [
+      "yogurt",
+      "yoghurt",
+      "ambrosial",
+      "ambrosial yogurt"
     ]
   },
   {
@@ -145,6 +196,13 @@
     "robotItem": "haoliyou",
     "aliases": [
       "好丽友"
+    ],
+    "nameEn": "Orion Choco Pie",
+    "aliasesEn": [
+      "choco pie",
+      "choco pies",
+      "orion choco pie",
+      "chocolate pie"
     ]
   },
   {
@@ -161,6 +219,14 @@
     "robotItem": "shupian",
     "aliases": [
       "薯片"
+    ],
+    "nameEn": "potato chips",
+    "aliasesEn": [
+      "chips",
+      "crisps",
+      "potato chips",
+      "lays",
+      "lay's chips"
     ]
   }
 ]

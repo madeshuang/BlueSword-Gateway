@@ -36,6 +36,7 @@ export interface SkillCall {
 
 /** 机器人动作前的确认请求：用户允许后才会执行 */
 export interface ConfirmRequest {
+  language?: 'zh' | 'en'
   id: string
   title: string
   skill?: string
@@ -93,6 +94,7 @@ export interface Task {
 }
 
 export type ServerEvent =
+  | { type: 'voice_status'; session_id?: string; mode: 'local'; enabled: boolean; active: boolean; tts: boolean; status: string; phase: string; error: string }
   | { type: 'wake' }
   | { type: 'phase'; phase: Phase }
   | { type: 'asr'; text: string; final: boolean }

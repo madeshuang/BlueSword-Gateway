@@ -213,10 +213,12 @@ function groupTurns(messages: Message[]) {
 }
 
 export function Conversation(props: {
+  voiceActive?: boolean
   voiceListening?: boolean
   voiceEnabled?: boolean
   voiceStatus?: string
   restored?: boolean
+  localVoice?: boolean
   phase: Phase
   partial: string
   messages: Message[]
@@ -242,7 +244,7 @@ export function Conversation(props: {
         <span className="conv-name">{config.assistantName}</span>
         <span className={`conv-status ${props.phase}`}>
           <i />
-          {props.readOnly ? '历史对话' : STATUS[props.phase]}
+          {props.readOnly ? '历史对话' : props.phase === 'listening' && props.voiceActive === false ? '语音已休眠' : STATUS[props.phase]}
         </span>
       </header>
 
@@ -269,7 +271,7 @@ export function Conversation(props: {
 
       {!props.readOnly && <div className="conv-composer">
         {props.confirm}
-        <Composer phase={props.phase} partial={props.partial} placeholder={props.placeholder} onSubmit={props.onSubmit} onMic={props.onMic}
+        <Composer voiceActive={props.voiceActive} phase={props.phase} partial={props.partial} placeholder={props.placeholder} onSubmit={props.onSubmit} onMic={props.onMic}
           voiceEnabled={props.voiceEnabled} voiceListening={props.voiceListening} voiceStatus={props.voiceStatus} />
       </div>}
 

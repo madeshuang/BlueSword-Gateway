@@ -115,8 +115,9 @@ test('own playback transcript is suppressed, and old recognition cannot enter a 
   assert.equal(next.submissions.length, 0)
 })
 
-test('stopping input leaves current playback and future TTS enabled', () => {
+test('stopping input preserves explicitly enabled playback', () => {
   const { c } = speechHarness(() => { throw Error('no recording expected') })
+  c.setTts(true)
   let stops = 0
   c.speechSource = { stop: () => stops++ }; c.playing = true
   c.stopListening()

@@ -49,7 +49,7 @@ export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState)
   const bridge = useRef<Bridge | null>(null)
   const speech = useRef<SpeechController | null>(null)
-  const [voice, setVoice] = useState<SpeechState>({ enabled: false, listening: false, tts: true, status: '' })
+  const [voice, setVoice] = useState<SpeechState>({ enabled: false, listening: false, tts: false, status: '' })
 
   useEffect(() => {
     const controller = new SpeechController(
@@ -59,6 +59,7 @@ export default function App() {
       () => dispatch({ type: 'wake' }),
     )
     speech.current = controller
+    void controller.initialize()
     const unlock = (event: PointerEvent) => {
       void controller.unlock().then(() => {
         if (!(event.target as HTMLElement).closest('.mic')) void controller.autoStart()
@@ -93,10 +94,10 @@ export default function App() {
     return () => { save(); window.removeEventListener('pagehide', save); document.removeEventListener('visibilitychange', save) }
   }, [])
 
-  // 快捷键：T 切换明暗主题，Esc 回首页，空格开启语音
+  // 快捷键：T 切换明暗主题，Esc 回首页，空格切换语音
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).tagName === 'INPUT') return
+      if ((e.target as HTMLElement).closest('input, textarea, button, [contenteditable="true"]') || e.repeat) return
       if (e.key === 't' || e.key === 'T') {
         const root = document.documentElement
         root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light'
@@ -148,6 +149,15 @@ export default function App() {
   const confirmVisible = useConfirmVisible(state)
   const confirmBar = state.confirm && confirmVisible ? <ConfirmBar request={state.confirm} onAnswer={answerConfirm} /> : undefined
 
+  const voiceActive = voice.mode === 'local' ? !!voice.active : voice.listening
+  const speechSettings = <div className="speech-settings">
+    {voice.status && <span role="status">{voice.status}</span>}
+    <button aria-pressed={voiceActive} onClick={actions.mic}>
+      {voiceActive ? '关闭语音' : '唤醒布鲁'}
+    </button>
+    <button aria-pressed={voice.tts} onClick={() => speech.current?.setTts(!voice.tts)}>播报{voice.tts ? '开' : '关'}</button>
+  </div>
+
   const visionPanel = (
     <VisionPanel
       showCamera={state.showCamera}
@@ -167,7 +177,8 @@ export default function App() {
 
   if (state.backendMode === 'gdk_mock') return (
     <>
-      <DemoConsole state={state} onSubmit={actions.submit} onMic={actions.mic}
+      {speechSettings}
+      <DemoConsole state={state} voiceActive={voiceActive} voiceListening={voice.listening} voiceStatus={voice.status} onSubmit={actions.submit} onMic={actions.mic}
     onCancel={() => bridge.current?.send({ type: 'cancel_task', task_id: state.task?.id })}
     onTake={() => bridge.current?.send({ type: 'mock_take' })}
     onRecover={() => bridge.current?.send({ type: 'mock_recover' })} confirm={confirmBar} />
@@ -181,21 +192,23 @@ export default function App() {
         activeId={state.viewing ?? state.sessionId}
         device={state.device}
         onNew={actions.home}
-        phase={state.viewing ? 'idle' : state.phase}
+        phase={!voiceActive ? 'sleep' : state.viewing ? 'idle' : state.phase}
         onPet={actions.mic}
         onOpen={(id) => {
           dispatch({ type: 'open_history', id })
         }}
       />
       <main className="main">
+        {speechSettings}
         {state.view === 'home' ? (
           <div className={`session ${showVision ? 'with-vision' : ''}`}>
-            <Home phase={state.phase} voiceEnabled={voice.enabled} voiceListening={voice.listening} voiceStatus={voice.status} onSubmit={actions.submit} onMic={actions.mic} />
+            <Home voiceActive={voiceActive} phase={state.phase} voiceEnabled={voice.enabled} voiceListening={voice.listening} voiceStatus={voice.status} onSubmit={actions.submit} onMic={actions.mic} />
             {showVision && visionPanel}
           </div>
         ) : (
           <div className={`session ${showVision ? 'with-vision' : ''}`}>
             <Conversation
+              voiceActive={voiceActive} localVoice={voice.mode === 'local'}
               readOnly={!!state.viewing}
               phase={state.viewing ? 'idle' : state.phase}
               partial={state.partial}

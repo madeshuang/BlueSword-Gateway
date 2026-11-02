@@ -117,7 +117,7 @@ function TracePanel({ scene }: { scene: Simulation | null }) {
   </section>
 }
 
-export function DemoConsole(props: { state: State; onSubmit: (text: string) => void; onMic: () => void; confirm?: ReactNode;
+export function DemoConsole(props: { state: State; voiceActive?: boolean; voiceListening?: boolean; voiceStatus?: string; onSubmit: (text: string) => void; onMic: () => void; confirm?: ReactNode;
   onCancel: () => void; onTake: () => void; onRecover: () => void }) {
   const { scene, connected } = useSimulation()
   const running = scene?.task?.status === 'running'
@@ -144,6 +144,7 @@ export function DemoConsole(props: { state: State; onSubmit: (text: string) => v
         </div>
         {!props.state.messages.length && <div className="demo-greeting"><span>你好，我是布鲁。</span><h2>你说要什么，<br />我来完成取物。</h2><p>试试“帮我拿奥利奥”。<br />网页展示 Agent 的交互过程，Blender 同步展示机器人动作。</p></div>}
         <Conversation messages={props.state.messages} partial={props.state.partial} phase={props.state.phase}
+          voiceActive={props.voiceActive} voiceListening={props.voiceListening} voiceStatus={props.voiceStatus}
           placeholder="输入，例如：帮我拿奥利奥"
           readOnly={false} confirm={props.confirm} glossary={props.state.glossary} onSubmit={props.onSubmit} onMic={props.onMic} />
         <div className="demo-controls">
