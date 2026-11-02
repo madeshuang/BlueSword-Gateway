@@ -1,0 +1,40 @@
+[project]
+name = "bluesword-agent"
+version = "0.1.0"
+description = "Exhibition fetch-and-handover agent with a shared robot/mock execution pipeline"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.30,<1",
+  "numpy>=1.26,<3",
+  "pillow>=11,<13",
+  "opencv-python-headless>=4.10,<5",
+  "openai>=1.60,<3",
+  "httpx[socks]>=0.27,<1",
+  "websockets>=15,<18",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2", "httpx>=0.27,<1", "ruff>=0.9,<1"]
+
+[project.scripts]
+bluesword-demo = "bluesword.cli:main"
+bluesword-gdk-demo = "bluesword.gdk_v223.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["bluesword"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

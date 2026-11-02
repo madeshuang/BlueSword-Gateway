@@ -1,4 +1,3 @@
-
 [
   {
     "id": "lighter_box",
@@ -10,7 +9,11 @@
     "maxCount": 3,
     "initialStock": 3,
     "art": "lighter_box",
-    "color": "#e3edf0"
+    "color": "#e3edf0",
+    "robotItem": "lighter_box",
+    "aliases": [
+      "打火机"
+    ]
   },
   {
     "id": "playing_card_box",
@@ -22,7 +25,12 @@
     "maxCount": 3,
     "initialStock": 3,
     "art": "playing_card_box",
-    "color": "#e5e6f1"
+    "color": "#e5e6f1",
+    "robotItem": "playing_card_box",
+    "aliases": [
+      "扑克牌",
+      "扑克"
+    ]
   },
   {
     "id": "pen_box",
@@ -34,7 +42,12 @@
     "maxCount": 3,
     "initialStock": 3,
     "art": "pen_box",
-    "color": "#dcecf1"
+    "color": "#dcecf1",
+    "robotItem": "pen_box",
+    "aliases": [
+      "签字笔",
+      "圆珠笔"
+    ]
   },
   {
     "id": "table_tennis_ball_box",
@@ -46,7 +59,11 @@
     "maxCount": 3,
     "initialStock": 3,
     "art": "table_tennis_ball_box",
-    "color": "#f4e8d8"
+    "color": "#f4e8d8",
+    "robotItem": "table_tennis_ball_box",
+    "aliases": [
+      "乒乓球"
+    ]
   },
   {
     "id": "shuttlecock_tube",
@@ -58,7 +75,11 @@
     "maxCount": 3,
     "initialStock": 3,
     "art": "shuttlecock_tube",
-    "color": "#e3eddf"
+    "color": "#e3eddf",
+    "robotItem": "shuttlecock_tube",
+    "aliases": [
+      "羽毛球"
+    ]
   },
   {
     "id": "air_pump",
@@ -70,7 +91,11 @@
     "maxCount": 3,
     "initialStock": 3,
     "art": "air_pump",
-    "color": "#e0e9f3"
+    "color": "#e0e9f3",
+    "robotItem": "air_pump",
+    "aliases": [
+      "打气筒"
+    ]
   },
   {
     "id": "aoliao",
@@ -82,7 +107,12 @@
     "maxCount": 3,
     "initialStock": 3,
     "art": "aoliao",
-    "color": "#e5e5f2"
+    "color": "#e5e5f2",
+    "robotItem": "aoliao",
+    "aliases": [
+      "奥利奥",
+      "饼干"
+    ]
   },
   {
     "id": "anmuxi",
@@ -94,7 +124,12 @@
     "maxCount": 3,
     "initialStock": 3,
     "art": "anmuxi",
-    "color": "#dcecf5"
+    "color": "#dcecf5",
+    "robotItem": "anmuxi",
+    "aliases": [
+      "安慕希",
+      "酸奶"
+    ]
   },
   {
     "id": "haoliyou",
@@ -106,7 +141,11 @@
     "maxCount": 3,
     "initialStock": 3,
     "art": "haoliyou",
-    "color": "#f2e1dc"
+    "color": "#f2e1dc",
+    "robotItem": "haoliyou",
+    "aliases": [
+      "好丽友"
+    ]
   },
   {
     "id": "shupian",
@@ -118,6 +157,10 @@
     "maxCount": 3,
     "initialStock": 3,
     "art": "shupian",
-    "color": "#f5ead5"
+    "color": "#f5ead5",
+    "robotItem": "shupian",
+    "aliases": [
+      "薯片"
+    ]
   }
 ]

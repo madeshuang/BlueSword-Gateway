@@ -1,0 +1,94 @@
+{
+  "calibrated": false,
+  "sdk_version": "2.2.3",
+  "map_id": null,
+  "navigation_frame": null,
+  "arm": null,
+  "end_effector_frame": "填写实际末端反馈 frame",
+  "optical_frame": "填写头部彩色光学 frame",
+  "depth_optical_frame": "填写头部深度光学 frame",
+  "camera_registered_rectified": false,
+  "depth_unit_m": null,
+  "timestamp_offset_ns": null,
+  "gripper": {
+    "state_index": null,
+    "open_position": null,
+    "closed_position": null,
+    "contact_position": null,
+    "min_contact_effort": null,
+    "position_tolerance": null,
+    "velocity_tolerance": null
+  },
+  "poses": {
+    "stow": {
+      "position": [
+        null,
+        null,
+        null
+      ],
+      "quaternion": [
+        null,
+        null,
+        null,
+        null
+      ]
+    },
+    "carry": {
+      "position": [
+        null,
+        null,
+        null
+      ],
+      "quaternion": [
+        null,
+        null,
+        null,
+        null
+      ]
+    },
+    "handover": {
+      "position": [
+        null,
+        null,
+        null
+      ],
+      "quaternion": [
+        null,
+        null,
+        null,
+        null
+      ]
+    }
+  },
+  "grasps": {
+    "替换为场景物品ID": {
+      "offset_base_m": [
+        null,
+        null,
+        null
+      ],
+      "quaternion": [
+        null,
+        null,
+        null,
+        null
+      ]
+    }
+  },
+  "observations": {
+    "center": {
+      "填写已标定关节名称": null
+    },
+    "left": {
+      "填写已标定关节名称": null
+    },
+    "upper": {
+      "填写已标定关节名称": null
+    },
+    "lower": {
+      "填写已标定关节名称": null
+    }
+  },
+  "detector_factory": "site_plugins:create_detector",
+  "take_sensor_factory": "site_plugins:create_take_sensor"
+}

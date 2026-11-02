@@ -1,27 +1,26 @@
-node_modules/
-.pnpm-store/
-dist/
-.vite/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+*.egg-info/
 .env
+backend/data/
+output/
+tmp/
+simulation/assets/agibot_g2/robots/
+simulation/assets/g2.urdf
+frontend/node_modules/
+frontend/dist/
 .env.*
 !.env.example
+.DS_Store
 *.log
-*.tsbuildinfo
-coverage/
-.~*
-.claude/
-.codex/
-.tmp/
-.data/
-.scratch/
+*.sqlite3*
+node_modules/
 
-# 本机开发规则、需求原始资料和内部记录不进入机器人交付工作区。
+# Local workspace files
+/.scratch/
+/.tmp/
 /AGENTS.md
-/docs/*
-!/docs/接口文档.md
-!/docs/真实机器人联调指南.md
-!/docs/本机人工联调指南.md
-!/docs/booth-inventory.md
-
-# Named local credential files
-*.env
+/docs/local/
