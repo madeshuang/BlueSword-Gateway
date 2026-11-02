@@ -35,7 +35,7 @@ def test_invalid_or_ambiguous_edit_retains_original():
     _, items = load_scene()
     original = [TaskLine(item_id="oreo"), TaskLine(item_id="chips")]
     for text in ("再来一个薯片", "换成三包饼干", "再来一个可乐", "饼干换成薯片还是矿泉水", "薯片好吃吗",
-                 "饼干改成薯片", "改成一个薯片和一个可乐"):
+                 "改成一个薯片和一个可乐"):
         with pytest.raises(ValueError):
             revise_order(text, original, items)
         assert original == [TaskLine(item_id="oreo"), TaskLine(item_id="chips")]
@@ -61,6 +61,8 @@ def test_addition_updates_confirmation_and_dispatches_only_latest_order(monkeypa
             def session(self, owner):
                 client = FakeClient([
                     [chunk(call=(0, "order", "fetch_items", '{"items":[{"item_id":"oreo","count":1}]}'))],
+                    {"kind": "edit", "edits": [{"action": "add", "item_id": "chips"}]},
+                    {"kind": "edit", "edits": [{"action": "add", "item_id": "chips"}]},
                     [chunk(content="好了，拿好哦。")],
                 ])
                 session = AgentSession(client, self.manager.settings, self.manager, owner)
@@ -137,3 +139,61 @@ def test_catalog_aliases_apply_to_pending_edits():
             ws.send_json({"type": "text_input", "text": "取消"})
             assert _drain_until(ws, "confirm_closed")["reason"] == "declined"
             assert client.get("/api/tasks").json() == []
+
+@pytest.mark.parametrize('cancel_via', ['text', 'button', 'reset'])
+def test_slow_edit_cannot_approve_old_draft_or_survive_cancellation(monkeypatch, cancel_via):
+    import asyncio
+    import threading
+
+    from bluesword.order_dialogue import Decision
+
+    started = threading.Event()
+    cancelled = threading.Event()
+
+    class SlowAgent:
+        def __init__(self, manager):
+            self.manager = manager
+
+        def session(self, owner):
+            session = AgentSession(FakeClient([
+                [chunk(call=(0, 'order', 'fetch_items', '{"items":[{"item_id":"oreo","count":1}]}'))],
+                [chunk(content='好的，这次先不拿。')],
+            ]), self.manager.settings, self.manager, owner)
+
+            async def interpret(*args):
+                started.set()
+                try:
+                    await asyncio.sleep(30)
+                except asyncio.CancelledError:
+                    cancelled.set()
+                    raise
+                return Decision.model_validate({'kind':'edit','edits':[{'action':'add','item_id':'chips'}]})
+
+            session.interpret_pending = interpret
+            return session
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr('bluesword.app.create_agent', lambda settings, manager: SlowAgent(manager))
+    with TestClient(create_app(settings())) as client:
+        with client.websocket_connect('/ws') as ws:
+            ws.send_json({'type':'text_input','text':'拿饼干'})
+            first = _drain_until(ws, 'confirm_request')
+            ws.send_json({'type':'text_input','text':'再拿薯片'})
+            refreshed = _drain_until(ws, 'confirm_refresh')
+            assert refreshed['id'] == first['id']
+            assert started.wait(2)
+            ws.send_json({'type':'confirm_response','id':first['id'],'approved':True})
+            assert '清单更新后再确认' in _drain_until(ws, 'assistant_delta')['text']
+            assert client.get('/api/tasks').json() == []
+            if cancel_via == 'text':
+                ws.send_json({'type':'text_input','text':'取消'})
+            elif cancel_via == 'button':
+                ws.send_json({'type':'confirm_response','id':first['id'],'approved':False})
+            else:
+                ws.send_json({'type':'reset'})
+            closed = _drain_until(ws, 'confirm_closed')
+            assert closed['reason'] in {'declined', 'cancelled'}
+            assert cancelled.wait(2)
+            assert client.get('/api/tasks').json() == []

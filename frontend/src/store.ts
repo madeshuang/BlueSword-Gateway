@@ -1,5 +1,5 @@
 import { config } from './config'
-import type { BackendMode, ConfirmRequest, Detection, Message, Phase, ProtocolEntry, ServerEvent, Task } from './types'
+import type { BackendMode, ConfirmRequest, Detection, Message, Phase, ServerEvent, Task } from './types'
 
 export interface HistoryItem {
   id: string
@@ -9,6 +9,13 @@ export interface HistoryItem {
 }
 
 export interface State {
+  sessionId: string
+  sessionBootId: string | null
+  backendBootId: string | null
+  backendReady: boolean
+  homeAfterRestart: boolean
+  restored: boolean
+  showCamera: boolean
   view: 'home' | 'session'
   phase: Phase
   partial: string
@@ -23,8 +30,6 @@ export interface State {
   /** 等待用户允许的机器人动作；null 表示没有弹窗 */
   confirm: (ConfirmRequest & { receivedAt: number }) | null
   backendMode: BackendMode | 'demo' | 'unknown'
-  /** 最近的机器人协议报文 */
-  protocol: ProtocolEntry[]
   /** 内部代号 → 中文，用于思考链显示 */
   glossary: Record<string, string>
   recoveryRequired: boolean
@@ -35,32 +40,43 @@ export interface State {
 
 const HISTORY_KEY = 'bluesword.history.v2'
 
-function demoHistory(): HistoryItem[] {
-  const now = Date.now()
-  const mk = (q: string, a: string, minsAgo: number): HistoryItem => ({
-    id: `seed-${minsAgo}`,
-    title: q,
-    at: now - minsAgo * 60_000,
-    messages: [
-      { id: `seed-${minsAgo}-u`, role: 'user', text: q },
-      { id: `seed-${minsAgo}-a`, role: 'assistant', text: a },
-    ],
-  })
-  return [
-    mk('帮我拿一瓶安慕希', '好的，安慕希已经递到你手上啦～', 6),
-    mk('货架上都有什么？', '货架上有扑克牌、纸巾、奥利奥、安慕希、矿泉水和薯片。', 18),
-    mk('你能做什么？', '我能听懂你说的话、看懂周围的环境，还能帮你拿东西。', 42),
-  ]
+const CURRENT_KEY = 'bluesword.current.v1'
+
+function safeMessages(value: unknown): Message[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((m): m is Message => !!m && typeof m.id === 'string' && typeof m.text === 'string' && ['user', 'assistant'].includes(m.role))
+    .map(m => ({ ...m, streaming: false, interrupted: m.interrupted || !!m.streaming,
+      reasoningMs: m.reasoningMs ?? 0,
+      skills: (Array.isArray(m.skills) ? m.skills : [])?.filter(k => k && typeof k.call_id === 'string').map(k => ({ ...k,
+        status: k.status === 'pending' || k.status === 'running' ? 'interrupted' as const : k.status })) }))
 }
 
 function loadHistory(): HistoryItem[] {
   try {
-    const saved = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? '[]') as HistoryItem[]
-    if (saved.length === 0 && !config.agentWsUrl) return demoHistory()
-    return saved
-  } catch {
-    return []
-  }
+    const saved: unknown = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? '[]')
+    if (!Array.isArray(saved)) return []
+    return saved.filter(h => h && typeof h.id === 'string' && typeof h.title === 'string' && typeof h.at === 'number')
+      .slice(0, 19).map(h => ({ ...h, messages: safeMessages(h.messages) }))
+  } catch { return [] }
+}
+
+function loadCurrent(): Partial<State> {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CURRENT_KEY) ?? 'null')
+    if (!saved || typeof saved.id !== 'string') return {}
+    const messages = safeMessages(saved.messages)
+    const sessionBootId = typeof saved.bootId === 'string' ? saved.bootId : null
+    return { sessionBootId, ...(messages.length ? { sessionId: saved.id, messages, view: 'session', restored: true } : {}) }
+  } catch { return {} }
+}
+
+export function persist(state: State): boolean {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(state.history.slice(0, 19)))
+    // Do not save image data, credentials or live confirmation capabilities.
+    localStorage.setItem(CURRENT_KEY, JSON.stringify({ id: state.sessionId, bootId: state.sessionBootId, messages: state.messages }))
+    return true
+  } catch { return false }
 }
 
 const freshSession = {
@@ -78,12 +94,19 @@ const freshSession = {
 
 export const initialState: State = {
   ...freshSession,
+  sessionId: crypto.randomUUID(),
+  sessionBootId: null,
+  backendBootId: null,
+  backendReady: false,
+  homeAfterRestart: false,
+  restored: false,
+  showCamera: true,
+  ...loadCurrent(),
   cameraSrc: null,
   device: { online: false, name: config.agentWsUrl ? '机器人后端' : '前端演示' },
   backendMode: config.agentWsUrl ? 'unknown' : 'demo',
   recoveryRequired: false,
   glossary: {},
-  protocol: [],
   history: loadHistory(),
   lastActivity: Date.now(),
 }
@@ -105,18 +128,21 @@ function updateMsg(messages: Message[], id: string, fn: (m: Message) => Message)
 
 /** 把当前实时会话存进历史（回看历史时不重复存） */
 function archive(state: State): HistoryItem[] {
-  if (state.viewing) return state.history
   const first = state.messages.find((m) => m.role === 'user')
   if (!first) return state.history
-  const item = { id: uid(), title: first.text, at: Date.now(), messages: state.messages.map((m) => ({ ...m, streaming: false })) }
-  const history = [item, ...state.history].slice(0, 20)
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(history))
+  const item = { id: state.sessionId, title: first.text, at: Date.now(), messages: safeMessages(state.messages) }
+  const history = [item, ...state.history.filter(h => h.id !== item.id)].slice(0, 19)
   return history
 }
 
 const reset = (state: State, extra: Partial<State> = {}): State => ({
   ...state,
   ...freshSession,
+  sessionId: crypto.randomUUID(),
+  sessionBootId: state.backendBootId,
+  homeAfterRestart: false,
+  restored: false,
+  cameraSrc: null,
   task: state.task?.status === 'running' || state.recoveryRequired ? state.task : null,
   history: archive(state),
   lastActivity: Date.now(),
@@ -124,21 +150,17 @@ const reset = (state: State, extra: Partial<State> = {}): State => ({
 })
 
 export function reducer(state: State, action: Action): State {
-  // 任何来自 Agent 的实时事件都会把界面从「回看历史」拉回当前会话
-  let s: State = { ...state, lastActivity: Date.now() }
-  if (state.viewing && action.type !== 'open_history' && action.type !== 'go_home' && action.type !== 'device' && action.type !== 'camera') {
-    s = { ...s, viewing: null, messages: [] }
-  }
+  const s: State = { ...state, lastActivity: Date.now() }
   switch (action.type) {
     case 'wake':
-      return { ...s, view: 'session', phase: 'listening', partial: '' }
+      return { ...s, homeAfterRestart: false, view: 'session', phase: 'listening', partial: '' }
     case 'phase':
-      return { ...s, phase: action.phase, view: action.phase === 'idle' ? s.view : 'session' }
+      return { ...s, phase: action.phase, view: action.phase === 'idle' || s.homeAfterRestart ? s.view : 'session' }
     case 'asr':
       if (!action.final) return { ...s, ...(action.text ? { view: 'session' as const } : {}), partial: action.text }
       return { ...s, view: 'session', partial: '', messages: [...s.messages, { id: uid(), role: 'user', text: action.text }] }
     case 'local_user':
-      return { ...s, view: 'session', messages: [...s.messages, { id: uid(), role: 'user', text: action.text }] }
+      return { ...s, viewing: null, restored: false, homeAfterRestart: false, sessionBootId: s.backendBootId ?? s.sessionBootId, view: 'session', messages: [...s.messages, { id: uid(), role: 'user', text: action.text }] }
     case 'local_notice':
       return { ...s, view: 'session', messages: [...s.messages, { id: uid(), role: 'assistant', text: action.text }] }
     case 'assistant_start':
@@ -156,6 +178,8 @@ export function reducer(state: State, action: Action): State {
           reasoningMs: m.reasoning && m.reasoningMs === undefined ? 0 : m.reasoningMs,
         })),
       }
+    case 'confirm_refresh':
+      return s.confirm?.id === action.id ? { ...s, confirm: { ...s.confirm, timeout_s: action.timeout_s, receivedAt: Date.now() } } : s
     case 'confirm_request': {
       const { type: _t, ...request } = action
       return { ...s, view: 'session', confirm: { ...request, receivedAt: Date.now() } }
@@ -163,10 +187,6 @@ export function reducer(state: State, action: Action): State {
     case 'confirm_closed':
     case 'confirm_answered':
       return s.confirm?.id === action.id ? { ...s, confirm: null } : s
-    case 'protocol': {
-      const { type: _t, ...entry } = action
-      return { ...state, protocol: [...state.protocol, entry].slice(-40) }
-    }
     case 'reasoning_delta':
       return { ...s, messages: updateMsg(s.messages, action.id, (m) => ({ ...m, reasoning: (m.reasoning ?? '') + action.text })) }
     case 'reasoning_end':
@@ -214,16 +234,32 @@ export function reducer(state: State, action: Action): State {
       }
     case 'device':
       return { ...state, device: { online: action.online, name: action.name },
-        ...(!action.online ? { confirm: null, partial: '', messages: state.messages.map(m => ({ ...m, streaming: false })) } : {}),
+        ...(!action.online ? { restored: state.messages.length > 0, confirm: null, partial: '', messages: safeMessages(state.messages) } : {}),
       }
-    case 'backend':
-      return { ...state, backendMode: action.mode, recoveryRequired: action.recovery_required, glossary: action.glossary ?? state.glossary }
+    case 'backend': {
+      let next = state
+      if (action.boot_id && !state.backendReady) {
+        const reloading = typeof performance !== 'undefined'
+          && (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined)?.type === 'reload'
+        if (state.sessionBootId && state.sessionBootId !== action.boot_id && !reloading) {
+          next = reset(state, { homeAfterRestart: true })
+        }
+        // Legacy history has no boot marker: adopt it without discarding any text.
+        next = { ...next, sessionBootId: action.boot_id, backendReady: true }
+      }
+      // Reconnection in an already open tab never navigates or rebinds its saved conversation.
+      return { ...next, backendBootId: action.boot_id ?? next.backendBootId,
+        backendMode: action.mode, recoveryRequired: action.recovery_required,
+        glossary: action.glossary ?? next.glossary, showCamera: action.show_camera ?? next.showCamera }
+    }
     case 'open_history': {
+      if (action.id === state.sessionId) return { ...state, homeAfterRestart: false, view: 'session', viewing: null }
       const item = state.history.find((h) => h.id === action.id)
       if (!item) return state
-      return reset(state, { view: 'session', viewing: item.id, messages: item.messages })
+      return { ...state, homeAfterRestart: false, view: 'session', viewing: item.id }
     }
     case 'session_end':
+      return state
     case 'go_home':
       return reset(state)
   }

@@ -12,6 +12,9 @@ const PHASE_HINT: Record<Phase, string> = {
 }
 
 export function Composer(props: {
+  voiceListening?: boolean
+  voiceEnabled?: boolean
+  voiceStatus?: string
   phase: Phase
   partial: string
   big?: boolean
@@ -20,7 +23,7 @@ export function Composer(props: {
   onMic: () => void
 }) {
   const [text, setText] = useState('')
-  const listening = props.phase === 'listening'
+  const listening = !!props.voiceListening
   const busy = props.phase === 'thinking' || props.phase === 'acting'
 
   const submit = () => {
@@ -32,8 +35,8 @@ export function Composer(props: {
 
   return (
     <div className={`composer ${props.big ? 'big' : ''} ${listening ? 'listening' : ''}`}>
-      <button className="mic" onClick={props.onMic} disabled={busy} aria-label="语音" title={`点击说话；待机时也可以说“${config.wakePhrase}”`}>
-        <IconMic size={props.big ? 24 : 22} />
+      <button className="mic" onClick={props.onMic} aria-pressed={listening} aria-label={listening ? '停止收音' : '语音'} title={listening ? '停止收音，最后一句会继续识别，播报不受影响' : props.voiceEnabled ? '点一下，直接和我说话' : '开启语音输入'}>
+        {listening ? <span className="mic-stop" /> : <IconMic size={props.big ? 24 : 22} />}
         <span className="mic-ring" />
       </button>
 
@@ -48,7 +51,7 @@ export function Composer(props: {
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && submit()}
-            placeholder={props.placeholder ?? PHASE_HINT[props.phase]}
+            placeholder={props.voiceStatus || props.placeholder || PHASE_HINT[props.phase]}
           />
         )}
       </div>

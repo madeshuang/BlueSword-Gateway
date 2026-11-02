@@ -152,8 +152,8 @@ def test_vlm_whole_order_progress_image_retry_reconnect_and_finish(gateway):
     task = final(client, identifier)
     assert task["status"] == "completed" and not task["recovery_required"]
     assert client.get("/api/inventory").json()["矿泉水"] == 2
-    log = client.get("/api/robot/protocol").json()
-    assert len([e for e in log if e["path"].endswith("/progress")]) == 8
+    log = client.get("/api/robot/protocol", headers={"X-Operator-Token": "onsite"}).json()
+    assert len([e for e in log if e["path"].endswith("/progress")]) == 10  # 包含重复进度和旧任务回报，便于通信排查
     assert retry["image"]["data"] not in json.dumps(log)
     assert retry["image"]["data"] not in json.dumps(client.get("/api/tasks/" + identifier + "/events").json())
 

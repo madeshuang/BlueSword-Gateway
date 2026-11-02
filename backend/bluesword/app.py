@@ -9,9 +9,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -21,6 +21,7 @@ from .domain import RobotError, TaskLine, TaskRequest
 from .drivers import create_bundle
 from .intents import confirmation_reply, resolve, revise_order
 from .mock import MockRobot
+from .order_dialogue import apply_decision, change_message
 from .protocol import reply
 from .robot_api import mount_robot_api
 from .service import EventBus, TaskManager
@@ -48,7 +49,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        store = TaskStore(settings.db_path)
+        app.state.boot_id = uuid.uuid4().hex
+        db_path = settings.db_path
+        if settings.robot_mode in {"mock", "gdk_mock"} and db_path != ":memory:":
+            path = Path(db_path)
+            db_path = str(path.with_name(f"{path.stem}.{settings.robot_mode}{path.suffix}"))
+        store = TaskStore(db_path)
         manager = None
         agent = None
         try:
@@ -196,6 +202,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # 机器人动作前的确认：id → 等待用户答复的 future
         pending: dict[str, tuple[asyncio.Future, dict]] = {}
         muted_tasks: set[str] = set()
+        editing: asyncio.Task | None = None
+        edit_version = 0
 
         def emit(event):
             if not queue.full():
@@ -223,6 +231,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "type": "backend",
                 "mode": settings.robot_mode,
                 "glossary": glossary(manager.items),
+                "show_camera": settings.show_camera,
+                "boot_id": app.state.boot_id,
                 "recovery_required": manager.store.recovery_required,
             }
         )
@@ -241,11 +251,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 identifier = uuid.uuid4().hex
                 future = asyncio.get_running_loop().create_future()
                 pending[identifier] = (future, plan)
+                plan["_deadline"] = asyncio.get_running_loop().time() + settings.confirm_timeout
                 visible = {key: value for key, value in plan.items() if not key.startswith("_")}
                 emit({"type": "confirm_request", "id": identifier, "timeout_s": settings.confirm_timeout, **visible})
                 emit({"type": "phase", "phase": "listening"})
                 try:
-                    approved = await asyncio.wait_for(future, settings.confirm_timeout)
+                    while True:
+                        remaining = max(0.01, plan["_deadline"] - asyncio.get_running_loop().time())
+                        try:
+                            approved = await asyncio.wait_for(asyncio.shield(future), remaining)
+                            break
+                        except TimeoutError:
+                            if asyncio.get_running_loop().time() >= plan["_deadline"]:
+                                raise
                     reason = "updated" if approved == "updated" else "approved" if approved else "declined"
                 except TimeoutError:
                     approved, reason = False, "timeout"
@@ -259,11 +277,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     return bool(approved)
                 if plan.get("_skill"):
                     emit({**plan["_skill"], "target": plan["target"], "status": "pending", "detail": "等待用户确认"})
-                say(f"好，这单改为{plan['target']}，确认后我再出发。")
+                say(plan.pop("_change_message", f"这单是{plan['target']}，确认后出发。"))
 
         def answer_confirm(identifier: str | None, approved: bool) -> bool:
             targets = [identifier] if identifier else list(pending)
             answered = False
+            if editing and not editing.done() and approved:
+                say("正在听清新的要求，清单更新后再确认吧。")
+                return False
             for key in targets:
                 entry = pending.get(key)
                 future = entry[0] if entry else None
@@ -276,6 +297,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             intent = resolve(text, manager.items)
             if intent.kind == "cancel":
                 await manager.cancel()
+            elif intent.kind == "inventory":
+                identifier = uuid.uuid4().hex
+                emit({"type": "assistant_start", "id": identifier})
+                emit({"type": "assistant_delta", "id": identifier, "text": f"这是{intent.category or '全部物品'}的剩余库存。"})
+                emit({"type": "skill", "id": identifier, "call_id": uuid.uuid4().hex,
+                      "name": "check_inventory", "title": "查询库存", "target": intent.category or "全部",
+                      "status": "done", "stock": [{"name": name, "count": count}
+                                                 for name, count in manager.inventory(intent.category).items()]})
+                emit({"type": "assistant_end", "id": identifier})
             elif manager.busy:
                 raise RobotError("busy", "正在执行取物，请等待完成或点击停止任务")
             elif intent.kind == "fetch":
@@ -335,8 +365,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 try:
                     event = ClientEvent.model_validate_json(raw)
                     if event.type == "confirm_response":
+                        if not event.approved and event.id in pending:
+                            edit_version += 1
+                            if editing:
+                                editing.cancel()
                         answer_confirm(event.id, bool(event.approved))
                     elif event.type == "reset":
+                        edit_version += 1
+                        if editing:
+                            editing.cancel()
                         if manager.active:
                             muted_tasks.add(manager.active.id)
                         if turn and not turn.done():
@@ -367,27 +404,70 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             say("请输入想要拿取的物品。")
                             continue
                         if pending:
-                            # Revise the unconfirmed whole order; never treat embedded “嗯/可以” as approval.
                             future, plan = next(iter(pending.values()))
                             if future.done():
                                 say("清单正在更新，请看最新的确认内容。")
                                 continue
-                            try:
-                                changed = revise_order(event.text, [TaskLine(**line) for line in plan["_items"]], manager.items) if "_items" in plan else None
-                            except ValueError as exc:
-                                say(str(exc))
+                            plan["_deadline"] = asyncio.get_running_loop().time() + settings.confirm_timeout
+                            emit({"type": "confirm_refresh", "id": next(iter(pending)), "timeout_s": settings.confirm_timeout})
+                            # Cancelling always invalidates an in-flight interpretation.
+                            if confirmation_reply(event.text) is False:
+                                edit_version += 1
+                                if editing:
+                                    editing.cancel()
+                                answer_confirm(None, False)
                                 continue
-                            if changed is not None:
-                                plan.update(describe_plan("fetch", manager.order_label(changed)))
-                                plan["_items"] = [line.model_dump() for line in changed]
-                                plan.setdefault("_updates", []).append(event.text)
-                                future.set_result("updated")
+                            if editing and not editing.done():
+                                say("正在处理上一句调整，请等清单更新后再说。")
                                 continue
-                            reply = confirmation_reply(event.text)
-                            if reply is None:
-                                say("可以继续调整这单。说“再来一个薯片”或“改成一包饼干”，选好后说“可以”就好。")
-                            else:
-                                answer_confirm(None, reply)
+                            edit_version += 1
+                            version = edit_version
+                            async def revise(text, future, plan, version):
+                                previous = [TaskLine(**line) for line in plan.get("_items", [])]
+                                discussion = plan.setdefault("_discussion", [])
+                                try:
+                                    if session and previous:
+                                        decision = await session.interpret_pending(text, previous, discussion)
+                                        if future.done() or version != edit_version:
+                                            return
+                                        discussion.append({"role": "user", "content": text})
+                                        if decision.kind in {"approve", "cancel"}:
+                                            future.set_result(decision.kind == "approve")
+                                            return
+                                        if decision.kind == "reply":
+                                            reply_text = decision.reply or "想怎么调整？再告诉我一下吧。"
+                                            discussion.append({"role": "assistant", "content": reply_text})
+                                            say(reply_text)
+                                            return
+                                        changed = apply_decision(decision, previous, manager.items)
+                                    else:
+                                        changed = revise_order(text, previous, manager.items) if previous else None
+                                        if changed is None:
+                                            reply = confirmation_reply(text)
+                                            if reply is None:
+                                                say("原清单保留着。可以继续调整，选好后再确认。")
+                                            else:
+                                                future.set_result(reply)
+                                            return
+                                    if future.done() or version != edit_version:
+                                        return
+                                    if not changed:
+                                        future.set_result(False)
+                                        return
+                                    plan.update(describe_plan("fetch", manager.order_label(changed)))
+                                    plan["_items"] = [line.model_dump() for line in changed]
+                                    plan.setdefault("_updates", []).append(text)
+                                    plan["_change_message"] = change_message(previous, changed, manager.items)
+                                    discussion.append({"role": "assistant", "content": plan["_change_message"]})
+                                    future.set_result("updated")
+                                except ValueError as exc:
+                                    if not future.done() and version == edit_version:
+                                        say(str(exc) if not isinstance(exc, ValidationError) else "这次调整还没确认清楚，原清单保留着。请再说一下想怎么改。")
+                                except Exception:
+                                    logger.exception("Pending order interpretation failed")
+                                    if not future.done() and version == edit_version:
+                                        say("刚才没听清调整，原清单保留着，可以再说一次。")
+                            editing = asyncio.create_task(revise(event.text, future, plan, version))
                         elif resolve(event.text, manager.items).kind == "cancel":
                             # 停止指令不经过大模型，立即生效
                             await manager.cancel()
@@ -408,6 +488,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except Exception:
             logger.exception("WebSocket session failed")
         finally:
+            if editing:
+                editing.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await editing
             if turn and not turn.done():
                 turn.cancel()
             bus.unsubscribe(queue)
@@ -423,6 +507,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for kind in ("progress", "finished", "error"):
 
             async def callback(request: Request):
+                request.state.protocol_body = {"note": "报文无法解析或超过大小限制"}
                 kind = request.url.path.rsplit("/", 1)[-1]
                 manager = app.state.manager
                 try:
@@ -435,6 +520,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     body = json.loads(raw)
                     if not isinstance(body, dict):
                         raise ValueError
+                    request.state.protocol_body = body
                 except Exception:
                     return reply(False, "报文不合法")
                 if kind == "finished" and (body.get("result") != "success" or any(k not in ("taskId","result") for k in body)):
@@ -452,7 +538,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         manager.bus.emit({"type":"task", "task":None})
                         manager.bus.emit({"type":"backend", "mode":settings.robot_mode,
                                           "recovery_required":True, "glossary":glossary(manager.items)})
-                        manager.protocol.add("in", "/api/task/error", body, reply(True))
                         return reply(True)
                     return reply(False,"当前没有等待结果的任务")
                 if body.get("taskId") not in (None,active.id) or (settings.robot_protocol in ("progress", "vlm") and body.get("taskId") != active.id):
@@ -468,7 +553,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         return answer
                     manager.store.save(active)
                     manager.store.append(active.id, {"type":"robot_progress", **log_body(body)})
-                    manager.protocol.add("in", "/api/task/progress", log_body(body), answer)
                     manager.bus.emit({"type":"task", "task":active.model_dump()})
                     if progress.image:
                         caption = progress.detection.label if progress.detection else "目标识别照片"
@@ -479,7 +563,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         manager.bus.emit({"type":"camera", "src":src})
                         manager.bus.emit({"type":"vision", "detections":[], "caption":caption, "scanning":False})
                     return answer
-                manager.protocol.add("in", f"/api/task/{kind}", log_body(body), answer)
                 if not manager.busy and active.recovery_required and kind in ("finished","error"):
                     if kind == "finished":
                         if settings.robot_protocol == "vlm":
@@ -496,18 +579,83 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     manager.remote_inbox.put_nowait((kind, body))
                 return answer
 
-            app.add_api_route(f"/api/task/{kind}", callback, methods=["POST"])
+            async def logged_callback(request: Request):
+                try:
+                    result = await callback(request)
+                except Exception as exc:
+                    app.state.manager.protocol.add("in", request.url.path, getattr(request.state, "protocol_body", {}),
+                                         {"http_status": 500, "error": type(exc).__name__})
+                    raise
+                response = result if isinstance(result, JSONResponse) else JSONResponse(result)
+                import json
+                app.state.manager.protocol.add("in", request.url.path, getattr(request.state, "protocol_body", {}),
+                                               {**json.loads(response.body), "http_status": response.status_code})
+                return result
 
-        @app.get("/api/robot/protocol", dependencies=[Depends(authorize)])
+            app.add_api_route(f"/api/task/{kind}", logged_callback, methods=["POST"])
+
+        @app.get("/api/robot/protocol", dependencies=[Depends(authorize), Depends(operator)])
         async def protocol_log():
             return list(app.state.manager.protocol.entries)
     else:
         # 机器人侧：接收任务下发（用于把本进程当作“兰剑机器人”）
         mount_robot_api(app, settings)
 
+    @app.get("/api/operator/inventory", dependencies=[Depends(authorize), Depends(operator)])
+    async def operator_inventory():
+        manager = app.state.manager
+        return [{"id": item.id, "name": item.name, "category": item.category,
+                 "count": manager.stock[item.id], "initial": item.stock} for item in manager.items.values()]
+
+    @app.get("/api/operator/protocol", dependencies=[Depends(authorize), Depends(operator)])
+    async def operator_protocol(since: float = Query(default=0, ge=0), until: float = Query(default=1e20, ge=0),
+                                task_id: str = "", before: int | None = None, limit: int = Query(default=100, ge=1, le=500)):
+        store = app.state.manager.store
+        store.prune_protocol(settings.protocol_retention_days)
+        rows = list(store.protocol_rows(since=since, until=until, task_id=task_id, before=before, limit=limit + 1))
+        return {"entries": rows[:limit], "next": rows[limit - 1]["seq"] if len(rows) > limit else None}
+
+    @app.get("/api/operator/protocol/download", dependencies=[Depends(authorize), Depends(operator)])
+    async def download_protocol(since: float = Query(default=0, ge=0), until: float = Query(default=1e20, ge=0), task_id: str = ""):
+        import csv
+        import io
+        import json
+        import tempfile
+        import zipfile
+        from datetime import datetime, timezone
+        store = app.state.manager.store
+        store.prune_protocol(settings.protocol_retention_days)
+        archive = tempfile.SpooledTemporaryFile(max_size=2 * 1024 * 1024)
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+            with bundle.open("records.jsonl", "w") as output:
+                for row in store.protocol_rows(since=since, until=until, task_id=task_id, limit=None):
+                    output.write((json.dumps(row, ensure_ascii=False) + "\n").encode())
+            with bundle.open("records.csv", "w") as raw:
+                output = io.TextIOWrapper(raw, encoding="utf-8-sig", newline="")
+                writer = csv.writer(output)
+                writer.writerow(["时间（UTC）", "方向", "接口", "任务编号", "请求内容", "响应"])
+                for row in store.protocol_rows(since=since, until=until, task_id=task_id, limit=None):
+                    values = [datetime.fromtimestamp(row["at"], timezone.utc).isoformat(), row["direction"], row["path"],
+                              str(row["body"].get("taskId", "")), json.dumps(row["body"], ensure_ascii=False), json.dumps(row["reply"], ensure_ascii=False)]
+                    writer.writerow(["'" + v if v.startswith(("=", "+", "-", "@", "\t", "\r")) else v for v in values])
+                output.flush()
+                output.detach()
+        archive.seek(0)
+        def chunks():
+            try:
+                while chunk := archive.read(65536):
+                    yield chunk
+            finally:
+                archive.close()
+        return StreamingResponse(chunks(), media_type="application/zip", headers={"Content-Disposition": 'attachment; filename="robot-communication.zip"'})
+
     # Build frontend once, then serve UI and /ws from a single process/port.
     frontend = Path(__file__).resolve().parents[2] / "frontend" / "dist"
     if frontend.exists() and settings.serve_ui:
+        @app.get("/operator", include_in_schema=False)
+        async def operator_page():
+            return FileResponse(frontend / "index.html")
+
         app.mount("/", StaticFiles(directory=frontend, html=True), name="frontend")
     return app
 

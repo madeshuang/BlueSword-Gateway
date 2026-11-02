@@ -119,7 +119,7 @@ def build_tools(manager: TaskManager) -> list[dict]:
             "function": {
                 "name": "check_inventory",
                 "description": "技能【查询库存】：查看展台货架上某一类东西还剩几件，数量为 0 的已经拿完了、不能再取。"
-                f"类别有：{'、'.join(manager.categories)}；按用户需求所属的类别查，拿不准就查“全部”。",
+                f"类别有：{'、'.join(manager.categories)}；取物前按用户需求所属类别查；用户泛问库存而未指定类别时查“全部”。",
                 "parameters": {
                     "type": "object",
                     "properties": {"category": {"type": "string", "enum": [*manager.categories, "全部"]}},
@@ -198,6 +198,7 @@ def system_prompt(manager: TaskManager, health: dict | None = None) -> str:
     prompt = (
         PROMPT_PATH.read_text(encoding="utf-8")
         .replace("{{ITEMS}}", "\n".join(lines))
+        .replace("{{PRODUCT_INFO}}", "\n".join(f"{i.name}：{i.description or '没有更多已确认的商品说明，不猜测口味或规格。'}" for i in manager.items.values()))
         .replace("{{STATE}}", "\n".join(state))
     )
     actions = "- 取物（fetch_items）：按完整清单执行取物并送到交付处；一次确认和调用对应一项完整任务。"
@@ -256,6 +257,37 @@ class AgentSession:
 
     def reset(self) -> None:
         self.history.clear()
+
+    async def interpret_pending(self, text: str, current: list, discussion: list[dict]):
+        from .intents import confirmation_reply
+        from .order_dialogue import Decision
+
+        explicit = confirmation_reply(text)
+        if explicit is not None:
+            return Decision(kind="approve" if explicit else "cancel")
+        catalog = [{"id": item.id, "name": item.name, "aliases": item.aliases, "category": item.category, "description": item.description}
+                   for item in self.manager.items.values()]
+        instructions = (
+            "你正在与用户讨论尚未执行的取物清单。只理解对话，不执行任何动作。返回JSON，符合给定schema。"
+            "追加保留旧物品；把A换成B只替换A，保留其他物品；只有明确要求整单改成时使用set。"
+            "问口味等问题用reply，不修改清单；目录未提供的信息如实说不知道。"
+            "同时包含同意和修改的话必须是edit，不是approve。仅明确同意当前完整清单才approve。"
+            "不确定指代时reply简短询问。remove表示删除该商品全部数量；replace的source_id必须是旧商品。"
+            "同一种商品数量调整可replace自身。kind=edit时reply不描述未经校验的结果，由程序生成。"
+            "取消整个请求为cancel。禁止在reply里声称已经执行或修改。\n"
+            + str(Decision.model_json_schema())
+        )
+        context = [{"role": m["role"], "content": m["content"]} for m in self.history
+                   if m["role"] in {"user", "assistant"} and m.get("content")][-24:]
+        response = await self.client.chat.completions.create(
+            model=self.settings.llm_model, stream=False, timeout=self.settings.llm_timeout,
+            response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": instructions}, *context,
+                      {"role": "user", "content": json.dumps({"catalog": catalog,
+                          "current_order": [line.model_dump() for line in current],
+                          "discussion": discussion[-24:], "new_message": text}, ensure_ascii=False)}],
+        )
+        return Decision.model_validate_json(response.choices[0].message.content)
 
     async def _tool(self, name: str, args: dict) -> dict:
         manager = self.manager
@@ -460,7 +492,7 @@ class AgentSession:
                             if item:
                                 approved_items.add(item.id)
                     if declined:
-                        result = {"ok": False, "declined": True, "error": "用户没有允许执行，本次已取消，机器人没有动"}
+                        result = {"ok": False, "declined": True, "order_discussion": plan.get("_discussion", []), "error": "用户没有允许执行，本次已取消，机器人没有动"}
                         emit({**base, "status": "cancelled", "detail": "未获允许"})
                     else:
                         emit({**base, "status": "running"})
@@ -471,6 +503,7 @@ class AgentSession:
                         if order:
                             result["confirmed_items"] = args["items"]
                             result["order_updates"] = plan.get("_updates", [])
+                            result["order_discussion"] = plan.get("_discussion", [])
                         ok = result.get("ok", True)
                         detail = result.get("completion_note") or result.get("error") or ("完成" if ok else result.get("status", "失败"))
                         if name == "look_shelf":

@@ -156,6 +156,7 @@ function AssistantTurn({
               {m.streaming && !m.skills?.length && <span className="caret" />}
             </div>
           )}
+          {m.interrupted && <div className="message-note">这条回复还没说完。</div>}
           {revealed[i] && m.skills?.map((k) => <SkillCard key={k.call_id} skill={k} />)}
         </Fragment>
       ))}
@@ -178,6 +179,7 @@ function SkillCard({ skill }: { skill: SkillCall }) {
       {skill.status === 'running' && <span className="skill-note">执行中…</span>}
       {skill.status === 'cancelled' && <span className="skill-note">用户未允许，已取消</span>}
       {skill.status === 'done' && skill.detail && skill.detail !== '完成' && <span className="skill-note">{skill.detail}</span>}
+      {skill.status === 'interrupted' && <span className="skill-note">此前记录</span>}
       {skill.status === 'failed' && skill.detail && <span className="skill-note">{skill.detail}</span>}
     </div>
   )
@@ -211,6 +213,10 @@ function groupTurns(messages: Message[]) {
 }
 
 export function Conversation(props: {
+  voiceListening?: boolean
+  voiceEnabled?: boolean
+  voiceStatus?: string
+  restored?: boolean
   phase: Phase
   partial: string
   messages: Message[]
@@ -242,6 +248,7 @@ export function Conversation(props: {
 
       <div className="messages" ref={scroller}>
         <div className="messages-inner">
+          {props.restored && <p className="message-note">聊天记录已找回。继续取物时，请再说一下完整需求。</p>}
           {groupTurns(props.messages).map((g, idx, all) =>
             g.role === 'user' ? (
               <div key={g.msgs[0].id} className="msg user">
@@ -260,11 +267,12 @@ export function Conversation(props: {
         </div>
       </div>
 
-      <div className="conv-composer">
-        {props.confirm || (
-          <Composer phase={props.phase} partial={props.partial} placeholder={props.placeholder} onSubmit={props.onSubmit} onMic={props.onMic} />
-        )}
-      </div>
+      {!props.readOnly && <div className="conv-composer">
+        {props.confirm}
+        <Composer phase={props.phase} partial={props.partial} placeholder={props.placeholder} onSubmit={props.onSubmit} onMic={props.onMic}
+          voiceEnabled={props.voiceEnabled} voiceListening={props.voiceListening} voiceStatus={props.voiceStatus} />
+      </div>}
+
     </section>
   )
 }

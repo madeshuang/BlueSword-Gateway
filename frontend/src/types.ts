@@ -1,5 +1,5 @@
 // 前后端事件协议：后端（Agent）通过 WebSocket 推送 ServerEvent，前端发送 ClientEvent。
-// 演示模式下由 mock.ts 模拟后端，协议完全一致。
+// 普通模拟与现场运行均连接后端，使用同一套事件协议。
 
 export type Phase = 'idle' | 'listening' | 'thinking' | 'speaking' | 'acting'
 
@@ -27,7 +27,7 @@ export interface SkillCall {
   name: string
   title: string
   target?: string
-  status: 'pending' | 'running' | 'done' | 'failed' | 'cancelled'
+  status: 'pending' | 'running' | 'done' | 'failed' | 'cancelled' | 'interrupted'
   detail?: string
   gdk?: string[]
   /** 查询库存的结果：每样东西剩几件 */
@@ -50,6 +50,7 @@ export interface Message {
   id: string
   role: 'user' | 'assistant'
   text: string
+  interrupted?: boolean
   streaming?: boolean
   thoughts?: Thought[]
   /** 大模型思考链（流式） */
@@ -103,14 +104,14 @@ export type ServerEvent =
   | { type: 'reasoning_end'; id: string; ms: number }
   | ({ type: 'skill'; id: string } & SkillCall)
   | ({ type: 'confirm_request' } & ConfirmRequest)
+  | { type: 'confirm_refresh'; id: string; timeout_s: number }
   | { type: 'confirm_closed'; id: string; reason: 'approved' | 'declined' | 'timeout' | 'cancelled' | 'updated' }
   | { type: 'vision'; detections?: Detection[]; caption?: string; scanning?: boolean }
   | { type: 'camera'; src: string | null }
   | { type: 'task'; task: Task | null }
   | { type: 'task_step'; id: string; status: StepStatus; detail?: string; gdk?: string[]; at?: number }
   | { type: 'device'; online: boolean; name: string }
-  | { type: 'backend'; mode: BackendMode; recovery_required: boolean; glossary?: Record<string, string> }
-  | ({ type: 'protocol' } & ProtocolEntry)
+  | { type: 'backend'; mode: BackendMode; show_camera?: boolean; boot_id?: string; recovery_required: boolean; glossary?: Record<string, string> }
   | { type: 'session_end' }
 
 export type ClientEvent =

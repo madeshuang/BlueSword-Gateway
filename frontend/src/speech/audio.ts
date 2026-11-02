@@ -18,6 +18,6 @@ export function pcm16(chunks: Float32Array[], sampleRate: number): ArrayBuffer {
 }
 
 export function wakeCommand(text: string): string | null {
-  const match = /你好[，,、\s]*(?:布鲁|布噜|布路|blue)[，,。！!\s]*/i.exec(text)
+  const match = /^[\s，,。！!？?]*(?:你好[，,、\s]*)?(?:布鲁|布噜|布路|布卢|blue(?![a-z]))[，,。！!？?、：:\s]*/i.exec(text)
   return match ? text.slice(match.index + match[0].length).trim() : null
 }

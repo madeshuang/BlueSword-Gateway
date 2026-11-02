@@ -45,7 +45,7 @@ async def demo(args) -> int:
 
 def main():
     parser = argparse.ArgumentParser(description="Run the full backend workflow against the mock robot")
-    parser.add_argument("--item", default="oreo")
+    parser.add_argument("--item", default="aoliao")
     parser.add_argument(
         "--scenario", choices=Settings.model_fields["scenario"].annotation.__args__, default="success"
     )
