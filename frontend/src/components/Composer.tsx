@@ -12,8 +12,11 @@ const PHASE_HINT: Record<Phase, string> = {
 }
 
 export function Composer(props: {
-  phase: Phase
   voiceActive?: boolean
+  voiceListening?: boolean
+  voiceEnabled?: boolean
+  voiceStatus?: string
+  phase: Phase
   partial: string
   big?: boolean
   placeholder?: string
@@ -21,7 +24,7 @@ export function Composer(props: {
   onMic: () => void
 }) {
   const [text, setText] = useState('')
-  const listening = props.phase === 'listening' && props.voiceActive !== false
+  const listening = !!props.voiceListening
   const active = props.voiceActive ?? listening
   const micLabel = active ? '关闭语音，让布鲁休眠 / End voice' : '唤醒布鲁 / Wake Blue'
   const busy = props.phase === 'thinking' || props.phase === 'acting'
@@ -36,7 +39,7 @@ export function Composer(props: {
   return (
     <div className={`composer ${props.big ? 'big' : ''} ${listening ? 'listening' : ''}`}>
       <button className={`mic ${active ? 'active' : ''}`} onClick={props.onMic} aria-pressed={active} aria-label={micLabel} title={micLabel}>
-        <IconMic size={props.big ? 24 : 22} />
+        {active ? <span className="mic-stop" /> : <IconMic size={props.big ? 24 : 22} />}
         <span className="mic-ring" />
       </button>
 
@@ -51,7 +54,7 @@ export function Composer(props: {
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && submit()}
-            placeholder={props.placeholder ?? PHASE_HINT[props.phase === 'listening' && !active ? 'idle' : props.phase]}
+            placeholder={props.voiceStatus || props.placeholder || PHASE_HINT[props.phase]}
           />
         )}
       </div>

@@ -1,5 +1,4 @@
 import type { ClientEvent, ServerEvent } from './types'
-import { createMockAgent } from './mock'
 
 export interface Bridge {
   send: (ev: ClientEvent) => void
@@ -7,9 +6,9 @@ export interface Bridge {
   mode: 'live' | 'demo'
 }
 
-/** 连接后端 Agent；未配置地址时使用演示模式 */
+/** 连接后端 Agent；模拟与现场使用同一通信路径。 */
 export function createBridge(url: string | undefined, onEvent: (ev: ServerEvent) => void): Bridge {
-  if (!url) return { ...createMockAgent(onEvent), mode: 'demo' }
+  if (!url) throw new Error("请配置机器人后端地址；本地体验使用 mock 后端。")
 
   let ws: WebSocket | null = null
   let closed = false

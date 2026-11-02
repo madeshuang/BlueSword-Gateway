@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import logging
 import secrets
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
@@ -34,10 +33,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        store = TaskStore(settings.db_path)
+        app.state.boot_id = uuid.uuid4().hex
+        db_path = settings.db_path
+        if settings.robot_mode in {"mock", "gdk_mock"} and db_path != ":memory:":
+            path = Path(db_path)
+            db_path = str(path.with_name(f"{path.stem}.{settings.robot_mode}{path.suffix}"))
+        store = TaskStore(db_path)
         manager = None
         agent = None
-        voice_task = None
         app.state.local_voice = None
         try:
             bundle = await create_bundle(settings)
@@ -50,18 +53,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 from .local_voice import LocalVoice
 
                 voice = app.state.local_voice = LocalVoice(settings)
-                voice_task = asyncio.create_task(
-                    serve_conversation(voice, settings, manager, agent, mock_take, mock_recover)
-                )
                 await voice.start()
             yield
         finally:
             if app.state.local_voice:
                 await app.state.local_voice.close()
-            if voice_task:
-                voice_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await voice_task
             if agent:
                 await agent.close()
             if manager:
@@ -192,15 +188,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await ws.accept()
         manager = app.state.manager
         if app.state.local_voice is not None:
-            await app.state.local_voice.serve(ws)
+            await app.state.local_voice.serve(ws, lambda transport: serve_conversation(
+                transport, settings, manager, app.state.agent, mock_take, mock_recover, boot_id=app.state.boot_id,
+            ))
         else:
-            await serve_conversation(ws, settings, manager, app.state.agent, mock_take, mock_recover)
+            await serve_conversation(ws, settings, manager, app.state.agent, mock_take, mock_recover, boot_id=app.state.boot_id)
 
     if settings.robot_mode == "lanjian_http":
         # 网关侧：接收机器人回调（v1.1 + 提案等级二），回复格式与 v1.1 一致
         for kind in ("progress", "finished", "error"):
 
             async def callback(request: Request):
+                request.state.protocol_body = {"note": "报文无法解析或超过大小限制"}
                 kind = request.url.path.rsplit("/", 1)[-1]
                 manager = app.state.manager
                 try:
@@ -213,6 +212,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     body = json.loads(raw)
                     if not isinstance(body, dict):
                         raise ValueError
+                    request.state.protocol_body = body
                 except Exception:
                     return reply(False, "报文不合法")
                 if kind == "finished" and (body.get("result") != "success" or any(k not in ("taskId","result") for k in body)):
@@ -230,7 +230,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         manager.bus.emit({"type":"task", "task":None})
                         manager.bus.emit({"type":"backend", "mode":settings.robot_mode,
                                           "recovery_required":True, "glossary":glossary(manager.items)})
-                        manager.protocol.add("in", "/api/task/error", body, reply(True))
                         return reply(True)
                     return reply(False,"当前没有等待结果的任务")
                 if body.get("taskId") not in (None,active.id) or (settings.robot_protocol in ("progress", "vlm") and body.get("taskId") != active.id):
@@ -246,7 +245,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         return answer
                     manager.store.save(active)
                     manager.store.append(active.id, {"type":"robot_progress", **log_body(body)})
-                    manager.protocol.add("in", "/api/task/progress", log_body(body), answer)
                     manager.bus.emit({"type":"task", "task":active.model_dump()})
                     if progress.image:
                         caption = progress.detection.label if progress.detection else "目标识别照片"
@@ -257,7 +255,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         manager.bus.emit({"type":"camera", "src":src})
                         manager.bus.emit({"type":"vision", "detections":[], "caption":caption, "scanning":False})
                     return answer
-                manager.protocol.add("in", f"/api/task/{kind}", log_body(body), answer)
                 if not manager.busy and active.recovery_required and kind in ("finished","error"):
                     if kind == "finished":
                         if settings.robot_protocol == "vlm":
@@ -274,18 +271,83 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     manager.remote_inbox.put_nowait((kind, body))
                 return answer
 
-            app.add_api_route(f"/api/task/{kind}", callback, methods=["POST"])
+            async def logged_callback(request: Request):
+                try:
+                    result = await callback(request)
+                except Exception as exc:
+                    app.state.manager.protocol.add("in", request.url.path, getattr(request.state, "protocol_body", {}),
+                                         {"http_status": 500, "error": type(exc).__name__})
+                    raise
+                response = result if isinstance(result, JSONResponse) else JSONResponse(result)
+                import json
+                app.state.manager.protocol.add("in", request.url.path, getattr(request.state, "protocol_body", {}),
+                                               {**json.loads(response.body), "http_status": response.status_code})
+                return result
 
-        @app.get("/api/robot/protocol", dependencies=[Depends(authorize)])
+            app.add_api_route(f"/api/task/{kind}", logged_callback, methods=["POST"])
+
+        @app.get("/api/robot/protocol", dependencies=[Depends(authorize), Depends(operator)])
         async def protocol_log():
             return list(app.state.manager.protocol.entries)
     else:
         # 机器人侧：接收任务下发（用于把本进程当作“兰剑机器人”）
         mount_robot_api(app, settings)
 
+    @app.get("/api/operator/inventory", dependencies=[Depends(authorize), Depends(operator)])
+    async def operator_inventory():
+        manager = app.state.manager
+        return [{"id": item.id, "name": item.name, "category": item.category,
+                 "count": manager.stock[item.id], "initial": item.stock} for item in manager.items.values()]
+
+    @app.get("/api/operator/protocol", dependencies=[Depends(authorize), Depends(operator)])
+    async def operator_protocol(since: float = Query(default=0, ge=0), until: float = Query(default=1e20, ge=0),
+                                task_id: str = "", before: int | None = None, limit: int = Query(default=100, ge=1, le=500)):
+        store = app.state.manager.store
+        store.prune_protocol(settings.protocol_retention_days)
+        rows = list(store.protocol_rows(since=since, until=until, task_id=task_id, before=before, limit=limit + 1))
+        return {"entries": rows[:limit], "next": rows[limit - 1]["seq"] if len(rows) > limit else None}
+
+    @app.get("/api/operator/protocol/download", dependencies=[Depends(authorize), Depends(operator)])
+    async def download_protocol(since: float = Query(default=0, ge=0), until: float = Query(default=1e20, ge=0), task_id: str = ""):
+        import csv
+        import io
+        import json
+        import tempfile
+        import zipfile
+        from datetime import datetime, timezone
+        store = app.state.manager.store
+        store.prune_protocol(settings.protocol_retention_days)
+        archive = tempfile.SpooledTemporaryFile(max_size=2 * 1024 * 1024)
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+            with bundle.open("records.jsonl", "w") as output:
+                for row in store.protocol_rows(since=since, until=until, task_id=task_id, limit=None):
+                    output.write((json.dumps(row, ensure_ascii=False) + "\n").encode())
+            with bundle.open("records.csv", "w") as raw:
+                output = io.TextIOWrapper(raw, encoding="utf-8-sig", newline="")
+                writer = csv.writer(output)
+                writer.writerow(["时间（UTC）", "方向", "接口", "任务编号", "请求内容", "响应"])
+                for row in store.protocol_rows(since=since, until=until, task_id=task_id, limit=None):
+                    values = [datetime.fromtimestamp(row["at"], timezone.utc).isoformat(), row["direction"], row["path"],
+                              str(row["body"].get("taskId", "")), json.dumps(row["body"], ensure_ascii=False), json.dumps(row["reply"], ensure_ascii=False)]
+                    writer.writerow(["'" + v if v.startswith(("=", "+", "-", "@", "\t", "\r")) else v for v in values])
+                output.flush()
+                output.detach()
+        archive.seek(0)
+        def chunks():
+            try:
+                while chunk := archive.read(65536):
+                    yield chunk
+            finally:
+                archive.close()
+        return StreamingResponse(chunks(), media_type="application/zip", headers={"Content-Disposition": 'attachment; filename="robot-communication.zip"'})
+
     # Build frontend once, then serve UI and /ws from a single process/port.
     frontend = Path(__file__).resolve().parents[2] / "frontend" / "dist"
     if frontend.exists() and settings.serve_ui:
+        @app.get("/operator", include_in_schema=False)
+        async def operator_page():
+            return FileResponse(frontend / "index.html")
+
         app.mount("/", StaticFiles(directory=frontend, html=True), name="frontend")
     return app
 

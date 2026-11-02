@@ -1441,3 +1441,14 @@ button {
 .operator-help label { display: block; margin: 8px 0; }
 .operator-help input[type="password"] { width: 130px; color: inherit; background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; }
 .operator-help span { display: block; margin-top: 6px; }
+
+.mic-stop { display: block; width: 1rem; height: 1rem; border-radius: .2rem; background: currentColor; }
+.message-note { color: var(--muted); font-size: .85rem; margin: .5rem 0; }
+.conv-composer .confirm-bar { margin-bottom: .7rem; }
+
+/* 无相机时沿用原面板，仅让进度更舒展；长任务仍在同一容器滚动。 */
+.vision.without-camera .task { padding-top: 1.25rem; }
+.vision.without-camera .steps { margin-top: 1.1rem; }
+.vision.without-camera .steps li { padding: .75rem 0; font-size: 1.08rem; grid-template-columns: 1.5rem 1fr auto; column-gap: .85rem; }
+.vision.without-camera .steps li:not(:last-child)::after { left: calc(.75rem - 1px); }
+.vision.without-camera .step-icon { width: 1.5rem; height: 1.5rem; }

@@ -14,6 +14,7 @@ from .agent import describe_plan, glossary
 from .domain import RobotError, TaskLine, TaskRequest
 from .intents import confirmation_reply, resolve, revise_order
 from .language import item_label, language_of, order_label, robot_error_text
+from .order_dialogue import apply_decision, change_message
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class ClientEvent(BaseModel):
 
 
 
-async def serve_conversation(ws: Transport, settings, manager, agent, take, recover):
+async def serve_conversation(ws: Transport, settings, manager, agent, take, recover, *, boot_id=""):
     bus = manager.bus
     owner = uuid.uuid4().hex
     queue = bus.subscribe()
@@ -46,6 +47,8 @@ async def serve_conversation(ws: Transport, settings, manager, agent, take, reco
     # 机器人动作前的确认：id → 等待用户答复的 future
     pending: dict[str, tuple[asyncio.Future, dict]] = {}
     muted_tasks: set[str] = set()
+    editing: asyncio.Task | None = None
+    edit_version = 0
     language = "zh"
 
     def emit(event):
@@ -75,6 +78,8 @@ async def serve_conversation(ws: Transport, settings, manager, agent, take, reco
             "type": "backend",
             "mode": settings.robot_mode,
             "glossary": glossary(manager.items),
+            "show_camera": settings.show_camera,
+            "boot_id": boot_id,
             "recovery_required": manager.store.recovery_required,
         }
     )
@@ -96,11 +101,19 @@ async def serve_conversation(ws: Transport, settings, manager, agent, take, reco
             identifier = uuid.uuid4().hex
             future = asyncio.get_running_loop().create_future()
             pending[identifier] = (future, plan)
+            plan["_deadline"] = asyncio.get_running_loop().time() + settings.confirm_timeout
             visible = {key: value for key, value in plan.items() if not key.startswith("_")}
             emit({"type": "confirm_request", "id": identifier, "timeout_s": settings.confirm_timeout, **visible})
             emit({"type": "phase", "phase": "listening"})
             try:
-                approved = await asyncio.wait_for(future, settings.confirm_timeout)
+                while True:
+                    remaining = max(0.01, plan["_deadline"] - asyncio.get_running_loop().time())
+                    try:
+                        approved = await asyncio.wait_for(asyncio.shield(future), remaining)
+                        break
+                    except TimeoutError:
+                        if asyncio.get_running_loop().time() >= plan["_deadline"]:
+                            raise
                 reason = "updated" if approved == "updated" else "approved" if approved else "declined"
             except TimeoutError:
                 approved, reason = False, "timeout"
@@ -114,11 +127,14 @@ async def serve_conversation(ws: Transport, settings, manager, agent, take, reco
                 return bool(approved)
             if plan.get("_skill"):
                 emit({**plan["_skill"], "target": plan["target"], "status": "pending", "detail": "等待用户确认"})
-            say(f"好，这单改为{plan['target']}，确认后我再出发。", f'Updated to {plan["target"]}. Say "yes" or tap Confirm when ready.')
+            say(plan.pop("_change_message", f"这单是{plan['target']}，确认后出发。"), f'Updated to {plan["target"]}. Say "yes" or tap Confirm when ready.')
 
     def answer_confirm(identifier: str | None, approved: bool) -> bool:
         targets = [identifier] if identifier else list(pending)
         answered = False
+        if editing and not editing.done() and approved:
+            say("正在听清新的要求，清单更新后再确认吧。", "Please wait for the updated order before confirming.")
+            return False
         for key in targets:
             entry = pending.get(key)
             future = entry[0] if entry else None
@@ -135,6 +151,15 @@ async def serve_conversation(ws: Transport, settings, manager, agent, take, reco
         intent = resolve(text, manager.items)
         if intent.kind == "cancel":
             await manager.cancel()
+        elif intent.kind == "inventory":
+            identifier = uuid.uuid4().hex
+            emit({"type": "assistant_start", "id": identifier})
+            emit({"type": "assistant_delta", "id": identifier, "text": f"这是{intent.category or '全部物品'}的剩余库存。"})
+            emit({"type": "skill", "id": identifier, "call_id": uuid.uuid4().hex,
+                  "name": "check_inventory", "title": "查询库存", "target": intent.category or "全部",
+                  "status": "done", "stock": [{"name": name, "count": count}
+                                             for name, count in manager.inventory(intent.category).items()]})
+            emit({"type": "assistant_end", "id": identifier})
         elif manager.busy:
             raise RobotError("busy", "正在执行取物，请等待完成或点击停止任务")
         elif intent.kind == "fetch":
@@ -202,8 +227,15 @@ async def serve_conversation(ws: Transport, settings, manager, agent, take, reco
             try:
                 event = ClientEvent.model_validate_json(raw)
                 if event.type == "confirm_response":
+                    if not event.approved and event.id in pending:
+                        edit_version += 1
+                        if editing:
+                            editing.cancel()
                     answer_confirm(event.id, bool(event.approved))
                 elif event.type == "reset":
+                    edit_version += 1
+                    if editing:
+                        editing.cancel()
                     if manager.active:
                         muted_tasks.add(manager.active.id)
                     if turn and not turn.done():
@@ -239,27 +271,70 @@ async def serve_conversation(ws: Transport, settings, manager, agent, take, reco
                         say("请输入想要拿取的物品。", "Please tell me which item you would like.")
                         continue
                     if pending:
-                        # Revise the unconfirmed whole order; never treat embedded “嗯/可以” as approval.
                         future, plan = next(iter(pending.values()))
                         if future.done():
                             say("清单正在更新，请看最新的确认内容。", "The order is updating. Please check the latest confirmation.")
                             continue
-                        try:
-                            changed = revise_order(event.text, [TaskLine(**line) for line in plan["_items"]], manager.items) if "_items" in plan else None
-                        except ValueError as exc:
-                            say(str(exc))
+                        plan["_deadline"] = asyncio.get_running_loop().time() + settings.confirm_timeout
+                        emit({"type": "confirm_refresh", "id": next(iter(pending)), "timeout_s": settings.confirm_timeout})
+                        # Cancelling always invalidates an in-flight interpretation.
+                        if confirmation_reply(event.text) is False:
+                            edit_version += 1
+                            if editing:
+                                editing.cancel()
+                            answer_confirm(None, False)
                             continue
-                        if changed is not None:
-                            plan.update(describe_plan("fetch", order_label(changed, manager.items, language), language))
-                            plan["_items"] = [line.model_dump() for line in changed]
-                            plan.setdefault("_updates", []).append(event.text)
-                            future.set_result("updated")
+                        if editing and not editing.done():
+                            say("正在处理上一句调整，请等清单更新后再说。", "Please wait for your previous change to finish.")
                             continue
-                        reply = confirmation_reply(event.text)
-                        if reply is None:
-                            say("可以继续调整这单。说“再来一个薯片”或“改成一包饼干”，选好后说“可以”就好。", "You can say \"add one pack of chips\" or \"change it to one pack of cookies\". Say \"yes\" to confirm or \"cancel\" to cancel.")
-                        else:
-                            answer_confirm(None, reply)
+                        edit_version += 1
+                        version = edit_version
+                        async def revise(text, future, plan, version):
+                            previous = [TaskLine(**line) for line in plan.get("_items", [])]
+                            discussion = plan.setdefault("_discussion", [])
+                            try:
+                                if session and previous and language != "en":
+                                    decision = await session.interpret_pending(text, previous, discussion)
+                                    if future.done() or version != edit_version:
+                                        return
+                                    discussion.append({"role": "user", "content": text})
+                                    if decision.kind in {"approve", "cancel"}:
+                                        future.set_result(decision.kind == "approve")
+                                        return
+                                    if decision.kind == "reply":
+                                        reply_text = decision.reply or "想怎么调整？再告诉我一下吧。"
+                                        discussion.append({"role": "assistant", "content": reply_text})
+                                        say(reply_text)
+                                        return
+                                    changed = apply_decision(decision, previous, manager.items)
+                                else:
+                                    changed = revise_order(text, previous, manager.items) if previous else None
+                                    if changed is None:
+                                        reply = confirmation_reply(text)
+                                        if reply is None:
+                                            say("原清单保留着。可以继续调整，选好后再确认。", "Your order is unchanged. You can add, remove or replace an item, or say yes to confirm.")
+                                        else:
+                                            future.set_result(reply)
+                                        return
+                                if future.done() or version != edit_version:
+                                    return
+                                if not changed:
+                                    future.set_result(False)
+                                    return
+                                plan.update(describe_plan("fetch", order_label(changed, manager.items, language), language))
+                                plan["_items"] = [line.model_dump() for line in changed]
+                                plan.setdefault("_updates", []).append(text)
+                                plan["_change_message"] = change_message(previous, changed, manager.items, language)
+                                discussion.append({"role": "assistant", "content": plan["_change_message"]})
+                                future.set_result("updated")
+                            except ValueError as exc:
+                                if not future.done() and version == edit_version:
+                                    say(str(exc) if not isinstance(exc, ValidationError) else "这次调整还没确认清楚，原清单保留着。请再说一下想怎么改。", "I could not apply that change. Your order is unchanged; please specify up to two items from the catalog.")
+                            except Exception:
+                                logger.exception("Pending order interpretation failed")
+                                if not future.done() and version == edit_version:
+                                    say("刚才没听清调整，原清单保留着，可以再说一次。", "I could not understand that change. Your order is unchanged; please try again.")
+                        editing = asyncio.create_task(revise(event.text, future, plan, version))
                     elif resolve(event.text, manager.items).kind == "cancel":
                         # 停止指令不经过大模型，立即生效
                         await manager.cancel()
@@ -280,6 +355,10 @@ async def serve_conversation(ws: Transport, settings, manager, agent, take, reco
     except Exception:
         logger.exception("WebSocket session failed")
     finally:
+        if editing:
+            editing.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await editing
         if turn and not turn.done():
             turn.cancel()
         bus.unsubscribe(queue)

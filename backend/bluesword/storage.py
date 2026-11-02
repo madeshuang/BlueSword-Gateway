@@ -108,3 +108,43 @@ class TaskStore:
 
     def close(self) -> None:
         self.db.close()
+
+    def init_protocol(self, retention_days: int) -> None:
+        self.db.executescript("""
+            CREATE TABLE IF NOT EXISTS protocol_log (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL,
+                task_id TEXT, payload TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS protocol_at ON protocol_log(at);
+            CREATE INDEX IF NOT EXISTS protocol_task ON protocol_log(task_id, seq);
+        """)
+        self.prune_protocol(retention_days)
+
+    def prune_protocol(self, retention_days: int) -> None:
+        import time
+        with self.db:
+            self.db.execute("DELETE FROM protocol_log WHERE at < ?", (time.time() - retention_days * 86400,))
+
+    def log_protocol(self, entry: dict) -> dict:
+        task_id = entry.get("body", {}).get("taskId")
+        with self.db:
+            cursor = self.db.execute("INSERT INTO protocol_log(at,task_id,payload) VALUES (?,?,?)",
+                                     (entry["at"], str(task_id) if task_id is not None else None,
+                                      json.dumps(entry, ensure_ascii=False)))
+        return {"seq": cursor.lastrowid, **entry}
+
+    def protocol_rows(self, *, since: float = 0, until: float = 1e20, task_id: str = "", before: int | None = None,
+                      limit: int | None = 100):
+        clauses, args = ["at >= ?", "at <= ?"], [since, until]
+        if task_id:
+            clauses.append("task_id = ?")
+            args.append(task_id)
+        if before is not None:
+            clauses.append("seq < ?")
+            args.append(before)
+        sql = "SELECT seq,payload FROM protocol_log WHERE " + " AND ".join(clauses) + " ORDER BY seq DESC"
+        if limit is not None:
+            sql += " LIMIT ?"
+            args.append(limit)
+        for seq, payload in self.db.execute(sql, args):
+            yield {"seq": seq, **json.loads(payload)}

@@ -27,14 +27,35 @@ logger = logging.getLogger(__name__)
 class ProtocolLog:
     """最近的协议报文，供前端“机器人通信”面板展示。"""
 
-    def __init__(self, emit: Callable[[dict], None]):
-        self.emit = emit
-        self.entries: collections.deque[dict] = collections.deque(maxlen=60)
+    def __init__(self, emit: Callable[[dict], None], store: TaskStore | None = None, retention_days: int = 30):
+        self.emit, self.store, self.retention_days = emit, store, retention_days
+        self.entries: collections.deque[dict] = collections.deque(maxlen=200)
+        self.pruned_at = time.monotonic()
+        if store:
+            store.init_protocol(retention_days)
+            self.entries.extend(reversed(list(store.protocol_rows(limit=200))))
+
+    @staticmethod
+    def clean(value):
+        if isinstance(value, dict):
+            return {str(k): ("<REDACTED>" if any(word in str(k).lower() for word in ("token", "secret", "password", "authorization", "api_key"))
+                            else {name: value[k].get(name) for name in ("mime", "width", "height")} if k == "image" and isinstance(value[k], dict)
+                            else ProtocolLog.clean(v)) for k, v in value.items()}
+        if isinstance(value, list):
+            return [ProtocolLog.clean(v) for v in value[:100]]
+        if isinstance(value, str):
+            return "<image omitted>" if value.startswith("data:image/") else value[:4000]
+        return value
 
     def add(self, direction: str, path: str, body: dict, reply: dict | None = None) -> None:
-        entry = {"direction": direction, "path": path, "body": body, "reply": reply, "at": time.time()}
+        entry = {"direction": direction, "path": path, "body": self.clean(body), "reply": self.clean(reply), "at": time.time()}
+        if self.store:
+            if time.monotonic() - self.pruned_at > 3600:
+                self.store.prune_protocol(self.retention_days)
+                self.pruned_at = time.monotonic()
+            entry = self.store.log_protocol(entry)
         self.entries.append(entry)
-        self.emit({"type": "protocol", **entry})
+        # Detailed protocol data is read only through the staff API.
 
 
 class RemoteRobot:
@@ -51,6 +72,7 @@ class RemoteRobot:
         self.client = httpx.AsyncClient(trust_env=False)
         self.holding = False
         self.health_cache: dict = {}
+        self.protocol_log: ProtocolLog | None = None
         self.health_at = 0.0
 
     async def connect(self) -> None:
@@ -69,8 +91,11 @@ class RemoteRobot:
                     body = response.json()
                     online = response.is_success and body.get("success") is True and type(body.get("busy")) is bool
                     busy = body.get("busy") if online else None
-                except Exception:
-                    pass
+                    if self.protocol_log:
+                        self.protocol_log.add("out", "/api/health", {}, {"http_status": response.status_code, "body": body})
+                except Exception as exc:
+                    if self.protocol_log:
+                        self.protocol_log.add("out", "/api/health", {}, {"error": type(exc).__name__})
                 self.health_cache = {"online": online, "robot_busy": busy}
                 self.health_at = time.monotonic()
             return {**self.health_cache, "holding": None, "telemetry_available": False,
@@ -188,10 +213,10 @@ class RemoteWorkflow:
 
     async def _follow(self) -> None:
         assert self.task
-        deadline = time.monotonic() + self.settings.remote_task_timeout
+        deadline = time.monotonic() + self.settings.remote_task_timeout if self.settings.remote_task_timeout else None
         while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
+            remaining = deadline - time.monotonic() if deadline is not None else None
+            if remaining is not None and remaining <= 0:
                 raise RobotError("result_timeout", "等待机器人完成通知超时，请工作人员核对")
             try:
                 kind, body = await asyncio.wait_for(self.inbox.get(), remaining)

@@ -1,6 +1,8 @@
 import asyncio
 import json
 import queue
+from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -234,47 +236,51 @@ def until(ws, predicate):
     raise AssertionError("expected event missing")
 
 
-def test_native_voice_shares_one_confirmation_across_viewers_and_survives_refresh(monkeypatch):
+def test_native_voice_uses_fresh_page_sessions_and_one_microphone(monkeypatch):
     voices = []
     def factory(settings):
         voice = make_voice(settings)
-        voice.tts = False
         voices.append(voice)
         return voice
     monkeypatch.setattr(local_voice, "LocalVoice", factory)
-    answers = iter(["你好，布鲁，拿一瓶矿泉水", "可以"])
+    answers = iter(["你好，布鲁，拿一瓶矿泉水", "Hello Blue, bring me water", "Yes, please"])
     async def recognize(*args):
         return next(answers)
     monkeypatch.setattr(speech, "recognize", recognize)
-    settings = Settings(db_path=":memory:", speech_mode="local", speech_api_key="test",
+    settings = Settings(catalog_path=str(Path(__file__).parent / "fixtures/geometry-catalog.json"),
+                        db_path=":memory:", speech_mode="local", speech_api_key="test",
                         mock_delay=0, api_token="private-token")
     headers = {"Authorization": "Bearer private-token"}
-    app = create_app(settings)
-    with TestClient(app) as client:
+    with TestClient(create_app(settings)) as client:
         voice = voices[0]
-        assert client.get("/api/speech", headers=headers).json()["local"]["enabled"]
         assert client.post("/api/speech/control", json={"action": "pause"}).status_code == 401
         assert client.post("/api/speech/control", json={"action": "pause"},
                            headers=headers | {"Origin": "https://wrong.test"}).status_code == 403
         with client.websocket_connect("/ws?token=private-token") as first:
-            until(first, lambda e: e["type"] == "voice_status")
+            first_id = until(first, lambda e: e["type"] == "voice_status")["session_id"]
             client.portal.call(voice._recognize, b"00")
-            confirmation = until(first, lambda e: e["type"] == "confirm_request")
-            assert client.get("/api/tasks", headers=headers).json() == []
-        # A refreshed page attaches to the station's pending confirmation, not a new session.
+            old = until(first, lambda e: e["type"] == "confirm_request")
+        assert voice.owner is None and voice.enabled
+        assert client.get("/api/tasks", headers=headers).json() == []
         with client.websocket_connect("/ws?token=private-token") as second:
-            restored = until(second, lambda e: e["type"] == "confirm_request")
-            assert restored["id"] == confirmation["id"]
+            second_id = until(second, lambda e: e["type"] == "voice_status")["session_id"]
+            assert second_id != first_id
+            until(second, lambda e: e["type"] == "phase" and e["phase"] == "idle")
+            second.send_json({"type": "confirm_response", "id": old["id"], "approved": True})
+            client.portal.call(voice._recognize, b"00")
+            fresh = until(second, lambda e: e["type"] == "confirm_request")
+            assert fresh["id"] != old["id"] and fresh["language"] == "en"
             with client.websocket_connect("/ws?token=private-token") as third:
-                assert until(third, lambda e: e["type"] == "confirm_request")["id"] == confirmation["id"]
-                client.portal.call(voice._recognize, b"00")
-                until(second, lambda e: e["type"] == "task" and e.get("task", {}).get("status") == "completed")
-                assert len(client.get("/api/tasks", headers=headers).json()) == 1
+                third_id = until(third, lambda e: e["type"] == "voice_status")["session_id"]
+                assert third_id != second_id and voice.owner.id == third_id
+                until(third, lambda e: e["type"] == "phase" and e["phase"] == "idle")
+                status = client.post("/api/speech/control", json={"action": "toggle", "session_id": second_id}, headers=headers).json()
+                assert status["active"] and voice.owner.id == second_id
+            client.portal.call(voice._recognize, b"00")
+            until(second, lambda e: e["type"] == "task" and e.get("task", {}).get("status") == "completed")
+            assert len(client.get("/api/tasks", headers=headers).json()) == 1
         assert voice.enabled and voice.audio.opens == 1
-        client.post("/api/speech/control", json={"action": "pause"}, headers=headers)
-        with client.websocket_connect("/ws?token=private-token") as refreshed:
-            assert not until(refreshed, lambda e: e["type"] == "voice_status")["enabled"]
-        assert voice.audio.opens == 1  # Refresh never overrides a deliberate pause.
+        assert client.post("/api/speech/control", json={"action": "toggle", "session_id": first_id}, headers=headers).status_code == 409
 
 
 async def test_native_capture_only_calls_asr_after_wake(monkeypatch):
@@ -286,6 +292,7 @@ async def test_native_capture_only_calls_asr_after_wake(monkeypatch):
         return "你好，布鲁，查询库存"
     monkeypatch.setattr(speech, "recognize", recognize)
     voice = make_voice()
+    voice.owner = SimpleNamespace(id="capture-test")
     await voice.start()
     try:
         assert (await voice.control("toggle"))["active"]

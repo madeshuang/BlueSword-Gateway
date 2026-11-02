@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { config } from '../config'
-import { SCENE } from '../mock'
-import type { BackendMode, Detection, ProtocolEntry, Task } from '../types'
+import type { BackendMode, Detection, Task } from '../types'
 import { gdkLabels } from '../gdkNames'
 import { IconCheck } from './Icons'
 import { OperatorHelp } from './OperatorHelp'
@@ -30,7 +29,7 @@ function SimulatedFeed({ detections }: { detections: Detection[] }) {
       ))}
       <rect x={0.05 * W} y={0.1 * H} width={0.014 * W} height={0.84 * H} fill="#2c3646" />
       <rect x={0.856 * W} y={0.1 * H} width={0.014 * W} height={0.84 * H} fill="#2c3646" />
-      {(detections.length ? detections.map((d) => ({ ...d, color: SCENE.find((s) => s.id === d.id)?.color ?? '#9fd3e6' })) : SCENE).map((d) => {
+      {detections.map(d => ({ ...d, color: '#9fd3e6' })).map((d) => {
         const [x, y, w, h] = d.box
         const bottle = d.id.startsWith('yogurt') || d.id === 'water'
         return bottle ? (
@@ -78,14 +77,32 @@ function Box({ d, i }: { d: Detection; i: number }) {
 
 /** 执行过程：步骤随机器人实际进展逐条出现（不预先列出整张清单），并标注距任务开始的时间 */
 function Timeline({ task }: { task: Task }) {
+  const container = useRef<HTMLDivElement>(null)
   const list = useRef<HTMLOListElement>(null)
-  useEffect(() => { list.current?.scrollTo({ top: list.current.scrollHeight, behavior: 'smooth' }) }, [task.steps])
+  const follow = useRef(true)
+  const previousTop = useRef(0)
+  useEffect(() => { follow.current = true; previousTop.current = 0 }, [task.id])
+  useEffect(() => {
+    const el = container.current
+    if (!el) return
+    const scroll = () => { if (follow.current) el.scrollTop = el.scrollHeight }
+    scroll()
+    const observer = new ResizeObserver(scroll)
+    observer.observe(el)
+    if (list.current) observer.observe(list.current)
+    return () => observer.disconnect()
+  }, [task.steps, task.status])
   const started = task.steps.filter((s) => s.status !== 'pending')
   const t0 = task.created_at ?? started[0]?.startedAt
   const running = task.status === 'running' || task.status === undefined
   const waiting = running && !started.some((s) => s.status === 'active')
   return (
-    <div className="task">
+    <div className="task" ref={container} onScroll={e => {
+      const el = e.currentTarget
+      if (el.scrollHeight - el.clientHeight - el.scrollTop < 32) follow.current = true
+      else if (el.scrollTop < previousTop.current - 1) follow.current = false
+      previousTop.current = el.scrollTop
+    }}>
       <div className="panel-title">
         执行过程<span className="task-name">{task.title}</span>
       </div>
@@ -116,57 +133,8 @@ function Timeline({ task }: { task: Task }) {
   )
 }
 
-const STATUS_TEXT: Record<string, string> = { started: '开始', done: '完成', failed: '失败' }
-
-function summarize(e: ProtocolEntry, glossary: Record<string, string>): { kind: string; text: string; ok?: boolean } {
-  const b = e.body as Record<string, any>
-  const name = e.path.split('/').pop()
-  if (name === 'dispatch') {
-    const action = { pick: '取货', place: '卸货' }[b.action as string] ?? '取物'
-    const item = (b.items ?? []).map((line: { item: string; count: number }) => `${glossary[line.item] ?? line.item} × ${line.count}`).join('、')
-    const r = e.reply as Record<string, any> | null | undefined
-    return { kind: '下发', text: `${action} · ${item}`, ok: r ? !!r.success : false }
-  }
-  if (name === 'progress')
-    return { kind: '回报', text: b.message ? [b.pickIndex ? `第${b.pickIndex}件` : '', b.message].filter(Boolean).join(' · ') : [b.label ?? b.stage, STATUS_TEXT[b.status] ?? b.status, b.detail].filter(Boolean).join(' · ') }
-  if (name === 'finished') return { kind: '完成', text: '完成通知', ok: true }
-  return { kind: '故障', text: String(b.message ?? ''), ok: false }
-}
-
-/** 网关 ⇄ 机器人的协议报文：一行一条，悬停看原始 JSON */
-function ProtocolLog({ entries, glossary }: { entries: ProtocolEntry[]; glossary: Record<string, string> }) {
-  const list = useRef<HTMLOListElement>(null)
-  useEffect(() => {
-    list.current?.scrollTo({ top: list.current.scrollHeight, behavior: 'smooth' })
-  }, [entries.length])
-  return (
-    <div className="protocol">
-      <div className="panel-title">
-        机器人通信<span className="task-name">兰剑协议</span>
-      </div>
-      {entries.length === 0 ? (
-        <p className="protocol-empty">还没有报文。下发任务后，这里会显示机器人回报的每一条消息。</p>
-      ) : (
-        <ol ref={list}>
-          {entries.map((e, i) => {
-            const s = summarize(e, glossary)
-            return (
-              <li key={i} className={e.direction} title={JSON.stringify(e.body, null, 1) + (e.reply ? '\n← ' + JSON.stringify(e.reply) : '')}>
-                <span className="protocol-dir">{e.direction === 'out' ? '→' : '←'}</span>
-                <span className="protocol-kind">{s.kind}</span>
-                <span className="protocol-text">{s.text}</span>
-                {s.ok !== undefined && <span className={`protocol-ok ${s.ok ? 'yes' : 'no'}`}>{s.ok ? (s.kind === '下发' ? '已接单' : '✓') : s.kind === '下发' ? '未接单' : '!'}</span>}
-                <span className="protocol-time">{new Date(e.at * 1000).toLocaleTimeString('zh-CN', { hour12: false })}</span>
-              </li>
-            )
-          })}
-        </ol>
-      )}
-    </div>
-  )
-}
-
 export function VisionPanel(props: {
+  showCamera: boolean
   cameraSrc: string | null
   detections: Detection[]
   caption: string
@@ -174,7 +142,6 @@ export function VisionPanel(props: {
   task: Task | null
   backendMode: BackendMode | 'demo' | 'unknown'
   recoveryRequired: boolean
-  protocol?: ProtocolEntry[]
   glossary?: Record<string, string>
   onCancel: () => void
   onTake: () => void
@@ -182,16 +149,16 @@ export function VisionPanel(props: {
 }) {
   const hasVision = props.detections.length > 0 || props.scanning
   return (
-    <section className="vision">
+    <section className={`vision${props.showCamera ? '' : ' without-camera'}`}>
       <div className="panel-title">
-        <span>{props.backendMode === 'lanjian_http' && !props.cameraSrc ? '机器人执行' : `${config.assistantName}的视野`}</span>
-        {(props.backendMode !== 'lanjian_http' || !!props.cameraSrc) && <span className="live-badge">
+        <span>{!props.showCamera || props.backendMode === 'lanjian_http' && !props.cameraSrc ? '机器人执行' : `${config.assistantName}的视野`}</span>
+        {(props.showCamera && (props.backendMode !== 'lanjian_http' || !!props.cameraSrc)) && <span className="live-badge">
           <i />
           {props.scanning ? '识别中' : props.detections.length > 0 ? `识别到 ${props.detections.length} 个物品` : '相机快照'}
         </span>}
       </div>
 
-      {(props.backendMode !== 'lanjian_http' || !!props.cameraSrc) && (
+      {(props.showCamera && (props.backendMode !== 'lanjian_http' || !!props.cameraSrc)) && (
       <div className={`feed ${props.scanning ? 'scanning' : ''} ${hasVision ? 'active' : ''}`}>
         {props.cameraSrc ? <img src={props.cameraSrc} alt="机器人相机画面" />
           : props.backendMode === 'gdk' ? <div className="camera-empty">等待相机画面</div>
@@ -208,7 +175,7 @@ export function VisionPanel(props: {
       </div>
       )}
 
-      {props.caption && (
+      {props.showCamera && props.caption && (
         <div className="caption">
           <div className="panel-sub">场景理解</div>
           <p>{props.caption}</p>
@@ -216,7 +183,6 @@ export function VisionPanel(props: {
       )}
 
       {props.task && <Timeline task={props.task} />}
-      {props.backendMode === 'lanjian_http' && <ProtocolLog entries={props.protocol ?? []} glossary={props.glossary ?? {}} />}
       <div className="task-controls">
         {props.task?.status === 'running' && <button onClick={props.onCancel}>{props.backendMode === 'lanjian_http' ? '需要停下' : '停止任务'}</button>}
         {(props.backendMode === 'mock' || props.backendMode === 'gdk_mock') && props.task?.status === 'running'

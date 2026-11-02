@@ -27,6 +27,7 @@ class Item(BaseModel):
     location: str = ""  # 现场机器人约定的货架位置
     box: tuple[float, float, float, float]
     stock: int = Field(default=3, ge=0, strict=True)  # 展台初始库存（补货后恢复到这个数）
+    description: str = ""
     category: str = "其他"  # 用于按类别查询库存
 
 
@@ -50,7 +51,7 @@ class Settings(BaseModel):
         "grasp_failure",
         "handover_timeout",
     ] = "success"
-    mock_delay: float = Field(default=0.35, ge=0, le=10)
+    mock_delay: float = Field(default=1, ge=0, le=10)
     auto_take: bool = True
     motion_timeout: float = Field(default=20, gt=0)
     handover_timeout: float = Field(default=30, gt=0)
@@ -70,7 +71,9 @@ class Settings(BaseModel):
     llm_base_url: str = "https://api.deepseek.com"
     llm_timeout: float = Field(default=90, gt=0)
     # 机器人动作前等待用户确认的时长（秒），超时视为取消
-    confirm_timeout: float = Field(default=60, gt=0)
+    confirm_timeout: float = Field(default=180, gt=0)
+    show_camera: bool = True
+    protocol_retention_days: int = Field(default=30, ge=1, le=3650)
     # —— 兰剑协议（网关侧，lanjian_http 模式）
     robot_dispatch_url: str = ""  # 机器人接收任务的完整地址，如 http://127.0.0.1:8001/api/task/dispatch
     robot_protocol: Literal["v1", "progress", "vlm"] = "v1"
@@ -92,7 +95,7 @@ class Settings(BaseModel):
     voice_silence: float = Field(default=0.85, ge=0.3, le=3)
     voice_idle: float = Field(default=20, ge=3, le=120)
     robot_timeout: float = Field(default=8, gt=0)  # 等待接单回复
-    remote_task_timeout: float = Field(default=300, gt=0)  # 等待完成通知的上限
+    remote_task_timeout: float = Field(default=0, ge=0)  # 0：持续等待机器人最终通知
     # —— 兰剑协议（机器人侧）：回报发往的网关地址，如 http://127.0.0.1:8000；为空则不回报
     gateway_url: str = ""
     # 是否提供网页；模拟“兰剑机器人”时关闭，只保留接口，避免误开机器人侧页面

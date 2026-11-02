@@ -16,8 +16,9 @@ from .language import language_of
 
 @dataclass(frozen=True)
 class Intent:
-    kind: Literal["fetch", "look", "chat", "cancel"]
+    kind: Literal["fetch", "look", "chat", "cancel", "inventory"]
     text: str = ""
+    category: str | None = None
     item_id: str | None = None
     items: list[TaskLine] | None = None
 
@@ -36,6 +37,9 @@ def resolve(text: str, items: dict[str, Item]) -> Intent:
             return Intent("chat", str(exc))
     if any(word in text for word in ("不要", "别拿", "不想", "不用", "别动", "不要动")):
         return Intent("chat", "好的，我不会发起取物。若需要中止正在执行的任务，请点击停止任务。")
+    if any(word in text for word in ("库存", "还剩", "剩余", "还有多少")):
+        category = next((item.category for item in items.values() if item.category in text), None)
+        return Intent("inventory", category=category)
     if any(word in text for word in ("看到", "看见", "有什么", "画面", "眼前")):
         return Intent("look")
     if any(word in text for word in ("能做什么", "会什么", "功能", "你是谁")):
@@ -69,16 +73,12 @@ def resolve(text: str, items: dict[str, Item]) -> Intent:
         if sum(line.count for line in lines) > 2:
             return Intent("chat", "每单最多两件，想先拿哪两件？")
         return Intent("fetch",item_id=lines[0].item_id,items=lines)
-    if "甜" in text or "饼干" in text:
-        return Intent("fetch", item_id="oreo")
-    if "渴" in text or "喝水" in text:
-        return Intent("fetch", item_id="water")
-    if "喝" in text or "零食" in text or "饿" in text:
-        return Intent("chat", "想要哪一种？可以选择矿泉水、安慕希、奥利奥或薯片。")
-    return Intent(
-        "chat",
-        "可以说“帮我拿一瓶矿泉水”或“帮我拿奥利奥”。目前支持扑克牌、纸巾、奥利奥、安慕希、矿泉水和薯片。",
-    )
+    preferred = "奥利奥" if "甜" in text or "饼干" in text else "矿泉水" if "渴" in text or "喝水" in text else None
+    if preferred:
+        match = next((item for item in items.values() if preferred in item.name), None)
+        if match:
+            return Intent("fetch", item_id=match.id)
+    return Intent("chat", "可以帮你拿这些物品：" + "、".join(dict.fromkeys(item.name for item in items.values())) + "。想要哪一种？")
 
 
 _YES = ("确认", "允许", "可以", "好的", "好呀", "好啊", "行", "没问题", "去吧", "是的", "对", "同意", "开始", "执行", "嗯")
@@ -123,10 +123,14 @@ def revise_order(text: str, current: list[TaskLine], items: dict[str, Item]) -> 
         raise ValueError("想调整清单的话，可以说“再来一个薯片”或“改成一包饼干”。")
     if sum((adding, replacing, removing)) > 1:
         raise ValueError("想换一下的话，直接告诉我“改成”哪一件或哪两件就好。")
+    source_id = None
     if replacing:
         prefix, text = re.split(r"改成|换成|改为|换为|只要", text, maxsplit=1)
-        if any(alias in prefix for item in items.values() for alias in item.aliases if alias):
-            raise ValueError("想替换整单的话，告诉我“改成”哪一件或哪两件就好。")
+        sources = [item.id for item in items.values() if any(alias in prefix for alias in item.aliases if alias)]
+        if len(sources) == 1 and sources[0] in {line.item_id for line in current}:
+            source_id = sources[0]
+        elif prefix.strip("嗯好那就，,。 "):
+            raise ValueError("还没确定要替换哪一种，原清单保留着。请说完整的物品名字。")
     if removing:
         if len({item.id for item in mentioned}) != 1:
             raise ValueError("想去掉哪一种？告诉我物品名字就好。")
@@ -158,7 +162,9 @@ def revise_order(text: str, current: list[TaskLine], items: dict[str, Item]) -> 
         raise ValueError("没有找到这件物品，原来的清单先保留着。")
     if not (adding or replacing):
         raise ValueError("是再加一件，还是换掉原来的？可以说“再来”或“改成”。")
-    counts = {line.item_id: line.count for line in current} if adding else {}
+    counts = {line.item_id: line.count for line in current} if adding or source_id else {}
+    if source_id:
+        del counts[source_id]
     for line in proposed:
         counts[line.item_id] = counts.get(line.item_id, 0) + line.count
     if sum(counts.values()) > 2:

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 import uuid
-from pathlib import Path
 
-from .config import Item, Settings, load_scene
+from .catalog import load_catalog
+from .config import Settings, load_scene
 from .domain import RobotError, TaskLine, TaskRecord, TaskRequest, TaskStep
 from .mock import MockRobot
 from .ports import RobotBundle
@@ -45,21 +44,7 @@ class TaskManager:
         self.bundle, self.settings, self.store, self.bus = bundle, settings, store, bus
         self.waypoints, self.items = load_scene()
         self.waypoints = getattr(bundle.robot, "scene_waypoints", self.waypoints)
-        catalog_path = settings.catalog_path
-        if not catalog_path and settings.robot_mode == "lanjian_http" and settings.robot_protocol == "vlm":
-            catalog_path = str(Path(__file__).resolve().parents[2] / "config/booth-catalog.example.json")
-        if catalog_path:
-            raw = json.loads(Path(catalog_path).read_text(encoding="utf-8"))
-            if not isinstance(raw, list) or not raw:
-                raise ValueError("物品目录必须是非空数组")
-            self.items = {}
-            for row in raw:
-                item = Item(id=row["id"], name=row["name"], name_en=row.get("nameEn", ""),
-                            aliases_en=row.get("aliasesEn", []), aliases=[row["name"], *row.get("aliases", [])],
-                            location=row.get("location", ""), robot_item=row.get("robotItem", row["name"]), box=(0, 0, 0.1, 0.1), stock=row["initialStock"], category=row["category"])
-                if item.id in self.items:
-                    raise ValueError(f"物品目录 id 重复：{item.id}")
-                self.items[item.id] = item
+        self.items = load_catalog(settings, self.items)
         if settings.robot_mode == "lanjian_http" and settings.robot_protocol != "vlm" and any(item.location.strip() in ("", "待配置") for item in self.items.values()):
             raise ValueError("现场模式请配置物品 location 或 BLUESWORD_CATALOG_PATH")
         self.store.init_inventory(self.items)
@@ -79,7 +64,9 @@ class TaskManager:
         self.remote_visual: dict = {}
         from .remote import ProtocolLog
 
-        self.protocol = ProtocolLog(bus.emit)
+        self.protocol = ProtocolLog(bus.emit, store, settings.protocol_retention_days)
+        if hasattr(bundle.robot, "protocol_log"):
+            bundle.robot.protocol_log = self.protocol
 
     @property
     def stock(self) -> dict[str, int]:

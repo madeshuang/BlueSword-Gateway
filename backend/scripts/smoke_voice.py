@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import io
+from pathlib import Path
 
 import numpy as np
 import soundfile as sf
@@ -46,7 +47,7 @@ async def fixture(utterance, settings, *, wake=True):
 
 async def main(language="zh", fetch=False):
     settings = Settings.from_env().model_copy(update={
-        "robot_mode": "mock", "db_path": ":memory:", "mock_delay": 0, "catalog_path": "",
+        "robot_mode": "mock", "db_path": ":memory:", "mock_delay": 0, "catalog_path": str(Path(__file__).resolve().parents[1] / "tests/fixtures/geometry-catalog.json"),
         "scenario": "success", "auto_take": True, "split_skills": False,
     })
     if not settings.speech_api_key or not settings.llm_api_key:

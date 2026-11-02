@@ -4,11 +4,7 @@ export const config = {
   wakePhrase: '你好，布鲁',
   tagline: '兰剑智能 · 具身智能助手',
   suggestions: ['查询库存', '你能做什么？', '介绍一下兰剑智能'],
-  /** 无交互多久后回到首页（毫秒） */
-  idleTimeoutMs: 60_000,
-  /** 默认连接同源后端；VITE_AGENT_MODE=demo 保留纯前端展示模式。 */
-  agentWsUrl: import.meta.env.VITE_AGENT_MODE === 'demo'
-    ? undefined
-    : (import.meta.env.VITE_AGENT_WS as string | undefined)
+  /** 模拟和现场均连接后端，共用物品目录与确认流程。 */
+  agentWsUrl: (import.meta.env.VITE_AGENT_WS as string | undefined)
       ?? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`,
 }

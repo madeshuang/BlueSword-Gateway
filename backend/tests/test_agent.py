@@ -37,7 +37,10 @@ class FakeClient:
 
     async def create(self, **kwargs):
         self.requests.append(kwargs)
-        return FakeStream(self.rounds.pop(0))
+        result = self.rounds.pop(0)
+        if not kwargs.get("stream", True):
+            return NS(choices=[NS(message=NS(content=json.dumps(result)))])
+        return FakeStream(result)
 
 
 async def test_agent_picks_then_unloads_and_streams_reasoning(make_manager):

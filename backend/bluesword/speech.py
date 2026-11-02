@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from websockets.asyncio.client import connect
 
 from .config import Settings
@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class VoiceControl(BaseModel):
+    session_id: str | None = Field(default=None, max_length=100)
     action: Literal["resume", "pause", "sleep", "listen", "toggle", "tts_on", "tts_off", "interrupt"]
 
 
@@ -151,7 +152,7 @@ def mount_speech(app: FastAPI, settings: Settings) -> None:
             raise HTTPException(403, "请从布鲁页面控制语音。")
         if app.state.local_voice is None:
             raise HTTPException(409, "当前未启用本地语音模式。")
-        return await app.state.local_voice.control(body.action)
+        return await app.state.local_voice.control(body.action, body.session_id)
 
     async def read_limited(request: Request, limit: int) -> bytes:
         body = bytearray()

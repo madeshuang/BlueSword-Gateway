@@ -21,7 +21,7 @@ export function ConfirmBar({
     const t = setInterval(() => setLeft(remaining()), 250)
     return () => clearInterval(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request.id])
+  }, [request.id, request.receivedAt, request.timeout_s])
 
   // Enter = 允许，Esc = 取消；捕获阶段拦截，避免触发全局快捷键
   useEffect(() => {
