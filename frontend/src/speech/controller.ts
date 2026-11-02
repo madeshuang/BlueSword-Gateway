@@ -3,7 +3,7 @@ import type { ServerEvent } from '../types'
 import workletUrl from './capture-worklet.js?url'
 import { pcm16, wakeCommand } from './audio'
 
-export interface SpeechState { enabled: boolean; tts: boolean; status: string }
+export interface SpeechState { enabled: boolean; tts: boolean; status: string; mode?: 'browser' | 'local' }
 
 export class SpeechController {
   private context: AudioContext | null = null
@@ -28,6 +28,8 @@ export class SpeechController {
   private text = new Map<string, string>()
   private spoken = new Set<string>()
   private state: SpeechState = { enabled: false, tts: true, status: '' }
+  private local = false
+  private ready: Promise<void> | null = null
 
   private submit: (text: string) => void
   private notice: (text: string) => void
@@ -41,14 +43,43 @@ export class SpeechController {
   }
 
   async unlock() {
+    await this.initialize()
+    if (this.local || this.closed) return
     this.context ??= new AudioContext()
     if (this.context.state === 'suspended') await this.context.resume()
   }
 
   private report(status: string) { this.state = { ...this.state, status }; this.update(this.state) }
 
+  initialize() {
+    this.ready ??= apiFetch('/api/speech').then(async response => {
+      if (!response.ok) throw new Error('语音状态暂不可用')
+      const data = await response.json()
+      if (!this.closed && !this.local && data.mode === 'local' && data.local) this.localState(data.local)
+    }).catch(() => { this.ready = null })
+    return this.ready
+  }
+
+  private localState(state: SpeechState) {
+    this.local = true
+    this.state = { enabled: state.enabled, tts: state.tts, status: state.status, mode: 'local' }
+    this.update(this.state)
+  }
+
+  private async control(action: string) {
+    try {
+      const response = await apiFetch('/api/speech/control', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }),
+      })
+      if (!response.ok) throw new Error('本地语音未连接')
+      if (!this.closed) this.localState(await response.json())
+    } catch { if (!this.closed) this.report('本地语音未连接，请检查后端服务') }
+  }
+
   async mic() {
+    await this.initialize()
     if (this.closed || this.starting) return
+    if (this.local) { await this.control('resume'); return }
     if (this.stream) {
       this.interrupt()
       this.activeUntil = Date.now() + 20_000
@@ -84,6 +115,7 @@ export class SpeechController {
   }
 
   stopListening() {
+    if (this.local) { void this.control('pause'); return }
     this.interrupt()
     this.stream?.getTracks().forEach(track => track.stop())
     this.capture?.disconnect(); this.source?.disconnect(); this.gain?.disconnect()
@@ -94,6 +126,7 @@ export class SpeechController {
   }
 
   setTts(enabled: boolean) {
+    if (this.local) { void this.control(enabled ? 'tts_on' : 'tts_off'); return }
     this.state = { ...this.state, tts: enabled }
     if (!enabled) this.interrupt()
     else void this.unlock().catch(() => {})
@@ -153,6 +186,11 @@ export class SpeechController {
   }
 
   onEvent(event: ServerEvent) {
+    if (event.type === 'voice_status') { this.localState(event); return }
+    if (this.local) {
+      if (event.type === 'device' && !event.online) this.report('连接中 · 本地监听由后端运行')
+      return
+    }
     if (event.type === 'confirm_closed') { this.text.clear(); this.interrupt() }
     if (event.type === 'phase') this.busy = event.phase === 'thinking' || event.phase === 'acting'
     if (event.type === 'confirm_request') { this.busy = false; this.activeUntil = Date.now() + event.timeout_s * 1000; for (const id of this.text.keys()) this.enqueue(id) }
@@ -200,6 +238,7 @@ export class SpeechController {
   }
 
   interrupt() {
+    if (this.local) return // The shared backend session interrupts audio when it receives input/reset.
     this.generation++
     this.abort.abort(); this.abort = new AbortController()
     this.speechSource?.stop(); this.speechSource = null
@@ -207,5 +246,9 @@ export class SpeechController {
   }
 
   reset() { this.interrupt(); this.text.clear(); this.busy = false; this.activeUntil = 0; this.partial('') }
-  close() { this.closed = true; this.interrupt(); this.stopListening(); void this.context?.close() }
+  close() {
+    this.closed = true
+    if (!this.local) { this.interrupt(); this.stopListening() }
+    void this.context?.close()
+  }
 }

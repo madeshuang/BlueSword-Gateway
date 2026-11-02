@@ -124,6 +124,7 @@ const reset = (state: State, extra: Partial<State> = {}): State => ({
 })
 
 export function reducer(state: State, action: Action): State {
+  if (action.type === 'voice_status') return state
   // 任何来自 Agent 的实时事件都会把界面从「回看历史」拉回当前会话
   let s: State = { ...state, lastActivity: Date.now() }
   if (state.viewing && action.type !== 'open_history' && action.type !== 'go_home' && action.type !== 'device' && action.type !== 'camera') {

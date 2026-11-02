@@ -37,7 +37,7 @@ def create_env(backend: Path) -> None:
     print("已生成 backend/.env，请填写 Key 和现场配置。", flush=True)
 
 
-def setup(root: Path) -> None:
+def setup(root: Path, voice: bool = False) -> None:
     executable("node")
     npm = executable("npm.cmd" if os.name == "nt" else "npm")
     uv = executable("uv")
@@ -47,10 +47,14 @@ def setup(root: Path) -> None:
         ("安装后端锁文件依赖", [uv, "sync", "--locked", "--python", "3.12", "--extra", "dev"],
          root / "backend"),
     ]
+    if voice:
+        steps[-1][1].extend(["--extra", "voice"])
     for title, command, directory in steps:
         print(f"\n{title}…", flush=True)
         subprocess.run(command, cwd=directory, check=True)
     create_env(root / "backend")
+    if voice:
+        subprocess.run([sys.executable, str(root / "scripts/setup-voice.py")], check=True)
     print("\n安装／更新完成。确认配置后运行启动脚本。", flush=True)
 
 
@@ -113,7 +117,8 @@ def main() -> int:
             stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="安装／更新或启动布鲁网关（Windows / Ubuntu 共用）")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("setup", help="安装锁文件依赖、构建网页并准备配置")
+    install = commands.add_parser("setup", help="安装锁文件依赖、构建网页并准备配置")
+    install.add_argument("--voice", action="store_true", help="同时安装本地持续唤醒依赖与模型")
     launch = commands.add_parser("start", help="使用现有配置前台启动，不安装依赖或构建")
     launch.add_argument("--host", choices=["127.0.0.1", "0.0.0.0"], default="127.0.0.1")
     launch.add_argument("--port", type=int, default=8000)
@@ -122,7 +127,7 @@ def main() -> int:
         parser.error("--port 必须在 1 到 65535 之间")
     try:
         if args.command == "setup":
-            setup(ROOT)
+            setup(ROOT, voice=args.voice)
         else:
             start(ROOT, args.host, args.port)
     except SetupError as exc:

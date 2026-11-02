@@ -92,6 +92,7 @@ export interface Task {
 }
 
 export type ServerEvent =
+  | { type: 'voice_status'; mode: 'local'; enabled: boolean; tts: boolean; status: string; phase: string; error: string }
   | { type: 'wake' }
   | { type: 'phase'; phase: Phase }
   | { type: 'asr'; text: string; final: boolean }

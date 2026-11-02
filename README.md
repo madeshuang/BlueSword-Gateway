@@ -462,17 +462,51 @@ VLM 发单携带任务编号，先查 `/api/health`，接收真实进度和带�
 
 配置 `DASHSCOPE_API_KEY`，可选 `DASHSCOPE_WORKSPACE_ID`；识别默认沿用原 main 的 `qwen-audio-3.1-asr-flash-message`，播报默认 `qwen3-tts-flash` / `Cherry`。可通过 `BLUESWORD_SPEECH_MODEL`、`BLUESWORD_TTS_MODEL`、`BLUESWORD_TTS_VOICE` 调整。
 
-首页保留“你好，布鲁”提示。首次打开网页仍需先点击麦克风或“开启语音”，授权并看到“我在听”后再说话；未开启麦克风时只喊唤醒词不会生效。只说“你好，布鲁”会进入聆听对话并显示“我在，接着说吧”，接着说请求即可，不需要先打字。说完停顿会提交识别；20 秒无交互后进入唤醒待机，说“你好，布鲁”可继续，也可以一句话连着说请求。点右上角“停止收音”会关闭麦克风及唤醒监听、丢弃尚未提交的识别，并停止当前播放；按钮变回“开启语音”后不会继续录背景声音。已经提交的对话或机器人任务不会被取消。“播报开／关”单独控制之后的回复朗读。只播报对用户的回复，不朗读思考。播报与模型处理期间暂停收音，避免把自身声音识别为新请求；网页不能在未经浏览器授权时自动打开麦克风。部署在其他电脑访问时需要 HTTPS；localhost 可直接测试。
+### 本地常驻唤醒（展台推荐）
 
-语音识别本身不发单：识别文本进入同一对话流程，仍使用原有允许／取消条确认整单。语音故障会显示在对话里，可重新点麦克风或继续打字。若再次出现“语音刚才没接上”，记下时间及当时使用的启动方式；后端日志中的 `speech_asr_failed` 记录异常类型和耗时，不记录音频、识别内容或密钥。音频不写入数据库，Key 不发送到前端；待机状态下检测到的说话声会送云端判断是否包含唤醒词，不是离线唤醒。
+```bash
+# 项目根目录，macOS / Ubuntu（Windows: python scripts/manage.py setup --voice）
+bash scripts/setup.sh --voice
+# 在 backend/.env 中填写阿里语音 Key 和 DeepSeek Key，然后设置：
+# BLUESWORD_SPEECH_MODE=local
+bash scripts/start.sh --port 8013
+```
+
+服务启动后，由**运行后端的电脑**自动打开麦克风，用 sherpa-onnx 在本地检测“你好，布鲁”。网页打开即可看到“本地待唤醒”，不用点击网页麦克风；首次运行仍需允许操作系统的麦克风权限。说“你好，布鲁，查询库存”可连贯下达指令；唤醒后 20 秒内可继续对话，空闲后自动回到本地唤醒。启动脚本运行期间保持监听；关机、休眠或停止进程后不会监听，这次不安装系统登录启动项。
+
+```text
+本机麦克风 → sherpa-onnx 唤醒 → 语音分段 → 千问 ASR
+  → 同一 Agent 会话 / DeepSeek → 取物确认 → 原有机器人任务接口
+  → 千问 TTS → 本机音箱
+网页 ← WebSocket：唤醒、识别文字、回复、确认单、语音状态
+```
+
+- 待机音频只在内存中做本地检测，不上传。命中唤醒后上传该段语音（含最多 3 秒前置缓存，避免丢失连说指令）；单段上限 25 秒，静音约 0.85 秒结束。采用可调 RMS 分段，展会嘈杂环境仍需调参和现场验证。
+- 后端只保留一个麦克风和一个会话。网页刷新、关闭或多开不会重复采集、播报或发单。多个页面共同查看和操作当前展台会话；刷新可以恢复仍有效的确认单，不重放历史发单。
+- 页面“暂停监听”关闭本机麦克风，取消尚未提交的识别和当前播报；刷新不会擅自恢复。已提交的 Agent 对话和机器人任务继续执行。“恢复监听”重新打开麦克风并等待唤醒。后端重启按配置自动监听。
+- “播报开／关”只控制朗读，不关闭收音。播报（含合成等待与回声消退）及 Agent 思考／执行期间不检测或提交音频，避免自身声音触发新指令；此版本不支持语音打断正在播报或执行的任务，仍可使用页面操作。
+- 语音文字复用网页输入的订单修改、确认、取消逻辑，不直接下发机器人动作。模型文件、系统权限或音频设备异常会显示在语音状态栏，文字聊天仍可用；检查后点击“恢复监听”。
+- 远程访问网页不会使用远程电脑的麦克风／音箱。本地模式仍需联网调用 ASR、DeepSeek、TTS；只有唤醒离线。采用单进程运行，勿使用多个 Uvicorn worker 同时打开麦克风。
+
+音频设备使用系统默认值，可在后端目录运行 `.venv/bin/python -m sounddevice` 查看设备，再设置 `BLUESWORD_VOICE_INPUT_DEVICE` 和 `BLUESWORD_VOICE_OUTPUT_DEVICE`（Windows 用 `.venv\Scripts\python.exe`）。Ubuntu 需有可用的 PortAudio，例如 `sudo apt install libportaudio2`。系统权限由启动后端的应用持有，在 macOS 的“隐私与安全性 → 麦克风”中允许对应终端／应用。
+
+`BLUESWORD_WAKE_THRESHOLD` 控制命中阈值（默认 0.25，越大越难唤醒）；`BLUESWORD_VOICE_RMS`、`BLUESWORD_VOICE_SILENCE`、`BLUESWORD_VOICE_IDLE` 调节音量门限、句尾静音和续聊窗口。模型默认位于 `backend/models/`（不提交），下载脚本校验 SHA-256；使用官方 [中英双语 KWS 模型](https://k2-fsa.github.io/sherpa/onnx/kws/pretrained_models/index.html)，关键词使用对应的 `phone+ppinyin` 编码。Python 包与原生 core 同版本锁定，避免平台依赖遗漏。
+
+### 原网页语音模式
+
+默认 `BLUESWORD_SPEECH_MODE=browser` 保持兼容：先点击麦克风或“开启语音”并授权，再说话。此模式先将说话声送千问识别，再判断文字是否包含唤醒词，**不是离线唤醒**。20 秒无交互后进入文字唤醒待机；“停止收音”关闭网页麦克风并停止播放。其他电脑访问需要 HTTPS，localhost 可直接测试。
+
+两种模式都不把音频写入数据库，也不把 Key 发给前端。识别／播报故障日志只记录异常类别，不记录音频、识别内容或 Key。配置保存在已忽略的 `backend/.env`，不要提交真实凭据。
 
 ```bash
 npm run build --prefix frontend
 node --test frontend/tests/*.test.mjs
-(cd backend && uv run --locked --extra dev pytest -q && uv run --locked --extra dev ruff check bluesword tests)
+(cd backend && uv run --locked --extra dev --extra voice pytest -q && uv run --locked --extra dev --extra voice ruff check bluesword tests)
 ```
 
 现场还需一起手动检查麦克风权限、嘈杂环境中的唤醒与识别、音箱音量及回声，并使用已确认的物品名称／编码、机器人地址和网关回调地址联调 VLM。模拟器和供应商测试不能证明真实机器人已完成取送。
+
+安装 voice 扩展并配置 Key 后，可在后端目录运行 `.venv/bin/python scripts/smoke_voice.py`：自动生成“你好，布鲁，查询库存”语音，实际经过 sherpa 唤醒、千问 ASR、DeepSeek 库存工具、千问 TTS。这项测试会产生少量模型调用费用；不开麦克风、不播放音频，使用独立内存数据库与 mock 机器人，不会影响正在演示的会话。合成语音测试通过不代表真人、远场或展馆噪声下的唤醒率已验收。
 
 浏览器回归使用 `frontend/tests/order.browser.cjs`、`frontend/tests/speech.browser.cjs`、`frontend/tests/speech-home.browser.cjs` 和 `frontend/tests/order-revision.browser.cjs`。先构建前端，在单独终端启动隔离模拟服务，再使用已安装的 `playwright-cli`：
 

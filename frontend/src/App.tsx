@@ -59,6 +59,7 @@ export default function App() {
       () => dispatch({ type: 'wake' }),
     )
     speech.current = controller
+    void controller.initialize()
     const unlock = () => { void controller.unlock().catch(() => {}) }
     window.addEventListener('pointerdown', unlock, { once: true })
     return () => { window.removeEventListener('pointerdown', unlock); controller.close(); speech.current = null }
@@ -131,9 +132,17 @@ export default function App() {
   )
   const confirmVisible = useConfirmVisible(state)
   const confirmBar = state.confirm && confirmVisible ? <ConfirmBar request={state.confirm} onAnswer={answerConfirm} /> : undefined
+  const speechSettings = <div className="speech-settings">
+    {voice.status && <span role="status">{voice.status}</span>}
+    <button aria-pressed={voice.enabled} onClick={() => voice.enabled ? speech.current?.stopListening() : void speech.current?.mic()}>
+      {voice.mode === 'local' ? (voice.enabled ? '暂停监听' : '恢复监听') : (voice.enabled ? '停止收音' : '开启语音')}
+    </button>
+    <button aria-pressed={voice.tts} onClick={() => speech.current?.setTts(!voice.tts)}>播报{voice.tts ? '开' : '关'}</button>
+  </div>
 
   if (state.backendMode === 'gdk_mock') return (
     <>
+      {speechSettings}
       <DemoConsole state={state} onSubmit={actions.submit} onMic={actions.mic}
     onCancel={() => bridge.current?.send({ type: 'cancel_task', task_id: state.task?.id })}
     onTake={() => bridge.current?.send({ type: 'mock_take' })}
@@ -157,15 +166,9 @@ export default function App() {
         }}
       />
       <main className="main">
-        <div className="speech-settings">
-          {voice.status && <span role="status">{voice.status}</span>}
-          <button aria-pressed={voice.enabled} title={voice.enabled ? '关闭麦克风，也停止唤醒监听' : '打开麦克风后，直接说话就好'} onClick={() => voice.enabled ? speech.current?.stopListening() : void speech.current?.mic()}>
-            {voice.enabled ? '停止收音' : '开启语音'}
-          </button>
-          <button aria-pressed={voice.tts} onClick={() => speech.current?.setTts(!voice.tts)}>{voice.tts ? '播报开' : '播报关'}</button>
-        </div>
+        {speechSettings}
         {state.view === 'home' ? (
-          <Home phase={state.phase} voiceEnabled={voice.enabled} onSubmit={actions.submit} onMic={actions.mic} />
+          <Home phase={state.phase} voiceEnabled={voice.enabled} localVoice={voice.mode === 'local'} onSubmit={actions.submit} onMic={actions.mic} />
         ) : (
           <div className={`session ${showVision ? 'with-vision' : ''}`}>
             <Conversation

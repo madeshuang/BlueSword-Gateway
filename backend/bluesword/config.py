@@ -80,6 +80,15 @@ class Settings(BaseModel):
     tts_model: str = "qwen3-tts-flash"
     tts_voice: str = "Cherry"
     speech_model: str = "qwen-audio-3.1-asr-flash-message"
+    # local: backend owns the microphone, KWS and speaker; browser is a shared display.
+    speech_mode: Literal["browser", "local"] = "browser"
+    wake_model_dir: str = "models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20"
+    wake_threshold: float = Field(default=0.25, gt=0, le=1)
+    voice_input_device: int | None = None
+    voice_output_device: int | None = None
+    voice_rms: float = Field(default=0.012, gt=0, lt=1)
+    voice_silence: float = Field(default=0.85, ge=0.3, le=3)
+    voice_idle: float = Field(default=20, ge=3, le=120)
     robot_timeout: float = Field(default=8, gt=0)  # 等待接单回复
     remote_task_timeout: float = Field(default=300, gt=0)  # 等待完成通知的上限
     # —— 兰剑协议（机器人侧）：回报发往的网关地址，如 http://127.0.0.1:8000；为空则不回报
