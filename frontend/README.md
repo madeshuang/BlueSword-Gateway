@@ -1,6 +1,6 @@
 # BlueSword · 布鲁 展示前端
 
-在项目根目录执行以下 Bash 命令（Windows 安装与启动见[项目说明](../README.md#Windows-原生安装与启动)）：
+在项目根目录执行以下 Bash 命令（Windows 安装与启动见[项目说明](../README.md#windows-原生安装与启动)）：
 
 ```bash
 cd frontend
