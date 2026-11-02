@@ -9,7 +9,7 @@ import { Sidebar } from './components/Sidebar'
 import { VisionPanel } from './components/VisionPanel'
 import { config } from './config'
 import { SpeechController, type SpeechState } from './speech/controller'
-import { initialState, reducer, type State } from './store'
+import { initialState, persist, reducer, type State } from './store'
 import { isRevealed, useRevealTick } from './reveal'
 
 /** 确认弹窗的出现时机：等布鲁把那句话说完（思考链打完、回复显示），再留一点阅读时间 */
@@ -33,7 +33,7 @@ function useConfirmVisible(state: State) {
     // 兜底：无论如何，请求到达 8 秒后一定弹出
     const fallback = setTimeout(() => setVisible(true), Math.max(0, MAX_DEFER_MS - (Date.now() - confirm.receivedAt)))
     return () => clearTimeout(fallback)
-  }, [confirm])
+  }, [confirm?.id])
 
   useEffect(() => {
     if (!confirm || !ready) return
@@ -49,7 +49,7 @@ export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState)
   const bridge = useRef<Bridge | null>(null)
   const speech = useRef<SpeechController | null>(null)
-  const [voice, setVoice] = useState<SpeechState>({ enabled: false, tts: true, status: '' })
+  const [voice, setVoice] = useState<SpeechState>({ enabled: false, listening: false, tts: true, status: '' })
 
   useEffect(() => {
     const controller = new SpeechController(
@@ -59,7 +59,11 @@ export default function App() {
       () => dispatch({ type: 'wake' }),
     )
     speech.current = controller
-    const unlock = () => { void controller.unlock().catch(() => {}) }
+    const unlock = (event: PointerEvent) => {
+      void controller.unlock().then(() => {
+        if (!(event.target as HTMLElement).closest('.mic')) void controller.autoStart()
+      }).catch(() => {})
+    }
     window.addEventListener('pointerdown', unlock, { once: true })
     return () => { window.removeEventListener('pointerdown', unlock); controller.close(); speech.current = null }
   }, [])
@@ -70,16 +74,24 @@ export default function App() {
     return () => b.close()
   }, [])
 
-  // 长时间无交互回到首页
+  const latestState = useRef(state)
+  latestState.current = state
   useEffect(() => {
-    if (state.backendMode === 'gdk_mock' || state.view !== 'session' || state.phase === 'acting' || state.task?.status === 'running' || state.confirm) return
-    const t = setTimeout(() => {
-      speech.current?.reset()
-      bridge.current?.send({ type: 'reset' })
-      dispatch({ type: 'go_home' })
-    }, config.idleTimeoutMs)
-    return () => clearTimeout(t)
-  }, [state.view, state.phase, state.lastActivity, state.backendMode, state.task?.status, state.confirm])
+    let saved: State | null = null
+    const timer = setInterval(() => {
+      const current = latestState.current
+      if (current.messages !== saved?.messages || current.history !== saved?.history || current.sessionId !== saved?.sessionId || current.sessionBootId !== saved?.sessionBootId) {
+        if (persist(current)) saved = current
+      }
+    }, 250)
+    return () => clearInterval(timer)
+  }, [])
+  useEffect(() => {
+    const save = () => { persist(latestState.current) }
+    window.addEventListener('pagehide', save)
+    document.addEventListener('visibilitychange', save)
+    return () => { save(); window.removeEventListener('pagehide', save); document.removeEventListener('visibilitychange', save) }
+  }, [])
 
   // 快捷键：T 切换明暗主题，Esc 回首页，空格开启语音
   useEffect(() => {
@@ -94,7 +106,7 @@ export default function App() {
         dispatch({ type: 'go_home' })
       } else if (e.key === ' ') {
         e.preventDefault()
-        void speech.current?.mic()
+        void speech.current?.toggle()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -104,11 +116,12 @@ export default function App() {
   const actions = useMemo(
     () => ({
       submit: (text: string) => {
+        speech.current?.activate()
         speech.current?.interrupt()
         dispatch({ type: 'local_user', text })
         bridge.current?.send({ type: 'text_input', text })
       },
-      mic: () => void speech.current?.mic(),
+      mic: () => void speech.current?.toggle(),
       home: () => {
         speech.current?.reset()
         bridge.current?.send({ type: 'reset' })
@@ -118,19 +131,39 @@ export default function App() {
     [],
   )
 
-  const showVision = !state.viewing && (state.detections.length > 0 || state.scanning || !!state.task || !!state.caption || state.recoveryRequired)
+  const showVision = !state.viewing && (!!state.task || state.recoveryRequired || state.showCamera && (state.detections.length > 0 || state.scanning || !!state.caption || !!state.cameraSrc))
+  const displayedMessages = state.viewing ? state.history.find(h => h.id === state.viewing)?.messages ?? [] : state.messages
+  const firstUser = state.messages.find(m => m.role === 'user')
+  const sidebarHistory = firstUser ? [{ id: state.sessionId, title: firstUser.text, at: state.lastActivity, messages: state.messages }, ...state.history] : state.history
 
   const confirmId = state.confirm?.id
   const answerConfirm = useCallback(
     (approved: boolean) => {
       if (!confirmId) return
       bridge.current?.send({ type: 'confirm_response', id: confirmId, approved })
-      dispatch({ type: 'confirm_answered', id: confirmId })
+
     },
     [confirmId],
   )
   const confirmVisible = useConfirmVisible(state)
   const confirmBar = state.confirm && confirmVisible ? <ConfirmBar request={state.confirm} onAnswer={answerConfirm} /> : undefined
+
+  const visionPanel = (
+    <VisionPanel
+      showCamera={state.showCamera}
+      cameraSrc={state.cameraSrc}
+      detections={state.detections}
+      caption={state.caption}
+      scanning={state.scanning}
+      task={state.task}
+      backendMode={state.backendMode}
+      glossary={state.glossary}
+      recoveryRequired={state.recoveryRequired}
+      onCancel={() => bridge.current?.send({ type: 'cancel_task', task_id: state.task?.id })}
+      onTake={() => bridge.current?.send({ type: 'mock_take' })}
+      onRecover={() => bridge.current?.send({ type: 'mock_recover' })}
+    />
+  )
 
   if (state.backendMode === 'gdk_mock') return (
     <>
@@ -144,56 +177,38 @@ export default function App() {
   return (
     <div className={`app view-${state.view}`}>
       <Sidebar
-        history={state.history}
-        activeId={state.viewing}
+        history={sidebarHistory}
+        activeId={state.viewing ?? state.sessionId}
         device={state.device}
         onNew={actions.home}
         phase={state.viewing ? 'idle' : state.phase}
         onPet={actions.mic}
         onOpen={(id) => {
-          speech.current?.reset()
-          bridge.current?.send({ type: 'reset' })
           dispatch({ type: 'open_history', id })
         }}
       />
       <main className="main">
-        <div className="speech-settings">
-          {voice.status && <span role="status">{voice.status}</span>}
-          <button aria-pressed={voice.enabled} title={voice.enabled ? '关闭麦克风，也停止唤醒监听' : '打开麦克风后，直接说话就好'} onClick={() => voice.enabled ? speech.current?.stopListening() : void speech.current?.mic()}>
-            {voice.enabled ? '停止收音' : '开启语音'}
-          </button>
-          <button aria-pressed={voice.tts} onClick={() => speech.current?.setTts(!voice.tts)}>{voice.tts ? '播报开' : '播报关'}</button>
-        </div>
         {state.view === 'home' ? (
-          <Home phase={state.phase} voiceEnabled={voice.enabled} onSubmit={actions.submit} onMic={actions.mic} />
+          <div className={`session ${showVision ? 'with-vision' : ''}`}>
+            <Home phase={state.phase} voiceEnabled={voice.enabled} voiceListening={voice.listening} voiceStatus={voice.status} onSubmit={actions.submit} onMic={actions.mic} />
+            {showVision && visionPanel}
+          </div>
         ) : (
           <div className={`session ${showVision ? 'with-vision' : ''}`}>
             <Conversation
               readOnly={!!state.viewing}
               phase={state.viewing ? 'idle' : state.phase}
               partial={state.partial}
-              messages={state.messages}
-              confirm={confirmBar}
+              messages={displayedMessages}
+              voiceEnabled={voice.enabled} voiceListening={voice.listening}
+              voiceStatus={voice.status}
+              restored={state.restored && !state.viewing}
+              confirm={state.viewing ? undefined : confirmBar}
               glossary={state.glossary}
               onSubmit={actions.submit}
               onMic={actions.mic}
             />
-            {showVision && (
-              <VisionPanel
-              cameraSrc={state.cameraSrc}
-              detections={state.detections}
-              caption={state.caption}
-              scanning={state.scanning}
-              task={state.task}
-              backendMode={state.backendMode}
-              protocol={state.protocol}
-              glossary={state.glossary}
-              recoveryRequired={state.recoveryRequired}
-              onCancel={() => bridge.current?.send({ type: 'cancel_task', task_id: state.task?.id })}
-              onTake={() => bridge.current?.send({ type: 'mock_take' })}
-              onRecover={() => bridge.current?.send({ type: 'mock_recover' })}
-              />
-            )}
+            {showVision && visionPanel}
           </div>
         )}
       </main>

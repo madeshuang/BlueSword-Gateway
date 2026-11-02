@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import inspect
 
+from .catalog import load_catalog
 from .config import Settings, load_scene
 from .mock import MockDetector, MockRobot
 from .ports import RobotBundle
@@ -10,6 +11,7 @@ from .ports import RobotBundle
 
 async def create_bundle(settings: Settings) -> RobotBundle:
     waypoints, items = load_scene()
+    items = load_catalog(settings, items)
     if settings.robot_mode == "mock":
         return RobotBundle(MockRobot(settings, waypoints, items), MockDetector())
     if settings.robot_mode == "lanjian_http":

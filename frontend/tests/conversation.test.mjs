@@ -27,3 +27,14 @@ test('wake phrase preserves the order and ignores unrelated conversation', () =>
   assert.equal(wakeCommand('你好 Blue，查询库存'), '查询库存')
   assert.equal(wakeCommand('帮我拿矿泉水'), null)
 })
+
+
+test('wake names accept documented homophones, strip punctuation and reject unrelated speech', () => {
+  for (const name of ['布鲁', '布噜', '布路', '布卢', 'Blue']) {
+    assert.equal(wakeCommand(name + '？'), '')
+    assert.equal(wakeCommand('你好，' + name + '。'), '')
+    assert.equal(wakeCommand(name + '，查询库存'), '查询库存')
+    assert.equal(wakeCommand('你好' + name + '拿薯片'), '拿薯片')
+  }
+  for (const text of ['你好', '不如拿一包薯片', '我们刚才在说布鲁', 'blueberry']) assert.equal(wakeCommand(text), null)
+})

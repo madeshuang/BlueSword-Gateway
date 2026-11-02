@@ -1,0 +1,21 @@
+.operator-page { height: 100vh; overflow: auto; padding: 2.5rem clamp(1rem, 5vw, 6rem); background: var(--bg); color: var(--text); }
+.operator-page header, .operator-section, .operator-page nav, .operator-filters { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.operator-page header { border-bottom: 1px solid var(--line); padding-bottom: 1.5rem; }
+.operator-page h1 { margin: .3rem 0; font-size: 2rem; }
+.operator-page p { color: var(--text-2); line-height: 1.7; }
+.operator-page button { border: 1px solid var(--line); border-radius: .6rem; padding: .7rem 1rem; background: var(--surface); }
+.operator-page button:disabled { opacity: .5; cursor: wait; }
+.operator-page nav { justify-content: flex-start; margin: 1.5rem 0; }
+.operator-page nav button[aria-pressed=true] { color: var(--accent-ink); background: var(--accent-soft); }
+.operator-page input { display: block; padding: .65rem; border: 1px solid var(--line); border-radius: .4rem; background: var(--surface); width: 100%; margin-top: .5rem; }
+.operator-page label { display: block; color: var(--text-2); }
+.operator-login { max-width: 28rem; margin: 4rem auto; display: grid; gap: 1.5rem; }
+.operator-page table { width: 100%; border-collapse: collapse; margin: 1rem 0; background: var(--surface); }
+.operator-page td, .operator-page th { text-align: left; padding: 1rem; border-bottom: 1px solid var(--line); }
+.operator-page th { color: var(--muted); font-weight: 500; }
+.operator-filters { justify-content: flex-start; align-items: end; }
+.operator-records details { border-bottom: 1px solid var(--line); background: var(--surface); padding: 1rem; }
+.operator-records summary { cursor: pointer; overflow-wrap: anywhere; }
+.operator-records summary > * { margin-right: 1.5rem; }
+.operator-records pre { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; max-height: 30rem; overflow: auto; }
+@media(max-width: 650px) { .operator-page td, .operator-page th { padding: .6rem .25rem; } .operator-records summary > * { display: block; margin: .4rem 0; } }

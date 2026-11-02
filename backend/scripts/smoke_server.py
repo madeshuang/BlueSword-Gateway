@@ -33,7 +33,7 @@ async def main(args):
         events = []
         task = None
         async with connect(websocket_url, max_size=2**22, proxy=None) as ws:
-            await ws.send(json.dumps({"type": "text_input", "text": "帮我拿一瓶矿泉水", "request_id": request_id}))
+            await ws.send(json.dumps({"type": "text_input", "text": "帮我拿一包奥利奥", "request_id": request_id}))
             async with asyncio.timeout(180):
                 async for raw in ws:
                     event = json.loads(raw)
@@ -52,7 +52,7 @@ async def main(args):
         stored = (await client.get(f"/api/tasks/{task['id']}")).raise_for_status().json()
         trace = (await client.get(f"/api/tasks/{task['id']}/events")).raise_for_status().json()
         # Same request cannot cause a second execution, including after disconnect.
-        duplicate = (await client.post("/api/tasks", json={"item_id": "water", "request_id": request_id})).json()
+        duplicate = (await client.post("/api/tasks", json={"item_id": "aoliao", "request_id": request_id})).json()
         assert duplicate["id"] == task["id"]
         report = {"url": base, "mode": health["mode"], "frontend_assets": len(assets),
                   "task_id": task["id"], "status": stored["status"], "steps": len(task["steps"]),

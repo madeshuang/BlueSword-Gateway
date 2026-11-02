@@ -55,7 +55,7 @@ def pair():
     robot_port, gateway_port = free_port(), free_port()
     robot = Settings(robot_mode="gdk_mock", db_path=":memory:", simulation_speed=30, auto_take=True,
                      gateway_url=f"http://127.0.0.1:{gateway_port}")
-    gateway = Settings(robot_mode="lanjian_http", split_skills=True, robot_protocol="progress", db_path=":memory:",
+    gateway = Settings(operator_token="test-only", robot_mode="lanjian_http", split_skills=True, robot_protocol="progress", db_path=":memory:",
                        robot_dispatch_url=f"http://127.0.0.1:{robot_port}/api/task/dispatch", remote_task_timeout=60)
     with Server(robot, robot_port), Server(gateway, gateway_port):
         yield gateway_port
@@ -88,7 +88,7 @@ async def test_pick_then_unload_over_protocol_with_stage_reports(pair):
         assert task["status"] == "completed", task
         assert [s["id"] for s in task["steps"]] == ["plan", "navigate_to_delivery", "place"]
 
-        log = (await client.get("/api/robot/protocol")).json()
+        log = (await client.get("/api/robot/protocol", headers={"X-Operator-Token": "test-only"})).json()
         paths = [(e["direction"], e["path"]) for e in log]
         assert paths[0] == ("out", "/api/task/dispatch")
         assert log[0]["body"]["action"] == "pick" and log[0]["body"]["taskId"] == pick["id"]
@@ -98,7 +98,7 @@ async def test_pick_then_unload_over_protocol_with_stage_reports(pair):
 
 async def test_unreachable_robot_is_uncertain_not_resent():
     port = free_port()
-    gateway = Settings(robot_mode="lanjian_http", split_skills=True, robot_protocol="progress", db_path=":memory:", robot_timeout=0.5,
+    gateway = Settings(operator_token="test-only", robot_mode="lanjian_http", split_skills=True, robot_protocol="progress", db_path=":memory:", robot_timeout=0.5,
                        robot_dispatch_url=f"http://127.0.0.1:{free_port()}/api/task/dispatch")
     with Server(gateway, port):
         async with httpx.AsyncClient(trust_env=False, base_url=f"http://127.0.0.1:{port}", timeout=10) as client:
@@ -110,7 +110,7 @@ async def test_unreachable_robot_is_uncertain_not_resent():
                 await asyncio.sleep(0.05)
             assert task["status"] == "failed" and task["error"]["code"] == "dispatch_uncertain"
             assert (await client.get("/health")).json()["recovery_required"] is True
-            log = (await client.get("/api/robot/protocol")).json()
+            log = (await client.get("/api/robot/protocol", headers={"X-Operator-Token": "test-only"})).json()
             assert len([e for e in log if e["path"] == "/api/task/dispatch"]) == 1  # 不自动重发
 
 

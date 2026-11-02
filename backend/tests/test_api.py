@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,7 +12,7 @@ from bluesword.intents import resolve
 
 def settings(**overrides):
     return Settings(
-        **(dict(db_path=":memory:", mock_delay=0, motion_timeout=0.5, handover_timeout=0.2) | overrides)
+        **(dict(catalog_path=str(Path(__file__).parent / "fixtures/geometry-catalog.json"), db_path=":memory:", mock_delay=0, motion_timeout=0.5, handover_timeout=0.2) | overrides)
     )
 
 

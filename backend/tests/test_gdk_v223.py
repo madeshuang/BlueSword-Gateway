@@ -21,7 +21,7 @@ async def gdk_manager():
     managers = []
 
     async def make(scenario="success"):
-        settings = Settings(db_path=":memory:", motion_timeout=1, handover_timeout=0.06)
+        settings = Settings(robot_mode="gdk", db_path=":memory:", motion_timeout=1, handover_timeout=0.06)
         bundle, sdk, waypoints = create_fake_bundle(settings, scenario)
         manager = TaskManager(bundle, settings, TaskStore(":memory:"), EventBus())
         manager.waypoints = waypoints

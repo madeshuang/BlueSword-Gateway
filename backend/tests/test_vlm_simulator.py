@@ -25,7 +25,7 @@ async def test_vlm_http_simulator_roundtrip(scenario, lines):
     robot_port, gateway_port = free_port(), free_port()
     gateway_url, robot_url = f"http://127.0.0.1:{gateway_port}", f"http://127.0.0.1:{robot_port}"
     simulator = create_simulator(gateway_url, delay=0.02, scenario=scenario)
-    settings = Settings(robot_mode="lanjian_http", robot_protocol="vlm", db_path=":memory:",
+    settings = Settings(operator_token="test-only", robot_mode="lanjian_http", robot_protocol="vlm", db_path=":memory:",
                         robot_dispatch_url=robot_url + "/api/task/dispatch", remote_task_timeout=10)
     with Server(None, robot_port, app=simulator), Server(settings, gateway_port) as gateway:
         async with httpx.AsyncClient(trust_env=False, base_url=gateway_url) as client:
@@ -51,7 +51,7 @@ async def test_vlm_http_simulator_roundtrip(scenario, lines):
                 await asyncio.sleep(0.02)
             assert task["status"] == ("failed" if scenario == "error" else "completed"), task
             assert task["recovery_required"] == (scenario != "success")
-            log = (await client.get("/api/robot/protocol")).json()
+            log = (await client.get("/api/robot/protocol", headers={"X-Operator-Token": "test-only"})).json()
             reports = [entry["body"] for entry in log if entry["path"] == "/api/task/progress"]
             assert reports and all(body["taskId"] == task["id"] for body in reports)
             for body in reports:

@@ -1,6 +1,11 @@
-async page => {
-  const base = new URL(page.url()).origin;
+async root => {
+  const testContext = await root.context().browser().newContext();
+  const page = await testContext.newPage();
+  try {
+  const base = new URL(root.url()).origin;
   if ((await (await page.request.get(base + '/health')).json()).mode !== 'mock') throw new Error('Use isolated mock server');
+  const restored = await page.request.post(base + '/api/inventory/reset', {headers:{'X-Operator-Token':'acceptance-only'}});
+  if (!restored.ok()) throw Error('Isolated test stock could not be restored');
   const initial = (await (await page.request.get(base + '/api/tasks')).json()).length;
   await page.addInitScript(() => {
     navigator.mediaDevices.getUserMedia = async () => {
@@ -10,7 +15,6 @@ async page => {
         const oscillator = context.createOscillator(); const gain = context.createGain(); gain.gain.value = .1;
         oscillator.connect(gain).connect(destination); oscillator.start(); oscillator.stop(context.currentTime + 1.2);
       };
-      window.__orderPulse();
       return destination.stream;
     };
   });
@@ -26,16 +30,19 @@ async page => {
   await page.route('**/api/speech/synthesize', route => route.fulfill({status:200,contentType:'audio/wav',body:wav}));
   await page.goto(base);
   await page.getByText('已连接', {exact:true}).waitFor();
-  await page.getByRole('button', {name:'语音',exact:true}).click();
+  await page.waitForFunction(() => document.querySelector('.mic[aria-pressed="true"]') || ['点一下麦克风，就能和我说话啦', '说「你好，布鲁」叫我，或在这里输入…'].includes(document.querySelector('input')?.placeholder));
+  if(await page.getByRole('button', {name:'语音',exact:true}).count()) await page.getByRole('button', {name:'语音',exact:true}).click();
+    await page.getByRole('button', {name:'停止收音',exact:true}).waitFor();
+    await page.evaluate(() => window.__orderPulse());
   await page.getByRole('alertdialog').waitFor();
-  if (!(await page.getByRole('alertdialog').innerText()).includes('奥利奥 × 1')) throw new Error('Original order missing');
+  if (!(await page.getByRole('alertdialog').innerText()).includes('奥利奥饼干 × 1')) throw new Error('Original order missing');
   await page.evaluate(() => window.__orderPulse());
-  await page.getByRole('alertdialog').filter({hasText:'奥利奥 × 1、薯片 × 1'}).waitFor({timeout:12000});
+  await page.getByRole('alertdialog').filter({hasText:'奥利奥饼干 × 1、乐事薯片 × 1'}).waitFor({timeout:12000});
   if ((await (await page.request.get(base + '/api/tasks')).json()).length !== initial) throw new Error('Dispatched edit without confirmation');
   await page.evaluate(() => window.__orderPulse());
   await page.getByText('这单最多拿两件，原来的清单先保留着。想换哪一件？',{exact:true}).waitFor();
   await page.waitForTimeout(300); // Let the controlled 100 ms reply finish before speaking.
-  if (!(await page.getByRole('alertdialog').innerText()).includes('奥利奥 × 1、薯片 × 1')) throw new Error('Excess edit changed order');
+  if (!(await page.getByRole('alertdialog').innerText()).includes('奥利奥饼干 × 1、乐事薯片 × 1')) throw new Error('Excess edit changed order');
   await page.evaluate(() => window.__orderPulse());
   let tasks;
   for (let i=0;i<150;i++) {
@@ -44,8 +51,9 @@ async page => {
     await page.waitForTimeout(100);
   }
   if(tasks.length !== initial+1 || tasks[0].status !== 'completed') throw new Error('Revised order did not complete once');
-  const expected=[{item_id:'oreo',count:1},{item_id:'chips',count:1}];
+  const expected=[{item_id:'aoliao',count:1},{item_id:'shupian',count:1}];
   if(JSON.stringify(tasks[0].items)!==JSON.stringify(expected)) throw new Error('Executed old or excessive order');
   await page.getByRole('button',{name:'停止收音',exact:true}).click();
   return {recognized,amended:tasks[0].items,oneTask:true,noCancelNeeded:true,excessPreservedOrder:true};
+  } catch(e) { throw Error(e.message+' UI: '+await page.locator('body').innerText()); } finally { await testContext.close(); }
 }
