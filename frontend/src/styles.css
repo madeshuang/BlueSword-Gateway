@@ -1069,7 +1069,27 @@ button {
 
 .steps li.failed .step-icon {
   border-color: #e5484d;
+  color: #e5484d;
 }
+
+.steps li.task-feedback {
+  --feedback-color: #c36d08;
+  grid-template-columns: 1.4rem minmax(0, 1fr);
+  align-items: start;
+  margin-top: 0.6rem;
+  padding: 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--feedback-color) 35%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--feedback-color) 8%, transparent);
+}
+
+.steps li.task-feedback.error { --feedback-color: #e5484d; }
+.steps li.task-feedback.resolved { --feedback-color: var(--teal); }
+.task-feedback .step-icon { border-color: var(--feedback-color); color: var(--feedback-color); }
+.feedback-copy strong { color: var(--feedback-color); }
+.feedback-copy p { margin: 0.4rem 0; color: var(--text-2); font-size: 0.9rem; line-height: 1.6; overflow-wrap: anywhere; }
+.feedback-copy small { display: block; margin-top: 0.3rem; color: var(--muted); font-size: 0.75rem; }
+.feedback-task-id { overflow-wrap: anywhere; }
 
 @keyframes spin {
   to { transform: rotate(360deg); }
@@ -1432,9 +1452,7 @@ button {
 }
 
 /* 语音和现场操作沿用已有弱化文字，不覆盖主对话。 */
-.speech-settings { position: absolute; top: 12px; right: 18px; z-index: 2; display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
-.speech-settings button, .operator-help summary { cursor: pointer; color: inherit; background: transparent; border: 0; font: inherit; }
-.speech-settings button[aria-pressed="true"] { color: var(--accent); }
+.operator-help summary { cursor: pointer; color: inherit; background: transparent; border: 0; font: inherit; }
 .home-voice-hint { margin-top: 10px; color: var(--muted); font-size: 12px; }
 .operator-help { font-size: 12px; max-width: 100%; }
 .operator-help[open] { display: flex; flex-direction: column; }

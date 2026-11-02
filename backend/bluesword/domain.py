@@ -124,6 +124,7 @@ class TaskRecord(BaseModel):
     holding: bool = False
     recovery_required: bool = False
     created_at: float
+    last_progress_at: float | None = None
     finished_at: float | None = None
 
 

@@ -85,6 +85,7 @@ export interface TaskStep {
 export interface Task {
   id?: string
   created_at?: number
+  last_progress_at?: number | null
   status?: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'resolved'
   recovery_required?: boolean
   error?: { code: string; message: string } | null

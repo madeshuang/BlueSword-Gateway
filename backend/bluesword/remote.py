@@ -209,7 +209,9 @@ class RemoteWorkflow:
             raise RobotError("dispatch_uncertain", "还没确认是否接单，请现场同事帮忙看一下。")
         if not answer["success"]:
             raise RobotError("rejected", f"机器人没有接单：{answer.get('data') or '未说明原因'}")
+        self.task.last_progress_at = self.task.last_progress_at or time.time()
         self.set_step("plan", "done", "机器人已接单")
+        self.snapshot()
 
     async def _follow(self) -> None:
         assert self.task
@@ -232,6 +234,8 @@ class RemoteWorkflow:
                         self.task.steps.append(type(self.task.steps[0])(
                             id=stage, label=body.get("label") or stage, gdk=STAGE_GDK.get(stage, [])))
                     self.set_step(stage, mapped, body.get("detail") or ("进行中" if mapped == "active" else None))
+                    self.task.last_progress_at = time.time()
+                    self.snapshot()
             elif kind == "finished":
                 if body.get("result") not in (None, "success"):
                     continue

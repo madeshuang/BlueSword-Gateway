@@ -113,7 +113,10 @@ def test_vlm_whole_order_progress_image_retry_reconnect_and_finish(gateway):
         image=picture(),
     )
     assert client.post("/api/task/progress", json=first).json()["success"]
+    first_at = client.get("/api/tasks/" + identifier).json()["last_progress_at"]
+    assert first_at is not None
     assert client.post("/api/task/progress", json=first).json()["success"]
+    assert client.get("/api/tasks/" + identifier).json()["last_progress_at"] == first_at
     retry = progress(
         identifier,
         "target_located",
@@ -125,6 +128,8 @@ def test_vlm_whole_order_progress_image_retry_reconnect_and_finish(gateway):
     assert client.post("/api/task/progress", json=retry).json()["success"]
     task = client.get("/api/tasks/" + identifier).json()
     assert len(task["steps"]) == 2 and task["steps"][1]["attempt"] == 2
+    assert task["last_progress_at"] > first_at
+    assert task["steps"][1]["startedAt"] == first_at
     assert task["status"] == "running"
     with client.websocket_connect("/ws") as ws:
         seen = [ws.receive_json() for _ in range(6)]
@@ -239,9 +244,17 @@ def test_fault_is_terminal_and_previous_order_cannot_complete_new_order(gateway)
         "success"
     ]
     assert client.get("/api/tasks/" + second).json()["status"] == "running"
+    assert client.post("/api/task/progress", json=progress(second, "target_located", 2, 1, total=5)).json()["success"]
     assert client.post("/api/task/error", json={"taskId": second, "message": "抓取失败"}).json()["success"]
     failed = final(client, second)
     assert failed["status"] == "failed" and failed["recovery_required"]
+    assert all(step["status"] == "done" for step in failed["steps"])
+    assert "抓取失败" in failed["error"]["message"]
+    with client.websocket_connect("/ws") as ws:
+        snapshot = [ws.receive_json() for _ in range(4)]
+        restored = next(event["task"] for event in snapshot if event["type"] == "task")
+        assert restored["error"] == failed["error"]
+        assert restored["last_progress_at"] == failed["last_progress_at"]
     assert not client.post("/api/task/finished", json={"taskId": second, "result": "success"}).json()[
         "success"
     ]

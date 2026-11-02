@@ -21,6 +21,7 @@ export function OperatorHelp({ taskId }: { taskId: string | undefined }) {
   }
   return <details className="operator-help">
     <summary>现场协助</summary>
+    <p>请在机器人端处理故障或停止动作，核对物品后再恢复接单。此操作不会停止机器人，也不会重发任务。</p>
     <label><input type="checkbox" checked={checked} onChange={e => setChecked(e.target.checked)} />已核对机器人和物品</label>
     <input type="password" value={token} autoComplete="off" placeholder="工作人员口令" aria-label="工作人员口令" onChange={e => setToken(e.target.value)} />
     <button disabled={!checked || !token || busy} onClick={() => void resolve()}>恢复接单</button>
