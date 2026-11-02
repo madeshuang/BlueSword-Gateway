@@ -101,6 +101,8 @@ class TaskStep(BaseModel):
     stage_index: int | None = None
     pick_index: int | None = None
     attempt: int = 0
+    detected_item: str | None = None
+    detected_label: str | None = None
     startedAt: float | None = None
 
 

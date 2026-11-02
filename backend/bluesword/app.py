@@ -274,6 +274,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         manager.store.settle_stock(active.id)
                     else:
                         active.error = {"code":"robot_error", "message":body["message"]}
+                        manager.settle_remote_failure(active)
                     manager.store.save(active)
                     manager.bus.emit({"type":"task", "task":active.model_dump()})
                 else:

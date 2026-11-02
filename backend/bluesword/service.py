@@ -213,6 +213,8 @@ class TaskManager:
                 self.store.settle_stock(task.id)
             elif (result.error or {}).get("code") == "rejected":
                 self.store.settle_stock(task.id, refund=True)
+            elif (result.error or {}).get("code") == "robot_error":
+                self.settle_remote_failure(result)
             return result
         finally:
             if hasattr(robot, "command_sink"):
@@ -270,6 +272,25 @@ class TaskManager:
             raise RobotError("unknown_item", "没有找到这件物品。")
         self.store.restock([item for key,item in self.items.items() if item_id in (None,key)])
         return self.inventory()
+
+    def settle_remote_failure(self, task: TaskRecord) -> None:
+        if self.settings.robot_mode != 'lanjian_http' or self.settings.robot_protocol != 'vlm':
+            return
+        from .vlm import failure_refunds
+
+        quantities = failure_refunds(task, self.items)
+        if quantities is None:
+            task.completion_note = '已抓取物品或数量无法确定，库存保留扣减，请现场核对。'
+        elif quantities:
+            returned = self.store.auto_refund_stock(task.id, quantities)
+            if returned:
+                task.completion_note = f'未收到抓取成功回报的物品已自动退回库存，共 {sum(returned.values())} 件。已抓取物品保留扣减；机器人仍需现场处理。'
+            elif not task.completion_note:
+                task.completion_note = '本单未抓取部分的库存已处理，无需重复退回；机器人仍需现场处理。'
+        else:
+            task.completion_note = '已收到抓取成功回报，库存保留扣减；机器人仍需现场处理。'
+        self.store.save(task)
+        self.bus.emit({'type': 'task', 'task': task.model_dump()})
 
     async def refund_reserved_stock(self, expected_task_id: str | None) -> dict[str, int]:
         async with self.lock:
