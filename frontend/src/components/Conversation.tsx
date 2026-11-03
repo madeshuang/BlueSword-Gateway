@@ -157,7 +157,7 @@ function AssistantTurn({
             </div>
           )}
           {m.interrupted && <div className="message-note">这条回复还没说完。</div>}
-          {revealed[i] && m.skills?.map((k) => <SkillCard key={k.call_id} skill={k} />)}
+          {m.skills?.filter(k => revealed[i] || !!k.commentary).map((k) => <SkillCard key={k.call_id} skill={k} />)}
         </Fragment>
       ))}
     </div>
@@ -183,7 +183,10 @@ function SkillCard({ skill }: { skill: SkillCall }) {
       {skill.status === 'failed' && skill.detail && <span className="skill-note">{skill.detail}</span>}
     </div>
   )
-  if (!skill.stock || skill.status !== 'done') return pill
+  if (!skill.stock || skill.status !== 'done') return <>
+    {pill}
+    {skill.commentary && <p className="task-commentary" role="status">{skill.commentary}</p>}
+  </>
   // 查询库存：技能标记下面一排卡片，每样东西剩几件，没货的标红
   return (
     <>

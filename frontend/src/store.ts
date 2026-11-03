@@ -212,6 +212,12 @@ export function reducer(state: State, action: Action): State {
         }),
       }
     }
+    case 'task_commentary':
+      if (action.task_id === s.dismissedTaskId || action.task_id !== s.task?.id) return s
+      return { ...s, messages: updateMsg(s.messages, action.id, m => ({ ...m,
+        skills: m.skills?.map(k => k.call_id === action.call_id && k.status === 'running'
+          ? { ...k, commentary: action.text, task_id: action.task_id } : k),
+      })) }
     case 'vision':
       if (action.task_id && action.task_id === s.dismissedTaskId) return s
       return {

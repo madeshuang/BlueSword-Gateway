@@ -20,6 +20,7 @@ import httpx
 from openai import AsyncOpenAI
 from pydantic import ValidationError
 
+from .commentary import TaskCommentary
 from .config import Settings
 from .domain import RobotError, TaskRecord, TaskRequest
 from .language import item_label, language_of, order_label
@@ -306,11 +307,18 @@ class AgentSession:
         )
         return Decision.model_validate_json(response.choices[0].message.content)
 
-    async def _tool(self, name: str, args: dict) -> dict:
+    async def _tool(self, name: str, args: dict, commentary: Emit | None = None, request_text: str = "") -> dict:
         manager = self.manager
         if name == "fetch_items":
             request = TaskRequest(items=args.get("items", []), request_id=self.request_id)
-            task = await manager.run_order(request.items, self.request_id, self.owner)
+            if (commentary and self.settings.task_commentary and self.settings.robot_mode == "lanjian_http"
+                    and self.settings.robot_protocol == "vlm"):
+                async with TaskCommentary(manager, self.client, self.settings, self.request_id,
+                                          self.language, request_text, commentary) as notes:
+                    task = await manager.run_order(request.items, self.request_id, self.owner)
+                    notes.update(task)
+            else:
+                task = await manager.run_order(request.items, self.request_id, self.owner)
             return summarize(task)
         if name == "pick_item":
             item_id = args.get("item_id")
@@ -522,7 +530,9 @@ class AgentSession:
                     else:
                         emit({**base, "status": "running"})
                         try:
-                            result = await self._tool(name, args)
+                            result = await self._tool(name, args, lambda note: emit({
+                                "type": "task_commentary", "id": msg_id, "call_id": call["id"], **note,
+                            }), text)
                         except RobotError as exc:
                             result = {"ok": False, "error": str(exc)}
                         if order:

@@ -7,6 +7,29 @@ const load = (localStorage = { getItem: () => null }) => loadSource('../src/stor
   localStorage, config: { agentWsUrl: 'ws://test' },
 })
 
+test('task commentary updates one running card and cannot overwrite completed or dismissed tasks', () => {
+  const { reducer, initialState } = load()
+  let state = reducer(initialState, { type: 'task', task })
+  state = reducer(state, { type: 'assistant_start', id: 'message' })
+  const skill = { type: 'skill', id: 'message', call_id: 'call', name: 'fetch_items', title: '取物', status: 'running' }
+  state = reducer(state, skill)
+  const note = { type: 'task_commentary', id: 'message', call_id: 'call', task_id: task.id, text: '找到目标了。', source: 'facts' }
+  state = reducer(state, note)
+  assert.equal(state.messages[0].skills[0].commentary, note.text)
+  state = reducer(state, { ...note, text: '已经拿到了。' })
+  assert.equal(state.messages[0].skills.length, 1)
+  assert.equal(state.messages[0].skills[0].commentary, '已经拿到了。')
+  state = reducer(state, { ...note, task_id: 'other', text: '错误订单' })
+  assert.equal(state.messages[0].skills[0].commentary, '已经拿到了。')
+  state = reducer(state, { ...skill, status: 'done' })
+  state = reducer(state, { ...note, text: '迟到的模型回复' })
+  assert.equal(state.messages[0].skills[0].commentary, '已经拿到了。')
+  state = reducer(state, { type: 'go_home' })
+  const messages = state.messages
+  state = reducer(state, note)
+  assert.equal(state.messages, messages)
+})
+
 test('new conversation closes old execution and photos, while retaining robot recovery state', () => {
   for (const status of ['running', 'completed', 'failed']) {
     const { reducer, initialState } = load()

@@ -99,6 +99,8 @@ bash scripts/start.sh
 
 配置统一填写在 `backend/.env`，已有进程环境变量优先；修改后需重启服务。模型默认 `deepseek-flash`，可用 `DEEPSEEK_MODEL` 调整；没有模型 Key 时使用规则路由。配置项见 [backend/.env.example](backend/.env.example)，不要提交真实 `.env`。
 
+使用模型和 VLM 整单取送时，取物卡片下会随进度更新一句简短说明，不等待思考文字播放完毕。普通识别、抓取节点可由模型改写；超时或生成失败时保留进度短句，故障、数量待核对及完成提示使用固定措辞。说明不触发机器人动作，也不替代最终通知。可设置 `BLUESWORD_TASK_COMMENTARY=false` 关闭，重启后端生效；执行中追加问答尚未接入。
+
 ### Windows 原生安装与启动
 
 安装 Windows 版 Git、Node.js 24 和 uv 后，重新打开 PowerShell，确认 `node`、`npm.cmd` 和 `uv` 可用。首次安装可选择分步执行或使用快捷脚本，执行其中一种即可。

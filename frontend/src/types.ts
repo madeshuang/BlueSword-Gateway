@@ -32,6 +32,9 @@ export interface SkillCall {
   gdk?: string[]
   /** 查询库存的结果：每样东西剩几件 */
   stock?: { name: string; count: number }[]
+  /** 当前订单的简短说明，与模型思考的逐字动画独立更新。 */
+  commentary?: string
+  task_id?: string
 }
 
 /** 机器人动作前的确认请求：用户允许后才会执行 */
@@ -106,6 +109,7 @@ export type ServerEvent =
   | { type: 'reasoning_delta'; id: string; text: string }
   | { type: 'reasoning_end'; id: string; ms: number }
   | ({ type: 'skill'; id: string } & SkillCall)
+  | { type: 'task_commentary'; id: string; call_id: string; task_id: string; text: string; source: 'facts' | 'model' }
   | ({ type: 'confirm_request' } & ConfirmRequest)
   | { type: 'confirm_refresh'; id: string; timeout_s: number }
   | { type: 'confirm_closed'; id: string; reason: 'approved' | 'declined' | 'timeout' | 'cancelled' | 'updated' }

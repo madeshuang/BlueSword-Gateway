@@ -757,6 +757,16 @@ button {
   opacity: 0.85;
 }
 
+.task-commentary {
+  margin: 0.65rem 0 0;
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--teal);
+  color: var(--text);
+  font-size: 1rem;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
 .step-gdk {
   grid-column: 2 / -1;
   margin-top: -0.15rem;
