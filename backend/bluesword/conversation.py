@@ -206,18 +206,13 @@ async def serve_conversation(ws: Transport, settings, manager, agent, take, reco
             await session.turn(text, emit, request_confirm, request_id)
         except asyncio.CancelledError:
             raise
-        except Exception:
-            logger.exception("LLM turn failed; falling back to rules")
+        except Exception as exc:
+            logger.warning("LLM turn failed type=%s", type(exc).__name__)
             attempted = session.order_attempted
-            session.reset()
             if attempted or manager.busy or manager.store.recovery_required:
                 say("回复暂时没接上，取物情况请看任务卡片。", "My reply was interrupted. Please check the task card for the robot's reported status.")
                 return
-            say("刚才没听明白，再告诉我想拿什么吧。", "My language service is unavailable. You can still name an item and quantity.")
-            try:
-                await handle_rules(text, request_id)
-            except RobotError as exc:
-                say(robot_error_text(exc, language))
+            say("对话服务暂时没接上，本次没有下单，请稍后重试。", "My language service is unavailable. No order was placed. Please try again shortly.")
             emit({"type": "phase", "phase": "listening"})
 
     sending = asyncio.create_task(sender())

@@ -21,6 +21,7 @@ export function OperatorPage() {
   const [query, setQuery] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  const [llm, setLlm] = useState<{ provider: string; primary_open?: boolean; reason?: string; retry_in_s?: number; blocked?: string[] } | null>(null)
   const revision = useRef(0)
   const headers = (key = token) => ({ 'X-Operator-Token': key })
   const read = async (response: Response) => {
@@ -42,6 +43,16 @@ export function OperatorPage() {
     } catch (e) { setMessage((e as Error).message) }
     finally { setBusy(false) }
   }
+  useEffect(() => {
+    if (!token) { setLlm(null); return }
+    const abort = new AbortController()
+    const refresh = () => apiFetch('/api/operator/llm', { headers: headers(), signal: abort.signal })
+      .then(read).then(value => { if (!abort.signal.aborted) setLlm(value) })
+      .catch(() => { if (!abort.signal.aborted) setLlm(null) })
+    void refresh()
+    const timer = setInterval(() => void refresh(), 5000)
+    return () => { abort.abort(); clearInterval(timer) }
+  }, [token])
   useEffect(() => {
     if (!token) return
     const abort = new AbortController()
@@ -101,6 +112,11 @@ export function OperatorPage() {
       <button disabled={!password || busy}>进入工作台</button>
     </form> : <>
       <OperatorRecovery token={token} />
+      <p role="status">对话服务：{llm ? ({ deepseek: 'DeepSeek', qwen: '千问备用', rules: '规则回复', unavailable: '暂不可用' }[llm.provider] ?? llm.provider) : '状态暂不可用'}
+        {llm?.primary_open && !llm.blocked?.includes('deepseek') && ' · 主服务恢复后自动切回'}
+        {!!llm?.retry_in_s && ` · ${llm.retry_in_s} 秒后探测`}
+        {!!llm?.blocked?.length && ' · 模型配置需核对，处理后重启服务'}
+        {llm?.reason && ` · ${llm.reason}`}</p>
       <nav><button aria-pressed={tab === 'stock'} onClick={() => setTab('stock')}>物品库存</button><button aria-pressed={tab === 'protocol'} onClick={() => setTab('protocol')}>机器人通信</button></nav>
       {tab === 'stock' ? <section>
         <div className="operator-section"><p>显示当前可用数量。补满实物后恢复库存，任务执行期间也可操作。</p><button disabled={busy} onClick={() => void restore()}>恢复全部库存</button></div>

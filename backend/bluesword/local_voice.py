@@ -354,6 +354,9 @@ class LocalVoice:
             await self.interrupt()
         elif kind == "assistant_start":
             self.text[event["id"]] = ""
+        elif kind == "assistant_abort":
+            self.text.pop(event["id"], None)
+            self.spoken.add(event["id"])
         elif kind == "assistant_delta" and event["id"] not in self.spoken:
             self.text[event["id"]] = (self.text.get(event["id"], "") + event["text"])[:1000]
         elif kind == "assistant_end":

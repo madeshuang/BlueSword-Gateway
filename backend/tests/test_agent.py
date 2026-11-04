@@ -20,7 +20,8 @@ class FakeStream:
         self.chunks = chunks
 
     def __aiter__(self):
-        self.it = iter(self.chunks)
+        terminal = NS(choices=[NS(finish_reason="stop", delta=NS(reasoning_content=None, content=None, tool_calls=None))])
+        self.it = iter([*self.chunks, terminal])
         return self
 
     async def __anext__(self):

@@ -229,9 +229,11 @@ def configure(root: Path) -> None:
     report = handoff(site, rows, robot_url)
     write_private(root / "output/site-setup.txt", report)
     print("\n已写入 backend/.env、config/site.local.json 和 output/site-setup.txt。")
+    print("聊天路由默认自动主备，千问备用复用百炼 Key；已有高级配置保留。")
+    print("请运行 --check-ai 验证聊天模型权限与额度；语音可用不代表千问聊天已开通。")
     print(f"物品目录：{catalog}\n请双方核对 robotItem 编码；脚本无法确认机器人实际支持的商品。")
     if not llm or not speech:
-        print("API Key 尚未填齐：缺 DeepSeek 时使用规则回复；缺阿里 Key 时无法语音识别。可重跑向导补填。")
+        print("API Key 尚未填齐：缺 DeepSeek 时无法使用主模型；缺阿里 Key 时无法语音识别及默认千问备用。可重跑向导补填。")
     print("\n" + report)
 
 
@@ -291,8 +293,15 @@ def check(root: Path) -> int:
 def main(root: Path = ROOT) -> int:
     parser = argparse.ArgumentParser(description="配置布鲁现场网关（Windows / Ubuntu / macOS）")
     parser.add_argument("--check", action="store_true", help="只读检查本地配置和安装，不连接机器人")
+    parser.add_argument("--check-ai", action="store_true", help="实际调用聊天供应商，验证思考/工具/JSON；不连接机器人")
     args = parser.parse_args()
     try:
+        if args.check_ai:
+            python = backend_python(root)
+            if not python.exists():
+                print("请先安装后端环境。")
+                return 1
+            return subprocess.run([str(python), "-m", "bluesword.check_llm"], cwd=root / "backend", check=False).returncode
         if args.check:
             return check(root)
         configure(root)

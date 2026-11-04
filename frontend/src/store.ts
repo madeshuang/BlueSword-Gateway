@@ -174,7 +174,10 @@ export function reducer(state: State, action: Action): State {
     case 'local_notice':
       return { ...s, view: 'session', messages: [...s.messages, { id: uid(), role: 'assistant', text: action.text }] }
     case 'assistant_start':
-      return { ...s, messages: [...s.messages, { id: action.id, role: 'assistant', text: '', streaming: true, thoughts: [] }] }
+      return { ...s, messages: [...s.messages, { id: action.id, role: 'assistant', text: '', streaming: true, thoughts: [],
+        revealDeadline: action.display_budget_ms === undefined ? undefined : Date.now() + action.display_budget_ms }] }
+    case 'assistant_abort':
+      return { ...s, messages: s.messages.filter(m => m.id !== action.id) }
     case 'thought':
       return { ...s, messages: updateMsg(s.messages, action.id, (m) => ({ ...m, thoughts: [...(m.thoughts ?? []), action.thought] })) }
     case 'assistant_delta':

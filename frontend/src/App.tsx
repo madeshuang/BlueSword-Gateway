@@ -37,7 +37,8 @@ function useConfirmVisible(state: State) {
 
   useEffect(() => {
     if (!confirm || !ready) return
-    const pause = anchor ? Math.min(2500, Math.max(900, textLen * READ_MS_PER_CHAR)) : 300
+    const pause = Math.min(anchor ? Math.min(2500, Math.max(900, textLen * READ_MS_PER_CHAR)) : 300,
+      Math.max(0, (anchor?.revealDeadline ?? Infinity) - Date.now()))
     const t = setTimeout(() => setVisible(true), pause)
     return () => clearTimeout(t)
   }, [confirm, ready, anchor, textLen])

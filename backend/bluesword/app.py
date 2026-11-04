@@ -122,8 +122,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             **await manager.bundle.robot.health(),
             "busy": manager.busy,
             "recovery_required": manager.store.recovery_required,
-            "intent_provider": f"deepseek:{settings.llm_model}" if app.state.agent else "rules",
+            "intent_provider": ((app.state.agent.router.selected() + ":" +
+                                 app.state.agent.router.model(app.state.agent.router.selected())) if hasattr(app.state.agent, "router")
+                                else f"deepseek:{settings.llm_model}" if app.state.agent else "rules"),
         }
+
+    @app.get("/api/operator/llm", dependencies=[Depends(authorize), Depends(operator)])
+    async def llm_status():
+        router = getattr(app.state.agent, "router", None)
+        return router.status() if router else {"provider": "rules", "reason": "未配置聊天模型"}
 
     @app.get("/api/inventory", dependencies=[Depends(authorize)])
     async def inventory(category: str | None = None):

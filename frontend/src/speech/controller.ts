@@ -276,6 +276,11 @@ export class SpeechController {
 
   onEvent(event: ServerEvent) {
     if (event.type === 'voice_status') { this.localState(event); return }
+    if (event.type === 'assistant_abort') {
+      this.text.delete(event.id)
+      this.spoken.add(event.id) // Late deltas/end must never enqueue the failed attempt.
+      return
+    }
     if (this.local) {
       if (event.type === 'device' && !event.online) this.report('连接中 · 本地监听由后端运行')
       return
@@ -295,7 +300,7 @@ export class SpeechController {
       if (event.type === 'confirm_request') for (const id of this.text.keys()) this.enqueue(id)
     }
     if (event.type === 'assistant_start') { this.processing = true; this.text.set(event.id, '') }
-    if (event.type === 'assistant_delta') this.text.set(event.id, (this.text.get(event.id) ?? '') + event.text)
+    if (event.type === 'assistant_delta' && !this.spoken.has(event.id)) this.text.set(event.id, (this.text.get(event.id) ?? '') + event.text)
     if (event.type === 'assistant_end') { this.processing = false; if (this.engaged) this.activeUntil = Date.now() + ACTIVE_MS; this.enqueue(event.id) }
     if (event.type === 'device' && !event.online) this.reset()
     if (event.type === 'device' && event.online) void this.autoStart()

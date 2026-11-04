@@ -58,6 +58,8 @@ export interface Message {
   reasoning?: string
   /** 思考用时；有值表示思考已结束 */
   reasoningMs?: number
+  /** 本轮呈现截止时间；到期后停止逐字等待，保持接待时间有界。 */
+  revealDeadline?: number
   skills?: SkillCall[]
 }
 
@@ -99,7 +101,8 @@ export type ServerEvent =
   | { type: 'wake' }
   | { type: 'phase'; phase: Phase; task_id?: string }
   | { type: 'asr'; text: string; final: boolean }
-  | { type: 'assistant_start'; id: string }
+  | { type: 'assistant_start'; id: string; display_budget_ms?: number }
+  | { type: 'assistant_abort'; id: string }
   | { type: 'thought'; id: string; thought: Thought }
   | { type: 'assistant_delta'; id: string; text: string }
   | { type: 'assistant_end'; id: string }

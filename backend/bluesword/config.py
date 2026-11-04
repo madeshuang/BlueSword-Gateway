@@ -70,6 +70,16 @@ class Settings(BaseModel):
     llm_model: str = "deepseek-flash"
     llm_base_url: str = "https://api.deepseek.com"
     llm_timeout: float = Field(default=90, gt=0)
+    # 接待上限包含模型、只读查询和最多 3 秒页面收尾；确认和机器人运动另计。
+    llm_response_timeout: float = Field(default=20, ge=5)
+    llm_primary_budget: float = Field(default=6, gt=0)
+    llm_idle_timeout: float = Field(default=4, gt=0)
+    llm_cooldown: float = Field(default=60, gt=0)
+    llm_routing: Literal["auto", "deepseek", "qwen"] = "auto"
+    llm_fallback_enabled: bool = True
+    qwen_model: str = "qwen3.8-max"
+    qwen_api_key: str = Field(default="", repr=False)  # 留空复用百炼语音 Key
+    qwen_base_url: str = ""  # 留空沿用北京地域/专属工作空间
     # 机器人动作前等待用户确认的时长（秒），超时视为取消
     confirm_timeout: float = Field(default=180, gt=0)
     show_camera: bool = True

@@ -248,7 +248,7 @@ def test_native_voice_uses_fresh_page_sessions_and_one_microphone(monkeypatch):
         return next(answers)
     monkeypatch.setattr(speech, "recognize", recognize)
     settings = Settings(catalog_path=str(Path(__file__).parent / "fixtures/geometry-catalog.json"),
-                        db_path=":memory:", speech_mode="local", speech_api_key="test",
+                        db_path=":memory:", speech_mode="local", speech_api_key="test", llm_fallback_enabled=False,
                         mock_delay=0, api_token="private-token")
     headers = {"Authorization": "Bearer private-token"}
     with TestClient(create_app(settings)) as client:
@@ -309,3 +309,28 @@ async def test_native_capture_only_calls_asr_after_wake(monkeypatch):
         assert not voice.sleeping and voice.status()["active"]
     finally:
         await voice.stop()
+
+
+async def test_aborted_model_attempt_never_enters_native_speech_queue():
+    voice = make_voice()
+    voice.enabled, voice.sleeping, voice.tts = True, False, True
+    # Keep the queue observable without starting audio playback.
+    voice.player = asyncio.create_task(asyncio.sleep(30))
+    try:
+        for event in [
+            {"type": "assistant_start", "id": "broken"},
+            {"type": "assistant_delta", "id": "broken", "text": "半句"},
+            {"type": "assistant_abort", "id": "broken"},
+            {"type": "assistant_delta", "id": "broken", "text": "迟到"},
+            {"type": "assistant_end", "id": "broken"},
+            {"type": "assistant_start", "id": "backup"},
+            {"type": "assistant_delta", "id": "backup", "text": "完整回复"},
+            {"type": "assistant_end", "id": "backup"},
+        ]:
+            await voice.send_json(event)
+        assert voice.speech_queue.qsize() == 1
+        assert voice.speech_queue.get_nowait() == "完整回复"
+    finally:
+        voice.player.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await voice.player

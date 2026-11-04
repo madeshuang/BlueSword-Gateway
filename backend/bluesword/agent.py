@@ -7,6 +7,8 @@ robot actually did, and the model must not claim success otherwise.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -16,13 +18,13 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-import httpx
 from openai import AsyncOpenAI
 from pydantic import ValidationError
 
 from .config import Settings
 from .domain import RobotError, TaskRecord, TaskRequest
 from .language import item_label, language_of, order_label
+from .llm import InvalidOutput, ModelRouter, ModelUnavailable, ResponseBudget, create_router
 from .service import TaskManager
 from .skills import SKILLS
 
@@ -263,17 +265,49 @@ def summarize(task: TaskRecord) -> dict[str, Any]:
 class AgentSession:
     """One conversation (one WebSocket). Not thread-safe; one turn at a time."""
 
-    def __init__(self, client: AsyncOpenAI, settings: Settings, manager: TaskManager, owner: str):
+    def __init__(self, client: AsyncOpenAI, settings: Settings, manager: TaskManager, owner: str,
+                 router: ModelRouter | None = None):
         self.client, self.settings, self.manager, self.owner = client, settings, manager, owner
+        self.router = router or ModelRouter(settings, {"deepseek": client})
         self.history: list[dict] = []
         self.tools = build_tools(manager)
         self.order_attempted = False
         self.request_id = ""
         self.language = "zh"
+        self._context_rejected = False
 
     def reset(self) -> None:
         self.history.clear()
         self.language = "zh"
+        self._context_rejected = False
+
+    def _repair_context(self) -> None:
+        """Discard rejected dialogue, retaining bounded facts of processed actions.
+
+        Do this only between tool rounds, never while a confirmation owns an open
+        call. Robot state and request deduplication remain in TaskManager.
+        """
+        calls, facts = {}, []
+        for message in self.history:
+            facts.extend(message.get("_execution_facts", []))
+            for call in message.get("tool_calls", []):
+                calls[call["id"]] = call["function"]["name"]
+            name = calls.get(message.get("tool_call_id"))
+            if message["role"] != "tool" or name not in {"fetch_items", "pick_item", "unload_item"}:
+                continue
+            result = json.loads(message["content"])
+            # Do not reintroduce arbitrary conversation, reasoning or robot error
+            # text that may have caused the request rejection in the first place.
+            fact = {key: result[key] for key in ("ok", "status", "item", "items", "confirmed_items", "holding",
+                                                "recovery_required", "declined") if key in result}
+            if fact:
+                facts.append({"skill": name, **fact,
+                              "completion_note": "数量待现场核对" if result.get("completion_note") else ""})
+        facts = facts[-3:]
+        self.history[:] = ([{"role": "assistant", "_execution_facts": facts,
+                             "content": "已处理技能的结果记录，仅用于回答，不能当成新请求再次执行："
+                                        + json.dumps(facts, ensure_ascii=False)}] if facts else [])
+        self._context_rejected = False
 
     async def interpret_pending(self, text: str, current: list, discussion: list[dict]):
         from .intents import confirmation_reply
@@ -296,15 +330,32 @@ class AgentSession:
         )
         context = [{"role": m["role"], "content": m["content"]} for m in self.history
                    if m["role"] in {"user", "assistant"} and m.get("content")][-24:]
-        response = await self.client.chat.completions.create(
-            model=self.settings.llm_model, stream=False, timeout=self.settings.llm_timeout,
-            response_format={"type": "json_object"},
-            messages=[{"role": "system", "content": instructions}, *context,
-                      {"role": "user", "content": json.dumps({"catalog": catalog,
-                          "current_order": [line.model_dump() for line in current],
-                          "discussion": discussion[-24:], "new_message": text}, ensure_ascii=False)}],
-        )
-        return Decision.model_validate_json(response.choices[0].message.content)
+        if self._context_rejected:
+            context = []
+        messages = [{"role": "system", "content": instructions}, *context,
+                    {"role": "user", "content": json.dumps({"catalog": catalog,
+                        "current_order": [line.model_dump() for line in current],
+                        "discussion": discussion[-24:], "new_message": text}, ensure_ascii=False)}]
+        budget = ResponseBudget(self.settings.llm_response_timeout)
+
+        async def complete(provider):
+            response = await self.router.clients[provider].chat.completions.create(
+                model=self.router.model(provider), stream=False, timeout=budget.remaining(),
+                extra_body=self.router.parameters(provider), response_format={"type": "json_object"},
+                messages=self.router.messages(messages, provider),
+            )
+            try:
+                return Decision.model_validate_json(response.choices[0].message.content)
+            except (ValidationError, IndexError) as exc:
+                raise InvalidOutput("Invalid pending-order JSON") from exc
+
+        try:
+            return await self.router.run(budget, complete)
+        except ModelUnavailable as exc:
+            if exc.request_rejected:
+                self._context_rejected = True
+                discussion.clear()
+            raise
 
     async def _tool(self, name: str, args: dict) -> dict:
         manager = self.manager
@@ -377,44 +428,87 @@ class AgentSession:
         return ""
 
     async def _stream_round(
-        self, messages: list[dict], emit: Emit, effort: str | None = None
+        self, messages: list[dict], emit: Emit, effort: str | None = None,
+        budget: ResponseBudget | None = None,
     ) -> tuple[str, str, list[dict], str]:
-        msg_id = uuid.uuid4().hex
-        emit({"type": "assistant_start", "id": msg_id})
-        reasoning, content, calls = "", "", {}
-        started, reasoning_ended = time.monotonic(), False
-        stream = await self.client.chat.completions.create(
-            model=self.settings.llm_model,
-            messages=messages,
-            tools=self.tools,
-            stream=True,
-            timeout=self.settings.llm_timeout,
-            extra_body={"reasoning_effort": effort or self.settings.llm_reasoning_effort},
-        )
-        async for chunk in stream:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            r = getattr(delta, "reasoning_content", None)
-            if r:
-                reasoning += r
-                emit({"type": "reasoning_delta", "id": msg_id, "text": r})
-            if delta.content:
-                if not reasoning_ended:
-                    reasoning_ended = True
-                    emit({"type": "reasoning_end", "id": msg_id, "ms": int((time.monotonic() - started) * 1000)})
-                    emit({"type": "phase", "phase": "speaking"})
-                content += delta.content
-                emit({"type": "assistant_delta", "id": msg_id, "text": delta.content})
-            for tc in delta.tool_calls or []:
-                entry = calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
-                entry["id"] = tc.id or entry["id"]
-                if tc.function:
-                    entry["name"] = tc.function.name or entry["name"]
-                    entry["arguments"] += tc.function.arguments or ""
-        if not reasoning_ended and reasoning:
-            emit({"type": "reasoning_end", "id": msg_id, "ms": int((time.monotonic() - started) * 1000)})
-        return msg_id, reasoning, list(calls.values()), content
+        budget = budget or ResponseBudget(self.settings.llm_response_timeout)
+
+        async def generate(provider):
+            msg_id = uuid.uuid4().hex
+            emit({"type": "assistant_start", "id": msg_id, "display_budget_ms": budget.display_ms()})
+            reasoning, content, calls = "", "", {}
+            started, reasoning_ended = time.monotonic(), False
+            progress_at, finish, stream = started, None, None
+            try:
+                async with asyncio.timeout(self.settings.llm_idle_timeout):
+                    stream = await self.router.clients[provider].chat.completions.create(
+                        model=self.router.model(provider),
+                        messages=self.router.messages(messages, provider, self.language), tools=self.tools, stream=True,
+                        timeout=min(self.settings.llm_timeout, budget.remaining()),
+                        extra_body=self.router.parameters(provider, effort),
+                    )
+                iterator = aiter(stream)
+                while True:
+                    try:
+                        async with asyncio.timeout_at(progress_at + self.settings.llm_idle_timeout):
+                            chunk = await anext(iterator)
+                    except StopAsyncIteration:
+                        break
+                    if not chunk.choices:
+                        continue
+                    choice = chunk.choices[0]
+                    finish = getattr(choice, "finish_reason", None) or finish
+                    delta = choice.delta
+                    r = getattr(delta, "reasoning_content", None)
+                    useful = bool(r or delta.content)
+                    if r:
+                        reasoning += r
+                        emit({"type": "reasoning_delta", "id": msg_id, "text": r})
+                    if delta.content:
+                        if not reasoning_ended:
+                            reasoning_ended = True
+                            emit({"type": "reasoning_end", "id": msg_id,
+                                  "ms": int((time.monotonic() - started) * 1000)})
+                            emit({"type": "phase", "phase": "speaking"})
+                        content += delta.content
+                        emit({"type": "assistant_delta", "id": msg_id, "text": delta.content})
+                    for tc in delta.tool_calls or []:
+                        entry = calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                        entry["id"] = tc.id or entry["id"]
+                        if tc.function:
+                            entry["name"] = tc.function.name or entry["name"]
+                            entry["arguments"] += tc.function.arguments or ""
+                            useful = useful or bool(tc.function.name or tc.function.arguments)
+                    if useful:
+                        progress_at = time.monotonic()
+                if finish not in {"stop", "tool_calls"} or not (content.strip() or calls):
+                    raise InvalidOutput("Incomplete model response")
+                for call in calls.values():
+                    try:
+                        if not call["id"] or not call["name"] or not isinstance(json.loads(call["arguments"]), dict):
+                            raise ValueError
+                    except (ValueError, TypeError) as exc:
+                        raise InvalidOutput("Incomplete tool arguments") from exc
+                if provider == "qwen":
+                    if self.language == "en" and re.search(r"[\u4e00-\u9fff]", content):
+                        raise InvalidOutput("Reply language mismatch")
+                    if re.search(r"^\s*(用户(?:想|要|请求)|The user |We need to )", content, re.I):
+                        raise InvalidOutput("Planning in spoken reply")
+                if not reasoning_ended and reasoning:
+                    emit({"type": "reasoning_end", "id": msg_id,
+                          "ms": int((time.monotonic() - started) * 1000)})
+                return msg_id, reasoning, list(calls.values()), content
+            except BaseException:
+                # No tool has run and no assistant_end has queued this attempt for speech.
+                emit({"type": "assistant_abort", "id": msg_id})
+                raise
+            finally:
+                if stream is not None and hasattr(stream, "close"):
+                    with contextlib.suppress(Exception):
+                        async with asyncio.timeout(0.1):
+                            await stream.close()
+
+        return await self.router.run(budget, generate)
 
     async def turn(self, text: str, emit: Emit, confirm: Confirm, request_id: str | None = None) -> None:
         """One user turn. Every robot-moving skill waits for confirm(plan) to return True."""
@@ -423,30 +517,38 @@ class AgentSession:
         self.order_attempted = False
         approved_items: set[str] = set()  # 本轮已获允许的物品：取货时的确认同时覆盖紧接着的卸货
         nudged = moved = False
+        budget = ResponseBudget(self.settings.llm_response_timeout)
+        active_message = None
+        if self._context_rejected:
+            self._repair_context()
         self.history.append({"role": "user", "content": text})
-        turn_start = len(self.history) - 1
         emit({"type": "phase", "phase": "thinking"})
         try:
             for _ in range(MAX_ROUNDS):
+                if self._context_rejected:
+                    self._repair_context()
                 try:
-                    health = await self.manager.bundle.robot.health()
+                    health = await budget.read(self.manager.bundle.robot.health)
+                except TimeoutError as exc:
+                    raise ModelUnavailable("Status query exceeded response budget") from exc
                 except Exception:
                     health = {}
                 language_instruction = ("\n本轮对用户的回复必须使用英语，物品名称也使用英语；工具参数仍使用清单中的原始 ID。"
                                         if self.language == "en" else "\n本轮请用简体中文对用户回复。")
                 messages = [{"role": "system", "content": system_prompt(self.manager, health) + language_instruction}]
                 # 以下划线开头的是内部标记，不发给模型接口
-                messages += [{k: v for k, v in m.items() if not k.startswith("_")} for m in self.history]
+                messages += self.history
                 # 拿到技能结果后的那一轮用更高的思考强度复盘机器人回报；决策轮保持默认强度
                 after_skill = self.history[-1]["role"] == "tool"
                 effort = self.settings.llm_review_effort if after_skill else None
-                msg_id, reasoning, calls, content = await self._stream_round(messages, emit, effort)
+                msg_id, reasoning, calls, content = await self._stream_round(messages, emit, effort, budget)
+                active_message = msg_id
                 if not content.strip():
                     content = self._opening_line(calls)
                     if content:
                         emit({"type": "phase", "phase": "speaking"})
                         emit({"type": "assistant_delta", "id": msg_id, "text": content})
-                assistant: dict[str, Any] = {"role": "assistant", "content": content or None}
+                assistant: dict[str, Any] = {"role": "assistant", "content": content or None, "_provider": budget.provider}
                 if reasoning or calls:
                     # 思考模式下，带工具调用的消息必须回传 reasoning_content（哪怕为空），否则接口返回 400
                     assistant["reasoning_content"] = reasoning
@@ -458,6 +560,7 @@ class AgentSession:
                 self.history.append(assistant)
                 if not calls:
                     emit({"type": "assistant_end", "id": msg_id})
+                    active_message = None
                     if not nudged and not moved and dangling_promise(content, self.manager.items):
                         # 只说不做：在后台提醒一次（不显示给用户，本轮结束后从历史中移除）
                         nudged = True
@@ -522,9 +625,16 @@ class AgentSession:
                     else:
                         emit({**base, "status": "running"})
                         try:
-                            result = await self._tool(name, args)
+                            if moves_robot:
+                                result = await self._tool(name, args)
+                            else:
+                                result = await budget.read(lambda: self._tool(name, args))
                         except RobotError as exc:
                             result = {"ok": False, "error": str(exc)}
+                        except TimeoutError as exc:
+                            emit({**base, "status": "failed", "detail":
+                                  "执行状态待确认，请查看任务卡片" if moves_robot else "查询超时，本次不下单"})
+                            raise ModelUnavailable("Read-only query exceeded response budget") from exc
                         if order:
                             result["confirmed_items"] = args["items"]
                             result["order_updates"] = plan.get("_updates", [])
@@ -547,37 +657,60 @@ class AgentSession:
                         extra = {"stock": [{"name": k, "count": v} for k, v in result["stock"].items()]} \
                             if name == "check_inventory" else {}
                         emit({**base, "status": "done" if ok else "failed", "detail": detail, **extra})
+                    if moves_robot:
+                        # Confirmation and physical execution never consume the model budget.
+                        budget = ResponseBudget(self.settings.llm_response_timeout, provider=budget.provider)
                     self.history.append(
                         {"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result, ensure_ascii=False)}
                     )
                 emit({"type": "assistant_end", "id": msg_id})
+                active_message = None
                 emit({"type": "phase", "phase": "thinking"})
+            else:
+                raise ModelUnavailable("Tool loop exhausted")
+        except ModelUnavailable as exc:
+            self._context_rejected |= exc.request_rejected
+            raise
         finally:
+            if active_message:
+                emit({"type": "assistant_end", "id": active_message})
+            # A cancelled read-only tool may leave unanswered calls. Keep completed facts,
+            # but never send an unmatched call to the next provider/turn.
+            answered = {m["tool_call_id"] for m in self.history if m["role"] == "tool"}
+            for message in self.history:
+                if "tool_calls" in message:
+                    message["tool_calls"] = [c for c in message["tool_calls"] if c["id"] in answered]
+                    if not message["tool_calls"]:
+                        message.pop("tool_calls")
+            self.history[:] = [m for m in self.history
+                               if m["role"] != "assistant" or m.get("content") or m.get("tool_calls")]
             # 思考链只在本轮工具循环中回传；之后的对话不再携带，节省上下文
-            self.history[turn_start:] = [m for m in self.history[turn_start:] if not m.get("_nudge")]
-            for message in self.history[turn_start:]:
+            self.history[:] = [m for m in self.history if not m.get("_nudge")]
+            for message in self.history:
                 message.pop("reasoning_content", None)
             user_turns = [i for i, m in enumerate(self.history) if m["role"] == "user"]
             if len(user_turns) > HISTORY_TURNS:
                 del self.history[: user_turns[-HISTORY_TURNS]]
+            if self._context_rejected:
+                self._repair_context()
             emit({"type": "phase", "phase": "listening"})
 
 
 class Agent:
     def __init__(self, settings: Settings, manager: TaskManager):
         self.settings, self.manager = settings, manager
-        self.client = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url, max_retries=1,
-                                  http_client=httpx.AsyncClient(trust_env=False))
+        self.router = create_router(settings)
+        self.client = next(iter(self.router.clients.values()), None)
 
     def session(self, owner: str) -> AgentSession:
-        return AgentSession(self.client, self.settings, self.manager, owner)
+        return AgentSession(self.client, self.settings, self.manager, owner, self.router)
 
     async def close(self) -> None:
-        await self.client.close()
+        await self.router.close()
 
 
 def create_agent(settings: Settings, manager: TaskManager) -> Agent | None:
-    if not settings.llm_api_key:
+    if not settings.llm_api_key and not ((settings.llm_fallback_enabled or settings.llm_routing == "qwen")
+                                        and (settings.qwen_api_key or settings.speech_api_key)):
         return None
     return Agent(settings, manager)
-

@@ -122,7 +122,17 @@ function AssistantTurn({
   }
   const hasReasoning = msgs.some((m) => m.reasoning)
   const thinking = msgs.some((m) => m.reasoning && m.reasoningMs === undefined)
-  const shown = usePacedLength(stableLength(combined, thinking), animate && hasReasoning)
+  const paced = usePacedLength(stableLength(combined, thinking), animate && hasReasoning)
+  const [now, setNow] = useState(Date.now)
+  const deadline = Math.min(...msgs.map(m => m.revealDeadline ?? Infinity).filter(t => t > now))
+  useEffect(() => {
+    if (!Number.isFinite(deadline)) return
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, deadline - Date.now()))
+    return () => clearTimeout(timer)
+  }, [deadline])
+  const forced = msgs.reduce((end, m, i) => m.revealDeadline !== undefined && m.revealDeadline <= now ? ends[i] : end, 0)
+  // Replacing an aborted attempt can shrink the text; clamp the old paced length.
+  const shown = Math.min(combined.length, Math.max(paced, forced))
 
   // 每条消息是否已“说出口”：前面的都已呈现、它那段思考已打完
   const revealed: boolean[] = []
