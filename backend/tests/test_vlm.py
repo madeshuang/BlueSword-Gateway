@@ -412,3 +412,48 @@ def test_booth_catalog_default_and_json_replacement_preserve_inventory(tmp_path)
             assert client.post("/api/task/finished", json={"taskId": identifier, "result": "success"}).json()["success"]
             client.headers.update(headers)
             assert final(client, identifier)["status"] == "completed"
+
+
+def test_late_milestones_preserve_stock_without_rewinding_camera(gateway):
+    client, _ = gateway
+    identifier = start(client)
+    manager = client.app.state.manager
+    client.post('/api/task/progress', json=progress(identifier, 'target_located', 5, 2,
+                detection={'item': 'water', 'label': '矿泉水', 'attempt': 1}, image=picture()))
+    latest_time = manager.active.last_progress_at
+    latest_visual = manager.remote_visual.copy()
+    for stage, index, extra in [
+        ('grasped', 3, {}),
+        ('target_located', 2, {'detection': {'item': 'chips', 'label': '薯片', 'attempt': 1}, 'image': picture('red')}),
+    ]:
+        assert client.post('/api/task/progress', json=progress(identifier, stage, index, 1, **extra)).json()['success']
+    assert manager.active.last_progress_at == latest_time
+    assert manager.remote_visual == latest_visual
+    indices = [step.stage_index or 0 for step in manager.active.steps]
+    assert indices == sorted(indices)
+    client.post('/api/task/error', json={'taskId': identifier, 'message': '第二件抓取失败'})
+    assert final(client, identifier)['status'] == 'failed'
+    stock = client.get('/api/inventory').json()
+    assert stock['矿泉水'] == 3 and stock['薯片'] == 2
+
+
+def test_workbench_status_and_recovery_use_current_task(gateway):
+    client, _ = gateway
+    headers = {'X-Operator-Token': 'onsite'}
+    assert client.get('/api/operator/status').status_code == 403
+    idle = client.get('/api/operator/status', headers=headers).json()
+    assert idle == {'mode': 'lanjian_http', 'busy': False, 'recovery_required': False, 'task': None}
+    identifier = start(client, 1)
+    client.post('/api/task/progress', json=progress(identifier, 'grasped', 3, 1, total=5))
+    client.post('/api/task/error', json={'taskId': identifier, 'message': '递物故障'})
+    final(client, identifier)
+    before = client.get('/api/inventory').json()
+    state = client.get('/api/operator/status', headers=headers).json()
+    assert state['task']['id'] == identifier and state['recovery_required'] and not state['busy']
+    body = {'task_id': 'old-task', 'confirmation': '已核对机器人和物品'}
+    assert client.post('/api/operator/resolve', headers=headers, json=body).status_code == 409
+    body['task_id'] = state['task']['id']
+    assert client.post('/api/operator/resolve', headers=headers, json=body).json() == {'resolved': True}
+    state = client.get('/api/operator/status', headers=headers).json()
+    assert not state['recovery_required'] and state['task']['status'] == 'resolved'
+    assert client.get('/api/inventory').json() == before

@@ -10,6 +10,13 @@
 .operator-page input { display: block; padding: .65rem; border: 1px solid var(--line); border-radius: .4rem; background: var(--surface); width: 100%; margin-top: .5rem; }
 .operator-page label { display: block; color: var(--text-2); }
 .operator-login { max-width: 28rem; margin: 4rem auto; display: grid; gap: 1.5rem; }
+.operator-recovery { margin: 1.5rem 0; padding: 1.25rem; border: 1px solid var(--line); border-radius: .8rem; background: var(--surface); overflow-wrap: anywhere; }
+.operator-recovery h2 { margin: 0; font-size: 1.15rem; }
+.operator-recovery strong { color: var(--accent-ink); }
+.operator-page .operator-recovery-confirm { display: flex; align-items: center; gap: .6rem; margin: 1rem 0; }
+.operator-page .operator-recovery-confirm input { width: auto; margin: 0; }
+.operator-recovery-actions { display: flex; flex-wrap: wrap; gap: .75rem; }
+.operator-recovery-actions button:first-child:not(:disabled) { background: var(--accent-soft); color: var(--accent-ink); }
 .operator-page table { width: 100%; border-collapse: collapse; margin: 1rem 0; background: var(--surface); }
 .operator-page td, .operator-page th { text-align: left; padding: 1rem; border-bottom: 1px solid var(--line); }
 .operator-page th { color: var(--muted); font-weight: 500; }

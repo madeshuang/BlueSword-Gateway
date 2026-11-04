@@ -87,9 +87,12 @@ def apply_progress(task: TaskRecord, report: Progress) -> bool:
     previous = next((step for step in task.steps if step.id == identifier), None)
     cursor = max((step.stage_index or 0 for step in task.steps), default=0)
     attempt = report.detection.attempt if report.detection else 0
-    if report.stageIndex < cursor or (previous and attempt <= previous.attempt):
+    if previous and attempt <= previous.attempt:
         return False
-    task.last_progress_at = time.time()
+    received_at = time.time()
+    # Late milestones still carry evidence for stock settlement.
+    if report.stageIndex >= cursor:
+        task.last_progress_at = received_at
     label = LABELS[report.stage]
     if report.pickIndex:
         label = f"第{report.pickIndex}件 · {label}"
@@ -103,12 +106,13 @@ def apply_progress(task: TaskRecord, report: Progress) -> bool:
         attempt=attempt,
         detected_item=report.detection.item if report.detection else None,
         detected_label=report.detection.label if report.detection else None,
-        startedAt=previous.startedAt if previous else task.last_progress_at,
+        startedAt=previous.startedAt if previous else received_at,
     )
     if previous:
         task.steps[task.steps.index(previous)] = step
     else:
         task.steps.append(step)
+    task.steps.sort(key=lambda entry: entry.stage_index or 0)
     return True
 
 

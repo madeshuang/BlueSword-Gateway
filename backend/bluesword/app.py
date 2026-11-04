@@ -88,6 +88,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not settings.operator_token or not secrets.compare_digest(x_operator_token or "", settings.operator_token):
             raise HTTPException(403, "请填写工作人员口令。")
 
+    @app.get("/api/operator/status", dependencies=[Depends(authorize), Depends(operator)])
+    async def operator_status():
+        manager = app.state.manager
+        return {
+            "mode": settings.robot_mode,
+            "busy": manager.busy,
+            "recovery_required": manager.store.recovery_required,
+            "task": manager.active.model_dump() if manager.active else None,
+        }
+
     @app.post("/api/operator/resolve", dependencies=[Depends(authorize), Depends(operator)])
     async def resolve_task(request: Request):
         body = await request.json()
@@ -255,7 +265,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     manager.store.save(active)
                     manager.store.append(active.id, {"type":"robot_progress", **log_body(body)})
                     manager.bus.emit({"type":"task", "task":active.model_dump()})
-                    if progress.image:
+                    if progress.image and progress.stageIndex == max(
+                        (step.stage_index or 0 for step in active.steps), default=0
+                    ):
                         caption = progress.detection.label if progress.detection else "目标识别照片"
                         if progress.detection:
                             caption += f" · 第{progress.pickIndex}件 · 第{progress.detection.attempt}次识别"
