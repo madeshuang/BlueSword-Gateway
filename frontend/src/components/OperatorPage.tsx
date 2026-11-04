@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiFetch } from '../api'
 import type { ProtocolEntry } from '../types'
+import { OperatorRecovery } from './OperatorRecovery'
 import './operator.css'
 
 type Stock = { id: string; name: string; category: string; count: number; initial: number }
@@ -99,6 +100,7 @@ export function OperatorPage() {
       <label>工作人员口令<input type="password" autoComplete="off" value={password} onChange={e => setPassword(e.target.value)} autoFocus /></label>
       <button disabled={!password || busy}>进入工作台</button>
     </form> : <>
+      <OperatorRecovery token={token} />
       <nav><button aria-pressed={tab === 'stock'} onClick={() => setTab('stock')}>物品库存</button><button aria-pressed={tab === 'protocol'} onClick={() => setTab('protocol')}>机器人通信</button></nav>
       {tab === 'stock' ? <section>
         <div className="operator-section"><p>显示当前可用数量。补满实物后恢复库存，任务执行期间也可操作。</p><button disabled={busy} onClick={() => void restore()}>恢复全部库存</button></div>
