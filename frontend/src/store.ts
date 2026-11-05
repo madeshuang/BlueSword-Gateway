@@ -1,3 +1,4 @@
+import { randomUUID } from './uuid'
 import { config } from './config'
 import type { BackendMode, ConfirmRequest, Detection, Message, Phase, ServerEvent, Task } from './types'
 
@@ -100,7 +101,7 @@ const freshSession = {
 
 export const initialState: State = {
   ...freshSession,
-  sessionId: crypto.randomUUID(),
+  sessionId: randomUUID(),
   sessionBootId: null,
   backendBootId: null,
   backendReady: false,
@@ -146,7 +147,7 @@ function archive(state: State): HistoryItem[] {
 const reset = (state: State, extra: Partial<State> = {}): State => ({
   ...state,
   ...freshSession,
-  sessionId: crypto.randomUUID(),
+  sessionId: randomUUID(),
   sessionBootId: state.backendBootId,
   homeAfterRestart: false,
   restored: false,

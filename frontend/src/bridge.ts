@@ -1,3 +1,4 @@
+import { randomUUID } from './uuid'
 import type { ClientEvent, ServerEvent } from './types'
 
 export interface Bridge {
@@ -17,7 +18,7 @@ export function createBridge(url: string | undefined, onEvent: (ev: ServerEvent)
   let deviceName = '机器人后端'
 
   const report = (text: string) => {
-    const id = crypto.randomUUID()
+    const id = randomUUID()
     onEvent({ type: 'assistant_start', id })
     onEvent({ type: 'assistant_delta', id, text })
     onEvent({ type: 'assistant_end', id })
@@ -51,7 +52,7 @@ export function createBridge(url: string | undefined, onEvent: (ev: ServerEvent)
     send: (ev) => {
       if (closed) return
       if (ws?.readyState === WebSocket.OPEN) {
-        const message = ev.type === 'text_input' ? { ...ev, request_id: ev.request_id ?? crypto.randomUUID() } : ev
+        const message = ev.type === 'text_input' ? { ...ev, request_id: ev.request_id ?? randomUUID() } : ev
         ws.send(JSON.stringify(message))
       } else if (ev.type !== 'reset') {
         // A reconnect must never execute stale physical commands queued while offline.
