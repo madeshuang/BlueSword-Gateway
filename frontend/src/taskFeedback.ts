@@ -21,8 +21,8 @@ export function taskFeedback(task: Task, now: number, warnAfterSeconds: number) 
   }
   const last = lastProgressAt(task)
   if ((task.status === 'running' || task.status === undefined) && last !== undefined && now - last >= warnAfterSeconds) {
-    return { tone: 'warning', title: '暂未收到新的进度',
-      message: `已有 ${Math.floor(now - last)} 秒没有新的进度回报，机器人状态待确认。仍在等待回报。` }
+    return { tone: 'warning', title: '进度暂未更新',
+      message: `距离上次更新已过 ${Math.floor(now - last)} 秒。你可以继续等待，或请现场工作人员帮忙查看。` }
   }
   return null
 }

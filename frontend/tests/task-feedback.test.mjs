@@ -22,7 +22,12 @@ test('a robot fault is visible even when every reported milestone is already don
 
 test('stale progress warns without ending the task; a new recognition attempt clears it', () => {
   assert.equal(taskFeedback(task, 179, 60), null)
-  assert.equal(taskFeedback(task, 180, 60).tone, 'warning')
+  const reminder = taskFeedback(task, 180, 60)
+  assert.equal(reminder.tone, 'warning')
+  assert.doesNotMatch(reminder.message, /状态待确认|失败|故障|回报/)
+  assert.match(reminder.message, /60 秒/)
+  assert.match(taskFeedback(task, 181, 60).message, /61 秒/)
+  assert.equal(taskFeedback(task, 202, 60).tone, 'warning')
   assert.equal(task.status, 'running')
   assert.equal(taskFeedback({ ...task, last_progress_at: 181 }, 182, 60), null)
   assert.equal(taskFeedback({ ...task, status: 'completed' }, 500, 60), null)

@@ -137,7 +137,7 @@ function Timeline({ task, remote }: { task: Task; remote: boolean }) {
               <strong role={feedback.tone === 'error' ? 'alert' : 'status'}>{feedback.title}</strong>
               <p>{feedback.message}</p>
               {task.recovery_required && <p>等待现场工作人员处理后恢复接单。</p>}
-              {lastProgress && <small>最后进度：{lastProgress.label}{reportedAt !== undefined && ` · ${new Date(reportedAt * 1000).toLocaleTimeString('zh-CN', { hour12: false })}`}</small>}
+              {lastProgress && <small>上次更新：{lastProgress.label}{reportedAt !== undefined && ` · ${new Date(reportedAt * 1000).toLocaleTimeString('zh-CN', { hour12: false })}`}</small>}
               {task.id && <small className="feedback-task-id">任务编号：{task.id}</small>}
             </div>
           </li>
@@ -147,7 +147,7 @@ function Timeline({ task, remote }: { task: Task; remote: boolean }) {
             <span className="step-icon">
               <i />
             </span>
-            <span className="step-label">{started.length ? '等待机器人下一步回报…' : '等待机器人接单…'}</span>
+            <span className="step-label">{started.length ? '等待进度更新…' : '正在联系机器人…'}</span>
           </li>
         )}
       </ol>
