@@ -24,7 +24,15 @@ from pydantic import ValidationError
 from .config import Settings
 from .domain import RobotError, TaskRecord, TaskRequest
 from .language import item_label, language_of, order_label
-from .llm import InvalidOutput, ModelRouter, ModelUnavailable, ResponseBudget, create_router
+from .llm import (
+    InvalidOutput,
+    ModelRouter,
+    ModelUnavailable,
+    ResponseBudget,
+    completion_content,
+    create_router,
+    stream_choice,
+)
 from .service import TaskManager
 from .skills import SKILLS
 
@@ -345,7 +353,7 @@ class AgentSession:
                 messages=self.router.messages(messages, provider),
             )
             try:
-                return Decision.model_validate_json(response.choices[0].message.content)
+                return Decision.model_validate_json(completion_content(response))
             except (ValidationError, IndexError) as exc:
                 raise InvalidOutput("Invalid pending-order JSON") from exc
 
@@ -454,9 +462,9 @@ class AgentSession:
                             chunk = await anext(iterator)
                     except StopAsyncIteration:
                         break
-                    if not chunk.choices:
+                    choice = stream_choice(chunk)
+                    if choice is None:
                         continue
-                    choice = chunk.choices[0]
                     finish = getattr(choice, "finish_reason", None) or finish
                     delta = choice.delta
                     r = getattr(delta, "reasoning_content", None)

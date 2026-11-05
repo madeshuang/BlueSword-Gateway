@@ -30,6 +30,47 @@ class InvalidOutput(Exception):
     """Incomplete generation must not reach confirmation or tool execution."""
 
 
+def completion_content(reply):
+    """Require textual completion content at the external response boundary."""
+    choices = getattr(reply, "choices", None)
+    if not isinstance(choices, list) or not choices:
+        raise InvalidOutput("Invalid completion choices")
+    message = getattr(choices[0], "message", None)
+    content = getattr(message, "content", None)
+    if not isinstance(content, str):
+        raise InvalidOutput("Invalid completion content")
+    return content
+
+
+def stream_choice(chunk):
+    """Validate provider-controlled fields before accumulating a streamed reply."""
+    choices = getattr(chunk, "choices", None)
+    if not isinstance(choices, list):
+        raise InvalidOutput("Invalid stream choices")
+    if not choices:  # Usage-only chunks are valid.
+        return None
+    choice = choices[0]
+    delta = getattr(choice, "delta", None)
+    if delta is None or not hasattr(delta, "content") or not hasattr(delta, "tool_calls"):
+        raise InvalidOutput("Invalid stream delta")
+    values = [getattr(choice, "finish_reason", None), delta.content, getattr(delta, "reasoning_content", None)]
+    calls = delta.tool_calls
+    if calls is not None and not isinstance(calls, list):
+        raise InvalidOutput("Invalid stream tool calls")
+    for call in calls or []:
+        index = getattr(call, "index", None)
+        if type(index) is not int or index < 0 or not hasattr(call, "function"):
+            raise InvalidOutput("Invalid stream tool index")
+        values.append(call.id)
+        if call.function is not None:
+            if not hasattr(call.function, "name") or not hasattr(call.function, "arguments"):
+                raise InvalidOutput("Invalid stream function")
+            values.extend([call.function.name, call.function.arguments])
+    if any(value is not None and not isinstance(value, str) for value in values):
+        raise InvalidOutput("Invalid stream text")
+    return choice
+
+
 @dataclass
 class ResponseBudget:
     seconds: float
@@ -146,7 +187,7 @@ class ModelRouter:
                         messages=[{"role": "user", "content": "Reply exactly OK."}],
                         extra_body={"reasoning_effort": "low"},
                     )
-                    if not reply.choices or (reply.choices[0].message.content or "").strip() != "OK":
+                    if completion_content(reply).strip() != "OK":
                         raise InvalidOutput("Probe did not complete")
                 # A concurrent request may block the provider while this probe is
                 # in flight, including a transport returning during cancellation.
