@@ -181,8 +181,16 @@ class RemoteWorkflow:
         if action:
             body["action"] = action
         try:
-            await self._dispatch(body)
-            await self._follow()
+            dispatch_error = None
+            try:
+                await self._dispatch(body)
+            except RobotError as exc:
+                if self.settings.robot_protocol == "v1":
+                    raise  # Legacy callbacks cannot reliably identify their task.
+                dispatch_error = exc
+            # A validated terminal callback may already be queued while the
+            # dispatch response is lost. Consume it before recording uncertainty.
+            await self._follow(dispatch_error)
         except asyncio.CancelledError:
             self._fail("cancelled", "cancelled", "已停止跟踪这次任务；当前协议没有取消接口，请工作人员到现场确认机器人状态")
         except RobotError as exc:
@@ -213,17 +221,23 @@ class RemoteWorkflow:
         self.set_step("plan", "done", "机器人已接单")
         self.snapshot()
 
-    async def _follow(self) -> None:
+    async def _follow(self, dispatch_error: RobotError | None = None) -> None:
         assert self.task
         deadline = time.monotonic() + self.settings.remote_task_timeout if self.settings.remote_task_timeout else None
         while True:
             remaining = deadline - time.monotonic() if deadline is not None else None
             if remaining is not None and remaining <= 0:
                 raise RobotError("result_timeout", "等待机器人完成通知超时，请工作人员核对")
-            try:
-                kind, body = await asyncio.wait_for(self.inbox.get(), remaining)
-            except TimeoutError:
-                continue
+            if dispatch_error is not None:
+                try:
+                    kind, body = self.inbox.get_nowait()
+                except asyncio.QueueEmpty:
+                    raise dispatch_error from None
+            else:
+                try:
+                    kind, body = await asyncio.wait_for(self.inbox.get(), remaining)
+                except TimeoutError:
+                    continue
             if (self.settings.robot_protocol in ("progress", "vlm") and body.get("taskId") != self.task.id) or body.get("taskId") not in (None, self.task.id):
                 continue  # 不是这一单的回报
             if kind == "progress":
