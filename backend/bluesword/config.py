@@ -104,8 +104,9 @@ class Settings(BaseModel):
     llm_reasoning_effort: Literal["low", "high", "max"] = "high"
     # 技能结果返回后的复盘轮（引用机器人回报）使用的思考强度
     llm_review_effort: Literal["low", "high", "max"] = "max"
-    # VLM 整单执行期间的简短说明；关闭可恢复原有展示。
-    task_commentary: bool = True
+    # VLM 执行说明与模型改写独立 opt-in；当前实验未证明展示收益。
+    task_commentary: bool = False
+    task_commentary_rewrite: bool = False
 
     @classmethod
     def from_env(cls) -> Settings:

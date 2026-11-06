@@ -92,7 +92,7 @@ async def test_new_progress_and_terminal_result_win_over_late_model(order):
     _, items = load_scene()
     manager = NS(bus=EventBus(), items=items, active=order)
     model, events = DelayedModel(ignore_cancel=True), []
-    async with TaskCommentary(manager, model, Settings(), "request", "zh", "拿水和薯片", events.append) as notes:
+    async with TaskCommentary(manager, model, Settings(task_commentary_rewrite=True), "request", "zh", "拿水和薯片", events.append) as notes:
         report(order, "target_located", 2, 1, detection={"item": "chips", "label": "薯片", "attempt": 1})
         notes.update(order)
         await model.started.wait()
@@ -118,7 +118,7 @@ async def test_wait_reminder_once_duplicate_does_not_clear_it_and_new_progress_r
     _, items = load_scene()
     manager = NS(bus=EventBus(), items=items, active=order)
     model, events = DelayedModel(), []
-    async with TaskCommentary(manager, model, Settings(), "request", "zh", "拿水", events.append) as notes:
+    async with TaskCommentary(manager, model, Settings(task_commentary_rewrite=True), "request", "zh", "拿水", events.append) as notes:
         notes.update(order)
         # Feed through the actual subscriber so it can schedule the no-progress reminder.
         manager.bus.emit({"type": "task", "task": order.model_dump()})
@@ -140,7 +140,7 @@ async def test_model_failure_keeps_fact_note_and_ignores_other_orders(order):
     manager = NS(bus=EventBus(), items=items, active=order)
     model, events = DelayedModel(fail=True), []
     model.release.set()
-    async with TaskCommentary(manager, model, Settings(), "request", "zh", "拿薯片", events.append) as notes:
+    async with TaskCommentary(manager, model, Settings(task_commentary_rewrite=True), "request", "zh", "拿薯片", events.append) as notes:
         notes.update(order.model_copy(update={"request_id": "another-request"}))
         assert not events
         report(order, "target_located", 2, 1)
@@ -155,7 +155,7 @@ async def test_model_reply_is_bounded_and_keeps_facts_on_timeout(order, monkeypa
     _, items = load_scene()
     manager = NS(bus=EventBus(), items=items, active=order)
     model, events = DelayedModel(), []
-    async with TaskCommentary(manager, model, Settings(), "request", "zh", "拿薯片", events.append) as notes:
+    async with TaskCommentary(manager, model, Settings(task_commentary_rewrite=True), "request", "zh", "拿薯片", events.append) as notes:
         report(order, "target_located", 2, 1)
         notes.update(order)
         await asyncio.gather(*notes.writers)
@@ -172,7 +172,8 @@ async def test_model_reply_is_bounded_and_keeps_facts_on_timeout(order, monkeypa
 
 async def test_agent_order_comments_before_finish_without_extra_dispatch(make_manager):
     manager = await make_manager(robot_mode="lanjian_http", robot_protocol="vlm", split_skills=False,
-                                 robot_dispatch_url="http://robot.test/api/task/dispatch")
+                                 robot_dispatch_url="http://robot.test/api/task/dispatch",
+                                 task_commentary=True, task_commentary_rewrite=True)
     sent, events = [], []
     accepted = asyncio.Event()
 
@@ -201,4 +202,22 @@ async def test_agent_order_comments_before_finish_without_extra_dispatch(make_ma
     assert result["status"] == "completed"
     assert len(sent) == 1
     assert events[-1]["text"] == "送到了，请到交付处领取。"
+    assert manager.bus.subscribers == set()
+
+
+async def test_fixed_notes_still_update_without_invoking_rewrite(order):
+    _, items = load_scene()
+    manager = NS(bus=EventBus(), items=items, active=order)
+    model, events = DelayedModel(), []
+    async with TaskCommentary(manager, model, Settings(task_commentary=True),
+                              "request", "zh", "拿水和薯片", events.append) as notes:
+        report(order, "target_located", 2, 1)
+        notes.update(order)
+        await asyncio.sleep(0)
+        report(order, "grasped", 3, 1)
+        notes.update(order)
+        await asyncio.sleep(0)
+        assert len(events) == 2
+        assert all(event["source"] == "facts" for event in events)
+        assert not model.requests
     assert manager.bus.subscribers == set()

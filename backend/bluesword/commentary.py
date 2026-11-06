@@ -144,7 +144,7 @@ class TaskCommentary:
         if self.writer:
             self.writer.cancel()
         self._publish(task.id, note.text, "facts")
-        if note.rewrite:
+        if note.rewrite and self.settings.task_commentary_rewrite:
             self.writer = asyncio.create_task(self._rewrite(note, task.id, revision))
             self.writers.add(self.writer)
             self.writer.add_done_callback(self.writers.discard)
