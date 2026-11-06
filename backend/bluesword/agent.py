@@ -7,6 +7,7 @@ robot actually did, and the model must not claim success otherwise.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -35,13 +36,24 @@ MAX_ROUNDS = 6
 # 嘴上说了要去拿（或请用户点允许），却没有真正调用取货
 PROMISE = re.compile(r"点一下允许|点允许|这就去|马上去|我去(帮你|给你)?拿|去(帮你|给你)拿|这就给你拿|马上出发"
                      r"|\bi(?:'ll| will)\s+(?:go (?:and )?)?(?:fetch|bring|get)\b|\b(?:tap|click) (?:allow|confirm)\b", re.I)
+CONFIRM_INVITATION = re.compile(
+    r"(?:^|[。！？!?\n])\s*(?:请|麻烦)(?:在屏幕上)?(?:点|点击|点一下|按|选择)(?:一下)?[“\"]?(?:允许|确认)"
+    r"|(?:^|[.!?\n])\s*please\s+(?:tap|click)\s+(?:allow|confirm)", re.I,
+)
+
+
 def dangling_promise(content: str, items: dict) -> bool:
     """回复里有一句“我这就去拿某样东西”式的承诺（点名了具体物品、且不是问句），但这一轮没有真的去取货。"""
     names = {name.casefold() for item in items.values()
              for name in [item.name, item.name_en, *item.aliases, *item.aliases_en] if name}
+    # A direct invitation can follow the item selection in a separate sentence.
+    if CONFIRM_INVITATION.search(content or "") and any(name in content.casefold() for name in names):
+        return True
     for sentence, end in re.findall(r"([^。！？!?]+)([。！？!?]?)", content or ""):
         if end in ("？", "?") or "哪" in sentence:
             continue  # 问用户“要哪样”不是承诺
+        if re.search(r"(?:不用|无需|不要|不必|别)(?:在屏幕上)?(?:点|点击|点一下|按)(?:一下)?[“\"]?(?:允许|确认)", sentence):
+            continue
         if PROMISE.search(sentence) and any(name in sentence.casefold() for name in names):
             return True
     return False
@@ -297,15 +309,26 @@ class AgentSession:
         )
         context = [{"role": m["role"], "content": m["content"]} for m in self.history
                    if m["role"] in {"user", "assistant"} and m.get("content")][-24:]
-        response = await self.client.chat.completions.create(
-            model=self.settings.llm_model, stream=False, timeout=self.settings.llm_timeout,
-            response_format={"type": "json_object"},
-            messages=[{"role": "system", "content": instructions}, *context,
-                      {"role": "user", "content": json.dumps({"catalog": catalog,
-                          "current_order": [line.model_dump() for line in current],
-                          "discussion": discussion[-24:], "new_message": text}, ensure_ascii=False)}],
-        )
-        return Decision.model_validate_json(response.choices[0].message.content)
+        messages = [{"role": "system", "content": instructions}, *context,
+                    {"role": "user", "content": json.dumps({"catalog": catalog,
+                        "current_order": [line.model_dump() for line in current],
+                        "discussion": discussion[-24:], "new_message": text}, ensure_ascii=False)}]
+        # One bounded retry for malformed output. Interpretation never applies an edit;
+        # the conversation still validates the result and checks cancellation/version.
+        async with asyncio.timeout(self.settings.llm_timeout):
+            for attempt in range(2):
+                response = await self.client.chat.completions.create(
+                    model=self.settings.llm_model, stream=False, timeout=self.settings.llm_timeout,
+                    response_format={"type": "json_object"}, messages=messages,
+                )
+                raw = response.choices[0].message.content
+                try:
+                    return Decision.model_validate_json(raw)
+                except ValidationError:
+                    if attempt:
+                        raise
+                    messages = [*messages, {"role": "user", "content":
+                        "上次没有返回有效的 JSON 判定。请重新理解同一条新消息，只返回符合 schema 的 JSON；不要默认批准。"}]
 
     async def _tool(self, name: str, args: dict, commentary: Emit | None = None, request_text: str = "") -> dict:
         manager = self.manager
@@ -471,6 +494,14 @@ class AgentSession:
                         nudged = True
                         self.history.append({"role": "user", "content": NUDGE, "_nudge": True})
                         continue
+                    if nudged and not moved and (not content.strip() or dangling_promise(content, self.manager.items)):
+                        correction = ("I couldn't prepare the confirmation. Nothing has moved; please try again."
+                                      if self.language == "en" else "这次没能发起取物，机器人还没有动。可以再试一次。")
+                        identifier = uuid.uuid4().hex
+                        emit({"type": "assistant_start", "id": identifier})
+                        emit({"type": "assistant_delta", "id": identifier, "text": correction})
+                        emit({"type": "assistant_end", "id": identifier})
+                        self.history.append({"role": "assistant", "content": correction})
                     break
                 for call in calls:
                     try:
